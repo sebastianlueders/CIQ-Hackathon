@@ -9,7 +9,11 @@ V=$(python3 -c "import vllm; print(vllm.__version__)"); echo "vllm=$V"
 for f in benchmark_moe.py utils.py; do
   curl -sfL -o /tmp/$f "https://raw.githubusercontent.com/vllm-project/vllm/v${V}/benchmarks/kernels/$f" || echo "fetch $f failed"
 done
-python3 -c "import ray" 2>/dev/null || pip install --quiet ray
+# vLLM's tuner imports ray, which the vLLM image does not ship; install it per-user (no root needed).
+export PYTHONUSERBASE=/tmp/pyuser PATH=/tmp/pyuser/bin:$PATH
+python3 -c "import ray" 2>/dev/null || pip install --quiet --user ray 2>&1 | tail -3
+python3 -c "import ray; print('RESULT {\"kind\": \"moe_tune_ray\", \"ok\": true}')" || echo 'RESULT {"kind": "moe_tune_ray", "ok": false}'
+
 M=/models/Qwen/Qwen3-Coder-30B-A3B-Instruct
 for DT in fp8_w8a8 auto; do
   t=$(date +%s)

@@ -42,12 +42,6 @@
   "kind": "serve"
  },
  {
-  "id": "s5-tune-moe-gb10",
-  "workflow": "69b82550-258e-4522-bea9-2f325afb342f",
-  "job": "run",
-  "kind": "serve"
- },
- {
   "id": "s6-pipeline-full-train",
   "workflow": "73f9c275-5122-4938-8b0d-c54df38f5db2",
   "job": "train",
@@ -94,5 +88,11 @@
   "workflow": "8e3c8935-25f2-4121-9537-9ecc34c94e8b",
   "job": "trial",
   "kind": "trial"
+ },
+ {
+  "id": "s5-tune-moe-gb10-2",
+  "workflow": "e501d609-f41a-4a0c-a7d7-180624fd35b6",
+  "job": "run",
+  "kind": "serve"
  }
 ]
