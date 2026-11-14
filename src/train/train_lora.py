@@ -156,7 +156,10 @@ def main():
     else:
         model = AutoModelForCausalLM.from_pretrained(cfg["model"], dtype=torch.bfloat16,
                                                      attn_implementation="sdpa", device_map={"": 0})
-    log(fh, kind="loaded", seconds=round(time.time() - t0, 1), loader=cfg.get("loader", "direct"))
+    if cfg.get("experts_impl"):  # "eager" (per-expert loop) | "grouped_mm" | "batched_mm" | registered custom kernel
+        model.config._experts_implementation = cfg["experts_impl"]
+    log(fh, kind="loaded", seconds=round(time.time() - t0, 1), loader=cfg.get("loader", "direct"),
+        experts_impl=model.config._experts_implementation)
     load_s = time.time() - t0
     if cfg["grad_ckpt"]:
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -185,7 +188,7 @@ def main():
         train_tokens_available=int(len(train)), eval_tokens=int(len(ev)),
         mem_gib=round(torch.cuda.memory_allocated() / 2**30, 1))
 
-    if not resumed:
+    if not resumed and not cfg.get("skip_eval"):
         e = evaluate(model, ev, cfg["seq_len"])
         log(fh, kind="eval", tokens=0, eval_loss=round(e, 5), ppl=round(math.exp(e), 4))
 
@@ -213,7 +216,7 @@ def main():
         log(fh, **rec)
         if not math.isfinite(tot):
             log(fh, kind="abort", reason="non-finite loss"); break
-        if tokens_seen >= next_eval or tokens_seen >= cfg["train_tokens"]:
+        if not cfg.get("skip_eval") and (tokens_seen >= next_eval or tokens_seen >= cfg["train_tokens"]):
             e = evaluate(model, ev, cfg["seq_len"])
             log(fh, kind="eval", tokens=tokens_seen, eval_loss=round(e, 5), ppl=round(math.exp(e), 4))
             next_eval += cfg["eval_every_tokens"]
@@ -223,7 +226,7 @@ def main():
         torch.save({"opt": opt.state_dict(), "tokens_seen": tokens_seen, "step": step,
                     "rng_seed": int(rng.integers(1 << 31))}, state_path)
     summary = dict(kind="summary", tokens=tokens_seen, steps=step,
-                   final_eval_loss=[json.loads(l)["eval_loss"] for l in open(fh.name) if '"kind": "eval"' in l][-1])
+                   final_eval_loss=([json.loads(l)["eval_loss"] for l in open(fh.name) if '"kind": "eval"' in l] or [None])[-1])
     json.dump(summary, open(os.path.join(cfg["out"], "summary.json"), "w"), indent=1)
     log(fh, **summary)
 
