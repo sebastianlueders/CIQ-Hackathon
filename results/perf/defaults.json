@@ -16,7 +16,10 @@
   {
    "candidate": "fused_ce",
    "adopted": false,
-   "reason": "not measured"
+   "speedup": 1.007,
+   "tok_s": 682.6500000000001,
+   "max_rel_loss_diff": 0.0014,
+   "rule": "speedup >= 1.05 and loss within 1% of baseline"
   }
  ]
 }
