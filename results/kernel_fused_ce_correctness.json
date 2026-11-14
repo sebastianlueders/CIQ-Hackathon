@@ -1,0 +1,1 @@
+{"kind": "kernel_correctness", "workflow": "1c3ea1be-59c3-4601-aa9e-95701dc956fb", "kernel": "fused_linear_ce", "N": 512, "V": 151936, "loss_ref": 12.377075, "loss_fused": 12.377075, "loss_abs_err": 0.0, "grad_rel_err": 5e-06, "ok": true}
