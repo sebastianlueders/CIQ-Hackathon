@@ -64,13 +64,30 @@ def main():
     serve = {}
     for f in glob.glob(os.path.join(R, "serve", "*.json")):
         if f.endswith("best.json"): continue
-        s = json.load(open(f)); serve[s["config"]] = s
+        s = json.load(open(f))
+        if s.get("kind") == "serve": serve[s["config"]] = s
     for name, s in sorted(serve.items()):
         if not s.get("ok"):
             rows.append((f"Serving {name}", "failed: " + s.get("error", "")[:80])); continue
         sp = {x["concurrency"]: x for x in s["speed"]}
         rows.append((f"Serving {name}: out tok/s at C=1 / C=16; held-out loss",
                      f"{sp.get(1, {}).get('out_tok_s')} / {sp.get(16, {}).get('out_tok_s')}; {s['eval_loss']}"))
+    if not ft and rungs:  # search still running: report the best completed rung honestly
+        best = min(rungs[-1]["ranking"], key=lambda r: r["eval_loss"])
+        rows[0] = ("Held-out LAMMPS loss (perplexity), base -> best so far",
+                   f"{fmt(base)} ({fmt(base and math.exp(base), 2)}) -> {best['eval_loss']} "
+                   f"({math.exp(best['eval_loss']):.2f}) after {rungs[-1]['budget_tokens']:,} tokens [{best['config']}]")
+    k = os.path.join(R, "kernel_fused_ce_correctness.json")
+    if os.path.exists(k):
+        kc = json.load(open(k))
+        rows.append(("Custom Triton fused linear+CE (V=151,936): correctness vs FP32 PyTorch",
+                     f"loss err {kc['loss_abs_err']}, grad rel err {kc['grad_rel_err']} ({'pass' if kc['ok'] else 'FAIL'})"))
+    kb = os.path.join(R, "kernel_fused_ce_bench.json")
+    if os.path.exists(kb):
+        for b in json.load(open(kb)):
+            rows.append((f"Fused linear+CE at N={b['N']}: time / peak memory vs PyTorch",
+                         f"{b['torch_ms']} -> {b['fused_ms']} ms ({b['speedup']}x); {b['torch_peak_gib']} -> {b['fused_peak_gib']} GiB"))
+    rows.append(("2-node data-parallel training", "not measured (rendezvous between nodes never connected)"))
     md = ["| Result | Value |", "|---|---|"] + [f"| {a} | {b} |" for a, b in rows]
     md += ["", f"Formula: utilization = tokens/s x 4 x {ACTIVE_PARAMS:.1e} FLOPs / measured BF16 GEMM peak "
            "(results/env_probe_ngc.json). Base and fine-tuned loss use the same held-out eval_small tokens."]

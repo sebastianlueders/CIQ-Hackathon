@@ -1,0 +1,28 @@
+[
+ {
+  "kind": "kernel_bench",
+  "kernel": "fused_linear_ce",
+  "N": 4096,
+  "V": 151936,
+  "torch_ms": 214.93,
+  "fused_ms": 102.17,
+  "speedup": 2.1,
+  "torch_peak_gib": 6.96,
+  "fused_peak_gib": 0.34,
+  "mem_saved_gib": 6.61,
+  "workflow": "1c3ea1be-59c3-4601-aa9e-95701dc956fb"
+ },
+ {
+  "kind": "kernel_bench",
+  "kernel": "fused_linear_ce",
+  "N": 8192,
+  "V": 151936,
+  "torch_ms": 481.4,
+  "fused_ms": 204.85,
+  "speedup": 2.35,
+  "torch_peak_gib": 13.91,
+  "fused_peak_gib": 0.36,
+  "mem_saved_gib": 13.55,
+  "workflow": "1c3ea1be-59c3-4601-aa9e-95701dc956fb"
+ }
+]
