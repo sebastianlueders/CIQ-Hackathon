@@ -1,0 +1,14 @@
+{
+ "id": "s4-perf-dp4",
+ "nodes": 4,
+ "config": {
+  "experts_impl": "grouped_mm",
+  "train_tokens": 655360,
+  "warmup_tokens": 32768,
+  "skip_eval": true,
+  "save_adapter": false,
+  "seq_len": 4096,
+  "micro_batch": 1,
+  "grad_accum": 8
+ }
+}

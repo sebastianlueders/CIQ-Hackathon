@@ -32,6 +32,7 @@ class Trial:
     config: dict
     script: str = "src/train/train_lora.py"
     timeout: str = "3h"
+    nodes: int = 1          # >1: Fuzzball multinode job, data parallel (one GB10 GPU per node)
     workflow_id: str = ""
     status: str = ""
     records: list = field(default_factory=list)
@@ -62,11 +63,35 @@ def render(t: Trial) -> dict:
                 "policy": {"timeout": {"execute": t.timeout}},
                 "resource": {"cpu": {"cores": ENV["cores"]}, "memory": {"size": ENV["memory"]},
                              "devices": {"nvidia.com/gpu": 1}},
-                "script": f"#!/bin/bash\nmkdir -p /tmp/home\nexec {ENV['python']} /opt/train.py --config /opt/trial.json\n",
+                "script": launch_script(t),
             }
         },
         "volumes": {v: {"name": v, "use": "team3"} for v in ("models", "data", "runs", "envs")},
-    }
+    } if t.nodes == 1 else _multinode(t)
+
+
+def _multinode(t: Trial) -> dict:
+    t2 = Trial(t.id, t.config, t.script, t.timeout, nodes=1)
+    wf = render(t2)
+    job = wf["jobs"]["trial"]
+    job["multinode"] = {"nodes": t.nodes, "implementation": "generic"}
+    job["script"] = launch_script(t)
+    job["env"] = job["env"] + ["NCCL_DEBUG=INFO"]
+    return wf
+
+
+def launch_script(t: Trial) -> str:
+    py = ENV["python"]
+    if t.nodes == 1:
+        return f"#!/bin/bash\nmkdir -p /tmp/home\nexec {py} /opt/train.py --config /opt/trial.json\n"
+    # Same script runs on every node; rank = position of this host in the sorted host list.
+    return (
+        "#!/bin/bash\nmkdir -p /tmp/home\n"
+        "HOSTS=$(echo \"$MULTINODE_HOSTLIST_NOSLOTS\" | tr ',' '\\n' | sort)\n"
+        "MASTER=$(echo \"$HOSTS\" | head -1); RANK=$(echo \"$HOSTS\" | grep -nx \"$(hostname)\" | cut -d: -f1)\n"
+        "echo \"host=$(hostname) master=$MASTER node_rank=$((RANK-1)) hosts=$(echo $HOSTS)\"\n"
+        f"exec {py} -m torch.distributed.run --nnodes {t.nodes} --nproc-per-node 1 --node-rank $((RANK-1)) "
+        "--master-addr $MASTER --master-port 29500 /opt/train.py --config /opt/trial.json\n")
 
 
 def launch(t: Trial):
@@ -122,6 +147,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("trials", nargs="+"); ap.add_argument("--concurrency", type=int, default=2)
     a = ap.parse_args()
-    ts = [Trial(d["id"], d.get("config", {})) for d in (json.load(open(p)) for p in a.trials)]
+    ts = [Trial(d["id"], d.get("config", {}), nodes=d.get("nodes", 1)) for d in (json.load(open(p)) for p in a.trials)]
     for t in run_all(ts, a.concurrency):
         print(json.dumps({"id": t.id, "status": t.status, "final_eval_loss": final_eval(t)}))
