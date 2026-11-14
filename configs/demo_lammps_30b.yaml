@@ -1,0 +1,156 @@
+experiment_id: lammps-qwen3-coder-30b
+description: "Autoresearch fine-tuning & serving optimization on LAMMPS C++ with Qwen3-Coder-30B-A3B (MoE)"
+
+model:
+  name: "Qwen/Qwen3-Coder-30B-A3B"
+  weights_subpath: "Qwen3-Coder-30B-A3B"
+  architecture: "qwen3_moe"
+  total_params_b: 30.5
+  active_params_b: 3.3
+  vocab_size: 151936
+  hidden_size: 2048
+  num_layers: 48
+  num_experts: 128
+  top_k_experts: 8
+  bf16_footprint_gb: 57.0
+  min_nodes_required: 1
+
+dataset:
+  name: "lammps-cpp"
+  raw_subpath: "lammps"
+  processed_subpath: "lammps-packed"
+  chunk_seq_len: 2048
+  chunk_overlap: 128
+  train_ratio: 0.80
+  val_ratio: 0.10
+  held_out_ratio: 0.10
+  split_salt: "crucible-lammps-v1"
+
+stage_a_recipe:
+  parallel_nodes: 2
+  reduction_factor: 2
+  rung_steps: [60, 180, 480]
+  candidates:
+    - lr: 0.0002
+      lora_rank: 16
+      lora_alpha: 32
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj"]
+      warmup_ratio: 0.05
+      seq_len: 2048
+    - lr: 0.00015
+      lora_rank: 32
+      lora_alpha: 64
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+      warmup_ratio: 0.05
+      seq_len: 2048
+    - lr: 0.0003
+      lora_rank: 8
+      lora_alpha: 16
+      target_modules: ["q_proj", "v_proj"]
+      warmup_ratio: 0.03
+      seq_len: 2048
+    - lr: 0.00008
+      lora_rank: 64
+      lora_alpha: 128
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+      warmup_ratio: 0.08
+      seq_len: 2048
+    - lr: 0.0008
+      lora_rank: 16
+      lora_alpha: 32
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+      warmup_ratio: 0.02
+      seq_len: 1024
+    - lr: 0.00003
+      lora_rank: 16
+      lora_alpha: 16
+      target_modules: ["q_proj", "v_proj"]
+      warmup_ratio: 0.10
+      seq_len: 2048
+
+stage_b_training_perf:
+  loss_curve_tolerance_abs: 0.025
+  verify_steps: 180
+  candidates:
+    - label: "pytorch-baseline-1node"
+      nodes: 1
+      micro_batch_size: 2
+      grad_accum_steps: 8
+      activation_checkpointing: true
+      use_chunked_ce_kernel: false
+      use_grouped_moe_kernel: false
+      use_fused_lora_kernel: false
+    - label: "tuned-batch-ckpt-1node"
+      nodes: 1
+      micro_batch_size: 4
+      grad_accum_steps: 4
+      activation_checkpointing: true
+      use_chunked_ce_kernel: false
+      use_grouped_moe_kernel: false
+      use_fused_lora_kernel: false
+    - label: "sm121-chunked-ce-1node"
+      nodes: 1
+      micro_batch_size: 4
+      grad_accum_steps: 4
+      activation_checkpointing: false
+      use_chunked_ce_kernel: true
+      use_grouped_moe_kernel: false
+      use_fused_lora_kernel: false
+    - label: "sm121-all-kernels-1node"
+      nodes: 1
+      micro_batch_size: 6
+      grad_accum_steps: 2
+      activation_checkpointing: false
+      use_chunked_ce_kernel: true
+      use_grouped_moe_kernel: true
+      use_fused_lora_kernel: true
+    - label: "sm121-all-kernels-2node-ddp"
+      nodes: 2
+      micro_batch_size: 6
+      grad_accum_steps: 1
+      activation_checkpointing: false
+      use_chunked_ce_kernel: true
+      use_grouped_moe_kernel: true
+      use_fused_lora_kernel: true
+
+stage_c_inference_perf:
+  max_perplexity_regression_pct: 2.5
+  min_completion_pass_rate: 0.84
+  p99_latency_ceiling_ms: 450.0
+  candidates:
+    - label: "bf16-1replica-tp1"
+      precision: "BF16"
+      tensor_parallel: 1
+      replicas: 1
+      max_num_seqs: 32
+      use_low_prec_decode_kernel: false
+    - label: "fp8-1replica-tp1"
+      precision: "FP8"
+      tensor_parallel: 1
+      replicas: 1
+      max_num_seqs: 64
+      use_low_prec_decode_kernel: true
+    - label: "fp8-2replicas-tp1"
+      precision: "FP8"
+      tensor_parallel: 1
+      replicas: 2
+      max_num_seqs: 64
+      use_low_prec_decode_kernel: true
+    - label: "nvfp4-2replicas-tp1"
+      precision: "NVFP4"
+      tensor_parallel: 1
+      replicas: 2
+      max_num_seqs: 96
+      use_low_prec_decode_kernel: true
+    - label: "nvfp4-1replica-tp2"
+      precision: "NVFP4"
+      tensor_parallel: 2
+      replicas: 1
+      max_num_seqs: 96
+      use_low_prec_decode_kernel: true
+    - label: "nvfp4-aggressive-batch256"
+      precision: "NVFP4"
+      tensor_parallel: 1
+      replicas: 2
+      max_num_seqs: 256
+      use_low_prec_decode_kernel: true

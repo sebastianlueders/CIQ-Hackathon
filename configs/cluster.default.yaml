@@ -1,0 +1,27 @@
+cluster_name: ciq-gb10-hackathon
+fuzzfile_version: v4
+
+nodes:
+  count: 2
+  gpu_model: "NVIDIA GB10"
+  sm_arch: "sm_121"
+  gpus_per_node: 1
+  cpu_cores_per_node: 20
+  memory_gb_per_node: 112
+  measured_peak_bf16_tflops: 198.0
+  measured_peak_train_tok_s_per_node: 4150.0
+  interconnect: "NCCL-RoCE-200GbE"
+
+vast:
+  volume_key: vast-shared
+  persistent_volume_name: crucible-vast
+  provisioner: vast
+  mount_path: /vast
+  models_dir: /vast/models
+  datasets_dir: /vast/data
+  runs_dir: /vast/runs
+
+images:
+  fetch: "docker://nvcr.io/nvidia/pytorch:25.09-py3"
+  train: "docker://nvcr.io/nvidia/pytorch:25.09-py3"
+  serve: "docker://nvcr.io/nvidia/vllm:25.09-py3"

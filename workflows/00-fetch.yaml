@@ -1,0 +1,74 @@
+# workflows/00-fetch.yaml
+# One-time CIQ Fuzzball bootstrap workflow that populates the shared VAST volume with:
+#   1. Base model weights: Qwen/Qwen3-Coder-30B-A3B (~57 GB BF16 safetensors)
+#   2. Public HPC stand-in corpus: LAMMPS C++ repository (~15,605 source/doc files)
+#
+# Launch with:
+#   fuzzball workflow validate workflows/00-fetch.yaml
+#   fuzzball workflow start workflows/00-fetch.yaml -n crucible-00-fetch
+
+version: v4
+
+volumes:
+  vast-shared:
+    use: vast
+    name: crucible-vast
+
+jobs:
+  fetch-base-model:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+    mounts:
+      /vast: vast-shared
+    env:
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - PYTHONUNBUFFERED=1
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 32GB
+    policy:
+      timeout:
+        execute: 2h
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      mkdir -p /vast/models/Qwen3-Coder-30B-A3B
+      python3 -m pip install --quiet huggingface_hub hf_transfer
+      python3 - <<'PY'
+      from huggingface_hub import snapshot_download
+      snapshot_download(
+          repo_id="Qwen/Qwen3-Coder-30B-A3B",
+          local_dir="/vast/models/Qwen3-Coder-30B-A3B",
+          ignore_patterns=["*.msgpack", "*.h5"],
+      )
+      print("Fetched Qwen/Qwen3-Coder-30B-A3B into /vast/models/Qwen3-Coder-30B-A3B")
+      PY
+
+  fetch-lammps-source:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+    mounts:
+      /vast: vast-shared
+    resource:
+      cpu:
+        cores: 4
+        affinity: CORE
+      memory:
+        size: 16GB
+    policy:
+      timeout:
+        execute: 45m
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      mkdir -p /vast/data
+      if [ ! -d /vast/data/lammps/.git ]; then
+        git clone --depth 1 https://github.com/lammps/lammps.git /vast/data/lammps
+      else
+        git -C /vast/data/lammps fetch --depth 1 origin && git -C /vast/data/lammps reset --hard FETCH_HEAD
+      fi
+      COUNT=$(find /vast/data/lammps -type f | wc -l)
+      echo "LAMMPS checkout ready at /vast/data/lammps (${COUNT} files)"
