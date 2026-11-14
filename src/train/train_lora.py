@@ -183,6 +183,11 @@ def main():
         model = get_peft_model(model, LoraConfig(r=cfg["lora_r"], lora_alpha=cfg["lora_alpha"],
                                                  lora_dropout=cfg["lora_dropout"],
                                                  target_modules=cfg["targets"], task_type="CAUSAL_LM"))
+    if cfg.get("compile"):  # regional torch.compile: each decoder layer, dynamic shapes (variable tokens/expert)
+        t_c = time.time()
+        for layer in model.get_base_model().model.layers:
+            layer.compile(dynamic=True)
+        log(fh, kind="compile", mode="per-layer dynamic", setup_s=round(time.time() - t_c, 1))
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=cfg["lr"], betas=(0.9, 0.95), weight_decay=0.0)
     tokens_seen, step = 0, 0
