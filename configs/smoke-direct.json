@@ -1,0 +1,13 @@
+{
+ "id": "s2-smoke-direct",
+ "config": {
+  "train_tokens": 65536,
+  "warmup_tokens": 32768,
+  "eval_every_tokens": 1000000000,
+  "seq_len": 4096,
+  "micro_batch": 1,
+  "grad_accum": 8,
+  "save_adapter": false,
+  "model": "/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused"
+ }
+}

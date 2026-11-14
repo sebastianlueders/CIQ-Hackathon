@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 DEFAULTS = dict(
-    model="/models/Qwen/Qwen3-Coder-30B-A3B-Instruct", data="/data/tok/lammps", out="/runs/trial",
+    model="/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused", data="/data/tok/lammps", out="/runs/trial",
     seq_len=4096, micro_batch=1, grad_accum=8, lr=2e-4, warmup_tokens=1_000_000, schedule="constant",
     train_tokens=4_000_000, lora_r=16, lora_alpha=32, lora_dropout=0.0,
     targets=["q_proj", "k_proj", "v_proj", "o_proj"], grad_ckpt=True,
@@ -82,6 +82,40 @@ def start_mem_monitor(fh, every=20):
     threading.Thread(target=loop, daemon=True).start()
 
 
+def drop_cache(path):
+    """Release page cache for a file (on GB10 page cache and GPU memory share one pool)."""
+    try:
+        fd = os.open(path, os.O_RDONLY); os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED); os.close(fd)
+    except OSError:
+        pass
+
+
+def load_direct(path):
+    """Load a checkpoint already in transformers' in-memory layout (see src/prep/fuse_experts.py):
+    build on meta, read each shard straight to GPU, then drop that shard's page cache."""
+    from transformers import AutoConfig, AutoModelForCausalLM
+    from safetensors import safe_open
+    cfg = AutoConfig.from_pretrained(path)
+    with torch.device("meta"):
+        model = AutoModelForCausalLM.from_config(cfg, dtype=torch.bfloat16, attn_implementation="sdpa")
+    shards = sorted(set(json.load(open(os.path.join(path, "model.safetensors.index.json")))["weight_map"].values()))
+    for f in shards: drop_cache(os.path.join(path, f))  # stale cache from earlier jobs on this node
+    loaded = set()
+    for f in shards:
+        with safe_open(os.path.join(path, f), framework="pt", device="cuda:0") as h:
+            sd = {k: h.get_tensor(k) for k in h.keys()}
+        model.load_state_dict(sd, strict=False, assign=True); loaded |= sd.keys(); del sd
+        drop_cache(os.path.join(path, f))
+    missing = [k for k in model.state_dict() if k not in loaded]
+    if missing: raise RuntimeError(f"direct load missing {len(missing)} tensors, e.g. {missing[:3]}")
+    # Non-persistent buffers (rotary inv_freq) were created on meta: rebuild them on GPU.
+    rot = model.model.rotary_emb
+    model.model.rotary_emb = type(rot)(config=cfg, device="cuda:0")
+    for n, b in model.named_buffers():
+        if b.is_meta: raise RuntimeError(f"buffer still on meta: {n}")
+    return model
+
+
 class RouterStats:
     """Counts top-k expert selections per MoE layer (router-collapse monitor)."""
     def __init__(self, model):
@@ -116,8 +150,12 @@ def main():
     from transformers import AutoModelForCausalLM
     from peft import LoraConfig, get_peft_model, PeftModel
     t0 = time.time()
-    model = AutoModelForCausalLM.from_pretrained(cfg["model"], dtype=torch.bfloat16,
-                                                 attn_implementation="sdpa", device_map={"": 0})
+    if cfg.get("loader", "direct") == "direct" and cfg["model"].endswith("-fused"):
+        model = load_direct(cfg["model"])
+    else:
+        model = AutoModelForCausalLM.from_pretrained(cfg["model"], dtype=torch.bfloat16,
+                                                     attn_implementation="sdpa", device_map={"": 0})
+    log(fh, kind="loaded", seconds=round(time.time() - t0, 1), loader=cfg.get("loader", "direct"))
     load_s = time.time() - t0
     if cfg["grad_ckpt"]:
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})

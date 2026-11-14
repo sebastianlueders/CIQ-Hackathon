@@ -1,0 +1,4 @@
+[
+ {"name": "bf16", "args": []},
+ {"name": "fp8", "args": ["--quantization", "fp8"]}
+]
