@@ -46,6 +46,7 @@ jobs:
       /vast: vast-shared
     env:
     - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/vast/crucible-src/src
     resource:
       cpu:
         cores: 8
@@ -57,15 +58,11 @@ jobs:
     policy:
       timeout:
         execute: 30m
-    command:
-    - crucible
-    - ingest
-    - --source-dir
-    - /vast/data/lammps
-    - --output-dir
-    - /vast/data/lammps-packed
-    - --seq-len
-    - '2048'
+    script: "#!/bin/bash\nset -euo pipefail\nif ! python3 -c \"import crucible\" 2>/dev/null\
+      \ && [ ! -d \"/vast/crucible-src/src/crucible\" ]; then\n  git clone --depth\
+      \ 1 https://github.com/sebastianlueders/CIQ-Hackathon.git \"/vast/crucible-src\"\
+      \nfi\npython3 -m crucible.cli ingest \\\n  --source-dir /vast/data/lammps \\\
+      \n  --output-dir /vast/data/lammps-packed \\\n  --seq-len 2048\n"
   train-lora:
     image:
       uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
@@ -76,6 +73,7 @@ jobs:
       status: FINISHED
     env:
     - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/vast/crucible-src/src
     - NCCL_IB_DISABLE=0
     - CUDA_DEVICE_MAX_CONNECTIONS=1
     - TORCH_CUDA_ARCH_LIST=12.0;12.1

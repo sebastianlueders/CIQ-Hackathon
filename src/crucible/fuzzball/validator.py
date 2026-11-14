@@ -108,6 +108,7 @@ def validate_fuzzfile(
 
     _validate_annotations_map(doc.get("annotations"), "workflow.annotations")
 
+    inline_files = doc.get("files") or {}
     volumes = doc.get("volumes") or {}
     jobs = doc.get("jobs") or {}
     services = doc.get("services") or {}
@@ -115,9 +116,14 @@ def validate_fuzzfile(
     if not jobs and not services:
         raise FuzzfileValidationError("Fuzzfile must define at least one entry in 'jobs' or 'services'.")
 
-    # Fuzzball v4 enforces a single namespace across volumes, jobs, and services
+    # Fuzzball v4 enforces a single namespace across files, volumes, jobs, and services
     seen_names: dict[str, str] = {}
-    for section_name, mapping in (("volume", volumes), ("job", jobs), ("service", services)):
+    for section_name, mapping in (
+        ("file", inline_files),
+        ("volume", volumes),
+        ("job", jobs),
+        ("service", services),
+    ):
         if not isinstance(mapping, dict):
             raise FuzzfileValidationError(f"Section '{section_name}s' must be a mapping.")
         for name in mapping:

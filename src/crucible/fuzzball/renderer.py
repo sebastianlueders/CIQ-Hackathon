@@ -21,6 +21,10 @@ from crucible.config import (
     RecipeCandidate,
     TrainingPerfCandidate,
 )
+from crucible.fuzzball.remote_bootstrap import (
+    REMOTE_SERVE_BENCH_PY,
+    REMOTE_TRAIN_RUNNER_PY,
+)
 from crucible.serving.vllm_bench import build_vllm_launch_args
 
 PROVISIONER_PIN_ANNOTATION_KEY = "fuzzball.io/provisioner_definition_id"
@@ -49,10 +53,18 @@ def _volume_section(
     egress_entries: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     if cluster.fuzzfile_version == "v4":
-        vol_spec: dict[str, Any] = {
-            "use": cluster.vast.provisioner,
-            "name": cluster.vast.persistent_volume_name,
-        }
+        if cluster.vast.ephemeral:
+            vol_spec: dict[str, Any] = {
+                "use": "ephemeral",
+                "size": cluster.vast.ephemeral_size,
+            }
+        else:
+            vol_spec = {"name": cluster.vast.persistent_volume_name}
+            if cluster.vast.provisioner:
+                vol_spec = {
+                    "use": cluster.vast.provisioner,
+                    "name": cluster.vast.persistent_volume_name,
+                }
         if egress_entries and cluster.vast.egress_metrics_to_object_cache:
             vol_spec["egress"] = [
                 {
@@ -64,7 +76,7 @@ def _volume_section(
         return {cluster.vast.volume_key: vol_spec}
     return {
         cluster.vast.volume_key: {
-            "reference": f"volume://user/{cluster.vast.provisioner}/{cluster.vast.persistent_volume_name}"
+            "reference": f"volume://user/{cluster.vast.provisioner or 'vast'}/{cluster.vast.persistent_volume_name}"
         }
     }
 
@@ -149,6 +161,11 @@ def render_training_trial_fuzzfile(
     recipe_str = json.dumps(recipe.model_dump(), sort_keys=True)
     perf_str = json.dumps(perf.model_dump(), sort_keys=True)
 
+    runner_entry = (
+        "/opt/crucible_remote_train.py"
+        if cluster.fuzzfile_version == "v4"
+        else "-m crucible.trainer.lora_trainer"
+    )
     if perf.nodes > 1:
         rdzv_dir = f"{trial_out_path}/rdzv"
         script = "\n".join(
@@ -167,7 +184,7 @@ def render_training_trial_fuzzfile(
                 '  --rdzv_id="' + trial_id + '" \\',
                 "  --rdzv_backend=c10d \\",
                 '  --rdzv_endpoint="${MASTER_ADDR}:29500" \\',
-                "  -m crucible.trainer.lora_trainer \\",
+                f"  {runner_entry} \\",
                 f"  --trial-id {trial_id} \\",
                 f"  --base-model-dir {base_model_path} \\",
                 f"  --processed-data-dir {processed_path} \\",
@@ -182,7 +199,7 @@ def render_training_trial_fuzzfile(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
-                "python3 -m crucible.trainer.lora_trainer \\",
+                f"python3 {runner_entry} \\",
                 f"  --trial-id {trial_id} \\",
                 f"  --base-model-dir {base_model_path} \\",
                 f"  --processed-data-dir {processed_path} \\",
@@ -196,6 +213,7 @@ def render_training_trial_fuzzfile(
     job_spec: dict[str, Any] = {
         "image": {"uri": cluster.images.train},
         "mounts": _mounts_section(cluster),
+        **({"files": {"/opt/crucible_remote_train.py": "file://crucible-train-runner"}} if cluster.fuzzfile_version == "v4" else {}),
         "env": [
             "PYTHONUNBUFFERED=1",
             "NCCL_IB_DISABLE=0",
@@ -220,6 +238,7 @@ def render_training_trial_fuzzfile(
     doc: dict[str, Any] = {
         "version": cluster.fuzzfile_version,
         **_workflow_annotations_section(cluster),
+        **({"files": {"crucible-train-runner": REMOTE_TRAIN_RUNNER_PY}} if cluster.fuzzfile_version == "v4" else {}),
         "volumes": _volume_section(cluster, egress_entries=[(egress_rel_summary, obj_uri)]),
         "jobs": {f"train-{trial_id}": job_spec},
     }
@@ -254,6 +273,7 @@ def render_serving_trial_fuzzfile(
     bench_job_name = f"bench-{trial_id}"
     cand_json = json.dumps(cand.model_dump(), sort_keys=True)
 
+    vllm_shell = " ".join(vllm_cmd)
     svc_spec: dict[str, Any] = {
         "image": {"uri": cluster.images.serve},
         "mounts": _mounts_section(cluster),
@@ -262,7 +282,15 @@ def render_serving_trial_fuzzfile(
             "FLASHINFER_DISABLE_VERSION_CHECK=1",
             f"CRUCIBLE_USE_LOW_PREC_DECODE={int(cand.use_low_prec_decode_kernel)}",
         ],
-        "command": vllm_cmd,
+        "script": (
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            f'if [ -f "{base_model_path}/config.json" ]; then\n'
+            f"  exec {vllm_shell}\n"
+            "else\n"
+            "  exec python3 -m http.server 8000\n"
+            "fi\n"
+        ),
         "resource": _gpu_resource_block(
             cluster, gpus_per_node=min(cand.tensor_parallel, cluster.nodes.gpus_per_node)
         ),
@@ -273,17 +301,23 @@ def render_serving_trial_fuzzfile(
             "implementation": "generic",
         }
 
+    bench_entry = (
+        "/opt/crucible_remote_serve_bench.py"
+        if cluster.fuzzfile_version == "v4"
+        else "-m crucible.serving.vllm_bench"
+    )
     # 2 cores / 8GiB fits inside the 4-core / 15.9-GiB headroom left on SPARK39/SPARK40
     bench_job: dict[str, Any] = {
         "image": {"uri": cluster.images.train},
         "mounts": _mounts_section(cluster),
+        **({"files": {"/opt/crucible_remote_serve_bench.py": "file://crucible-serve-runner"}} if cluster.fuzzfile_version == "v4" else {}),
         **_dependency_field(cluster, [(service_name, "RUNNING")]),
         "resource": _cpu_helper_resource_block(cluster, cores=2, mem_gib=8, affinity="CORE"),
         "script": "\n".join(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
-                "python3 -m crucible.serving.vllm_bench \\",
+                f"python3 {bench_entry} \\",
                 f"  --endpoint http://{service_name}:8000 \\",
                 f"  --processed-data-dir {processed_path} \\",
                 f"  --trial-id {trial_id} \\",
@@ -302,6 +336,7 @@ def render_serving_trial_fuzzfile(
     doc: dict[str, Any] = {
         "version": cluster.fuzzfile_version,
         **_workflow_annotations_section(cluster),
+        **({"files": {"crucible-serve-runner": REMOTE_SERVE_BENCH_PY}} if cluster.fuzzfile_version == "v4" else {}),
         "volumes": _volume_section(cluster, egress_entries=[(egress_rel_srv, srv_obj_uri)]),
         "services": {service_name: svc_spec},
         "jobs": {bench_job_name: bench_job},
@@ -336,22 +371,30 @@ def render_final_turnkey_fuzzfile(
     recipe_json = json.dumps(winning_recipe.model_dump(), sort_keys=True)
     perf_json = json.dumps(winning_train_perf.model_dump(), sort_keys=True)
 
+    crucible_src_dir = f"{cluster.vast.mount_path.rstrip('/')}/crucible-src"
     ingest_job: dict[str, Any] = {
         "image": {"uri": cluster.images.train},
         "mounts": _mounts_section(cluster),
-        "env": ["PYTHONUNBUFFERED=1"],
+        "env": [
+            "PYTHONUNBUFFERED=1",
+            f"PYTHONPATH={crucible_src_dir}/src",
+        ],
         "resource": _cpu_helper_resource_block(cluster, cores=8, mem_gib=32, affinity="NUMA"),
         "policy": {"timeout": {"execute": "30m"}},
-        "command": [
-            "crucible",
-            "ingest",
-            "--source-dir",
-            raw_data_path,
-            "--output-dir",
-            processed_path,
-            "--seq-len",
-            str(winning_recipe.seq_len),
-        ],
+        "script": "\n".join(
+            [
+                "#!/bin/bash",
+                "set -euo pipefail",
+                f'if ! python3 -c "import crucible" 2>/dev/null && [ ! -d "{crucible_src_dir}/src/crucible" ]; then',
+                f'  git clone --depth 1 https://github.com/sebastianlueders/CIQ-Hackathon.git "{crucible_src_dir}"',
+                "fi",
+                "python3 -m crucible.cli ingest \\",
+                f"  --source-dir {raw_data_path} \\",
+                f"  --output-dir {processed_path} \\",
+                f"  --seq-len {winning_recipe.seq_len}",
+            ]
+        )
+        + "\n",
     }
 
     if winning_train_perf.nodes > 1:
@@ -404,6 +447,7 @@ def render_final_turnkey_fuzzfile(
         **_dependency_field(cluster, [("ingest-lammps", "FINISHED")]),
         "env": [
             "PYTHONUNBUFFERED=1",
+            f"PYTHONPATH={crucible_src_dir}/src",
             "NCCL_IB_DISABLE=0",
             "CUDA_DEVICE_MAX_CONNECTIONS=1",
             "TORCH_CUDA_ARCH_LIST=12.0;12.1",

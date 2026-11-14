@@ -89,6 +89,8 @@ class VastStorageConfig(BaseModel):
     volume_key: str = "vast-shared"
     persistent_volume_name: str = "crucible-vast"
     provisioner: str = "vast"
+    ephemeral: bool = False
+    ephemeral_size: str = "64GiB"
     mount_path: str = "/vast"
     models_dir: str = "/vast/models"
     datasets_dir: str = "/vast/data"

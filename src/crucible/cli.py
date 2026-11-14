@@ -64,6 +64,13 @@ def _cmd_bench_kernels(args: argparse.Namespace) -> int:
 
 
 def _cmd_discover(args: argparse.Namespace) -> int:
+    if getattr(args, "dump_mcp_tools", False):
+        from crucible.fuzzball.mcp_client import FuzzballMCPStdioClient
+
+        with FuzzballMCPStdioClient(allow_write=True, allow_exec=True) as mcp:
+            print(json.dumps(mcp.dump_tool_catalog(), indent=2, sort_keys=True))
+        return 0
+
     base_cfg = ClusterConfig.load(args.cluster_config)
     discovered_cfg, report = discover_cluster_config(
         base_config=base_cfg,
@@ -234,6 +241,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_dis.add_argument("--mcp-snapshot", type=Path, default=None)
     p_dis.add_argument("--write-config", type=Path, default=None)
     p_dis.add_argument("--json", action="store_true")
+    p_dis.add_argument(
+        "--dump-mcp-tools",
+        action="store_true",
+        help="Connect to 'fuzzball mcp serve' and dump exact advertised tool inputSchemas as JSON",
+    )
     p_dis.set_defaults(func=_cmd_discover)
 
     p_run = sub.add_parser("run", help="Execute the 4-stage autoresearch loop and emit turnkey Fuzzfile")

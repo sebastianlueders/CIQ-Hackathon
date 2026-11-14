@@ -332,7 +332,8 @@ class FuzzballMCPBackend:
 
     def _execute_and_fetch_metrics(
         self,
-        yaml_text: str,
+        render_fn: Callable[[ClusterConfig], str],
+        fz_path: Path,
         workflow_name: str,
         trial_id: str,
         kind: str,
@@ -341,18 +342,43 @@ class FuzzballMCPBackend:
     ) -> tuple[dict[str, object], str, list[str]]:
         seq_idx = self._trial_counter
         self._trial_counter += 1
+        yaml_text = render_fn(self.cluster)
+        fz_path.write_text(yaml_text, encoding="utf-8")
         validate_fuzzfile(yaml_text, cluster=self.cluster)
+
         with FuzzballMCPStdioClient(
             command=self.mcp_command,
             allow_write=True,
             allow_exec=True,
         ) as mcp:
-            val_res = mcp.workflow_validate(yaml_text)
+            val_res = mcp.workflow_validate(yaml_text, fuzzfile_path=fz_path)
+            if not val_res.get("valid", True):
+                err_blob = json.dumps(val_res.get("errors") or []).lower()
+                adapted = False
+                if not self.cluster.vast.ephemeral and any(
+                    tok in err_blob for tok in ("volume", "provisioner", "not exist", "not found")
+                ):
+                    self.cluster.vast.ephemeral = True
+                    adapted = True
+                if self.cluster.nodes.arch_device and "cpu/arm64" in err_blob:
+                    self.cluster.nodes.arch_device = ""
+                    adapted = True
+                if self.cluster.pin_definition_annotation and (
+                    "annotation" in err_blob or "provisioner_definition_id" in err_blob
+                ):
+                    self.cluster.pin_definition_annotation = False
+                    adapted = True
+                if adapted:
+                    yaml_text = render_fn(self.cluster)
+                    fz_path.write_text(yaml_text, encoding="utf-8")
+                    validate_fuzzfile(yaml_text, cluster=self.cluster)
+                    val_res = mcp.workflow_validate(yaml_text, fuzzfile_path=fz_path)
+
             if not val_res.get("valid", True):
                 raise FuzzballMCPError(
                     f"Fuzzball MCP workflow_validate rejected '{workflow_name}': {val_res.get('errors')}"
                 )
-            wf_id = mcp.workflow_start(yaml_text, name=workflow_name)
+            wf_id = mcp.workflow_start(yaml_text, name=workflow_name, fuzzfile_path=fz_path)
             desc_initial = (
                 mcp.workflow_describe(wf_id) if "workflow_describe" in mcp.advertised_tools else {}
             )
@@ -415,13 +441,18 @@ class FuzzballMCPBackend:
     ) -> TrainingTrialSummary:
         trial_dir = self.local_run_dir / "trials" / trial_id
         trial_dir.mkdir(parents=True, exist_ok=True)
-        yaml_text = render_training_trial_fuzzfile(
-            self.cluster, self.exp, trial_id, recipe, perf, max_steps, self.run_id
-        )
-        (trial_dir / "workflow.yaml").write_text(yaml_text, encoding="utf-8")
+        fz_path = trial_dir / "workflow.yaml"
         obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
         raw, wf_id, nodes = self._execute_and_fetch_metrics(
-            yaml_text, f"crucible-{trial_id}", trial_id, "train", perf.nodes, obj_uri
+            lambda c: render_training_trial_fuzzfile(
+                c, self.exp, trial_id, recipe, perf, max_steps, self.run_id
+            ),
+            fz_path,
+            f"crucible-{trial_id}",
+            trial_id,
+            "train",
+            perf.nodes,
+            obj_uri,
         )
         (trial_dir / "summary.json").write_text(
             json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8"
@@ -450,20 +481,20 @@ class FuzzballMCPBackend:
     ) -> ServingTrialSummary:
         srv_dir = self.local_run_dir / "serving" / trial_id
         srv_dir.mkdir(parents=True, exist_ok=True)
+        fz_path = srv_dir / "workflow.yaml"
         adapter_vast = f"{self.cluster.vast.runs_dir}/{self.run_id}/best_adapter"
-        yaml_text = render_serving_trial_fuzzfile(
-            self.cluster,
-            self.exp,
-            trial_id,
-            adapter_vast,
-            cand,
-            baseline_finetuned_loss,
-            self.run_id,
-        )
-        (srv_dir / "workflow.yaml").write_text(yaml_text, encoding="utf-8")
         srv_obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, f"serving-{trial_id}")
         raw, wf_id, nodes = self._execute_and_fetch_metrics(
-            yaml_text,
+            lambda c: render_serving_trial_fuzzfile(
+                c,
+                self.exp,
+                trial_id,
+                adapter_vast,
+                cand,
+                baseline_finetuned_loss,
+                self.run_id,
+            ),
+            fz_path,
             f"crucible-srv-{trial_id}",
             trial_id,
             "serve",

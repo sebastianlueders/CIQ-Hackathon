@@ -269,28 +269,59 @@ def apply_mcp_discovery_payload(
         if pname and pname not in report.discovered_provisioners:
             report.discovered_provisioners.append(pname)
 
-    for raw_vol in payload.get("volumes") or []:
-        if not isinstance(raw_vol, dict):
-            continue
-        vname = _clean_ident(raw_vol.get("name"))
-        vprov = _clean_ident(raw_vol.get("provisioner") or raw_vol.get("use"))
-        mount = _clean_ident(raw_vol.get("mount_path"))
-        if vname:
-            report.discovered_volumes.append(
-                {"name": vname, "provisioner": vprov or "auto", "source": source_label}
+    raw_vols_list = payload.get("volumes")
+    if isinstance(raw_vols_list, list):
+        parsed_vols: list[dict[str, Any]] = []
+        for raw_vol in raw_vols_list:
+            if not isinstance(raw_vol, dict):
+                continue
+            vname = _clean_ident(raw_vol.get("name") or raw_vol.get("id"))
+            vprov = _clean_ident(
+                raw_vol.get("provisioner")
+                or raw_vol.get("use")
+                or raw_vol.get("provisionerId")
+                or raw_vol.get("storageClass")
             )
-            if raw_vol.get("selected") or "vast" in (vprov or "").lower() or "vast" in vname.lower():
-                cfg_data["vast"]["persistent_volume_name"] = vname
-                report.applied_overrides["vast.persistent_volume_name"] = vname
-                if vprov:
-                    cfg_data["vast"]["provisioner"] = vprov
-                    report.applied_overrides["vast.provisioner"] = vprov
-                if mount and mount.startswith("/"):
-                    cfg_data["vast"]["mount_path"] = mount
-                    cfg_data["vast"]["models_dir"] = f"{mount.rstrip('/')}/models"
-                    cfg_data["vast"]["datasets_dir"] = f"{mount.rstrip('/')}/data"
-                    cfg_data["vast"]["runs_dir"] = f"{mount.rstrip('/')}/runs"
-                    report.applied_overrides["vast.mount_path"] = mount
+            mount = _clean_ident(raw_vol.get("mount_path") or raw_vol.get("mountPath"))
+            if vname:
+                parsed_vols.append(
+                    {"name": vname, "provisioner": vprov, "mount": mount, "raw": raw_vol}
+                )
+                report.discovered_volumes.append(
+                    {"name": vname, "provisioner": vprov or "auto", "source": source_label}
+                )
+
+        if len(parsed_vols) == 0 and source_label == "fuzzball_mcp_stdio":
+            # Live cluster has 0 pre-created persistent volumes -> auto-switch to ephemeral scratch
+            cfg_data["vast"]["ephemeral"] = True
+            report.applied_overrides["vast.ephemeral"] = True
+        elif parsed_vols:
+            cfg_data["vast"]["ephemeral"] = False
+            preferred = [
+                v
+                for v in parsed_vols
+                if v["raw"].get("selected")
+                or any(
+                    tok in v["name"].lower() or tok in (v["provisioner"] or "").lower()
+                    for tok in ("vast", "crucible", "team20", "lammps", "shared", "data")
+                )
+            ]
+            chosen = preferred[0] if preferred else parsed_vols[0]
+            cfg_data["vast"]["persistent_volume_name"] = chosen["name"]
+            report.applied_overrides["vast.persistent_volume_name"] = chosen["name"]
+            if chosen["provisioner"]:
+                cfg_data["vast"]["provisioner"] = chosen["provisioner"]
+                report.applied_overrides["vast.provisioner"] = chosen["provisioner"]
+            elif source_label == "fuzzball_mcp_stdio":
+                # Omit `use:` when binding an existing persistent volume whose provisioner ID wasn't listed
+                cfg_data["vast"]["provisioner"] = ""
+            if chosen["mount"] and str(chosen["mount"]).startswith("/"):
+                m = str(chosen["mount"])
+                cfg_data["vast"]["mount_path"] = m
+                cfg_data["vast"]["models_dir"] = f"{m.rstrip('/')}/models"
+                cfg_data["vast"]["datasets_dir"] = f"{m.rstrip('/')}/data"
+                cfg_data["vast"]["runs_dir"] = f"{m.rstrip('/')}/runs"
+                report.applied_overrides["vast.mount_path"] = m
 
     images = payload.get("images")
     if isinstance(images, dict):

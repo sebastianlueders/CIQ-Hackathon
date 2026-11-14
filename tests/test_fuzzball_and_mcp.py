@@ -29,16 +29,93 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
         import json, sys
 
         TOOLS = [
-            {"name": "cluster_list"},
-            {"name": "node_list"},
-            {"name": "volume_list"},
-            {"name": "workflow_list"},
-            {"name": "workflow_validate"},
-            {"name": "workflow_describe"},
-            {"name": "workflow_start"},
-            {"name": "workflow_wait"},
-            {"name": "object_get"},
+            {
+                "name": "cluster_list",
+                "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+            {
+                "name": "node_list",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"fields": {"type": "array", "items": {"type": "string"}}},
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "volume_list",
+                "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+            {
+                "name": "workflow_list",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"status": {"type": "string"}},
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "workflow_validate",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fuzzfile": {"type": "string", "description": "Fuzzfile YAML string or path"},
+                        "cluster_id": {"type": "string"},
+                    },
+                    "required": ["fuzzfile"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "workflow_describe",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "include_spec": {"type": "boolean"},
+                    },
+                    "required": ["id"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "workflow_start",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fuzzfile": {"type": "string"},
+                        "name": {"type": "string"},
+                        "confirm_endpoint_takeover": {"type": "boolean"},
+                    },
+                    "required": ["fuzzfile"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "workflow_wait",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "timeout": {"type": "string", "description": "Go duration e.g. 7200s"},
+                    },
+                    "required": ["id"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "object_get",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "ref": {"type": "string"},
+                        "max_inline_bytes": {"type": "integer"},
+                    },
+                    "required": ["ref"],
+                    "additionalProperties": False,
+                },
+            },
         ]
+        SCHEMAS = {t["name"]: t["inputSchema"] for t in TOOLS}
 
         for raw in sys.stdin:
             raw = raw.strip()
@@ -58,6 +135,16 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                 params = msg.get("params") or {}
                 tname = params.get("name")
                 targs = params.get("arguments") or {}
+                schema = SCHEMAS.get(tname, {})
+                allowed_props = set((schema.get("properties") or {}).keys())
+                unexpected = sorted(set(targs.keys()) - allowed_props)
+                if unexpected:
+                    err_txt = f'validating "arguments": validating root: unexpected additional properties {json.dumps(unexpected)}'
+                    res = {"content": [{"type": "text", "text": err_txt}], "isError": True}
+                    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": req_id, "result": res}) + "\\n")
+                    sys.stdout.flush()
+                    continue
+
                 if tname == "cluster_list":
                     payload = {"clusters": [{"name": "ciq-gb10-team20"}]}
                 elif tname == "volume_list":
@@ -92,15 +179,18 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                 elif tname == "workflow_list":
                     payload = {"workflows": [{"id": "wf-fetch-01", "name": "crucible-00-fetch", "status": "finished"}]}
                 elif tname == "workflow_validate":
+                    assert isinstance(targs.get("fuzzfile"), str) and "version:" in targs["fuzzfile"]
                     payload = {"valid": True, "errors": [], "warnings": []}
                 elif tname == "workflow_describe":
-                    payload = {"workflowId": targs.get("workflow_id"), "node": "CIQ-CHI-SPARK39 (192.168.99.48/7331)"}
+                    payload = {"workflowId": targs.get("id"), "node": "CIQ-CHI-SPARK39 (192.168.99.48/7331)"}
                 elif tname == "workflow_start":
+                    assert isinstance(targs.get("fuzzfile"), str)
                     payload = {"workflowId": "11111111-2222-3333-4444-555555555555"}
                 elif tname == "workflow_wait":
-                    payload = {"workflowId": targs.get("workflow_id"), "status": "STAGE_STATUS_FINISHED"}
+                    assert isinstance(targs.get("timeout"), str) and targs["timeout"].endswith("s")
+                    payload = {"workflowId": targs.get("id"), "status": "STAGE_STATUS_FINISHED"}
                 elif tname == "object_get":
-                    uri = targs.get("uri", "")
+                    uri = targs.get("ref", "")
                     if "serving-" in uri:
                         payload = {
                             "trial_id": "srv-mcp-01",
@@ -340,3 +430,67 @@ def test_turnkey_v4_and_v1_rendering() -> None:
         )
         stages = validate_fuzzfile(yml, cluster=cluster)
         assert stages == ["eval-held-out", "ingest-lammps", "serve-vllm", "train-lora"]
+
+
+def test_self_contained_remote_bootstrap_executes_without_crucible_installed(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
+    import subprocess
+
+    from crucible.fuzzball.remote_bootstrap import REMOTE_SERVE_BENCH_PY, REMOTE_TRAIN_RUNNER_PY
+
+    train_py = tmp_path / "remote_train.py"
+    train_py.write_text(REMOTE_TRAIN_RUNNER_PY, encoding="utf-8")
+    out_dir = tmp_path / "remote_out"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(train_py),
+            "--trial-id",
+            "remote-t01",
+            "--base-model-dir",
+            str(tmp_path / "missing_model"),
+            "--processed-data-dir",
+            str(tmp_path / "missing_data"),
+            "--output-dir",
+            str(out_dir),
+            "--max-steps",
+            "6",
+            "--recipe-json",
+            '{"lr":0.0002,"lora_rank":16,"lora_alpha":32,"target_modules":["q_proj","v_proj"],"seq_len":2048}',
+            "--perf-json",
+            '{"label":"sm121","nodes":1,"micro_batch_size":2,"grad_accum_steps":1,"activation_checkpointing":false,"use_chunked_ce_kernel":true,"use_grouped_moe_kernel":true,"use_fused_lora_kernel":true}',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "CRUCIBLE_SUMMARY_JSON=" in proc.stdout
+    assert (out_dir / "summary.json").exists()
+
+    srv_py = tmp_path / "remote_srv.py"
+    srv_py.write_text(REMOTE_SERVE_BENCH_PY, encoding="utf-8")
+    srv_json = tmp_path / "srv_summary.json"
+    sproc = subprocess.run(
+        [
+            sys.executable,
+            str(srv_py),
+            "--endpoint",
+            "http://127.0.0.1:9",
+            "--processed-data-dir",
+            str(tmp_path / "missing_data"),
+            "--trial-id",
+            "remote-s01",
+            "--baseline-loss",
+            "1.40",
+            "--output-json",
+            str(srv_json),
+            "--candidate-json",
+            '{"label":"nvfp4-2replicas-tp1","precision":"NVFP4","tensor_parallel":1,"replicas":2,"max_num_seqs":96,"use_low_prec_decode_kernel":true}',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert sproc.returncode == 0, sproc.stderr
+    assert srv_json.exists()
