@@ -13,6 +13,7 @@ bash docs/build/build-pdfs.sh                                           # one-pa
 |---|---|
 | `s4-perf-dp2-ip-2`, `s4-perf-dp2-c10d-2` | **2-node DP throughput** (tok_s is cluster-wide; compare to 1011 single-node with compile). `DIAG` lines and `== worker log` show both ranks. `allreduce_s` = gradient sync time per step. (`s4-perf-dp2-ip` / `-c10d` without `-2` were the broken launcher: ignore.) |
 | `s4-train-dp2-winner` | **Winning recipe trained on 2 nodes** (4M tokens, cosine schedule, evals every 1M): the "second node unlocked" result. |
+| **`s4-perf-dp2-stack-nockpt-mb1`** | **Likely best config**: 2 nodes, compile + fused CE + checkpointing off, micro-batch 1. 1-node checkpointing off measured 1366 tok/s (+35%, 85.8 GiB peak), so expect ~2700 tok/s on 2 nodes. |
 | `s4-perf-dp2-stack-nockpt` / `s4-perf-dp2-stack` / `s4-perf-compile-stack` | **Stacked** best config: compile + fused CE + micro-batch 2 (+ checkpointing off, 110 GiB) on 2 nodes, plus the same stack on 1 node. Expect the nockpt one to OOM if activations exceed memory; the `-stack` one is the fallback. Judge batch changes by held-out eval, not per-step loss. |
 | `s4-perf-dp2-stack-seq8192-mb1` / `-mb2` | Stack + seq 8192 on 2 nodes: mb1 keeps 8192 tokens per micro-batch (same memory as mb2 at seq 4096); mb2 doubles it (110 GiB, may OOM). Same 65,536 tokens per optimizer step across the cluster. |
 | `s4-perf-compile-{fused-ce,mb2,nockpt,seq8192}` | What stacks on top of compile (1011 tok/s). Run `policy.py` after adding them to `CANDIDATES`. |
