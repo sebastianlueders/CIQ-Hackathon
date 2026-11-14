@@ -21,6 +21,12 @@ FIXED = {"seq_len": 4096, "micro_batch": 1, "grad_accum": 8, "warmup_tokens": 65
          "schedule": "constant", "eval_every_tokens": 250_000, "save_adapter": True, "resume": True}
 
 
+def perf_defaults():
+    """Phase B winners (e.g. torch.compile) become defaults for every later trial."""
+    p = os.path.join(runner.REPO, "results", "perf", "defaults.json")
+    return json.load(open(p)).get("adopted", {}) if os.path.exists(p) else {}
+
+
 def sample(n, seed=0):
     grid = [dict(zip(SPACE, v)) for v in itertools.product(*SPACE.values())]
     random.Random(seed).shuffle(grid)
@@ -64,7 +70,8 @@ def main():
     for k, budget in enumerate(budgets):
         if k < start: continue
         trials = [runner.Trial(f"s3-recipe-r{k}-{name}",
-                               {**FIXED, **g, "train_tokens": budget, "out": f"/runs/trials/s3-recipe-{name}"})
+                               {**FIXED, **perf_defaults(), **g, "train_tokens": budget,
+                                "out": f"/runs/trials/s3-recipe-{name}"})
                   for name, g in alive]
         if a.dry_run:
             print(json.dumps(runner.render(trials[0]))[:400]); return

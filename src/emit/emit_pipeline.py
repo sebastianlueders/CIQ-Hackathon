@@ -35,6 +35,8 @@ def main():
         for f in CODE:
             subprocess.run([FB, "object", "put", os.path.join(REPO, f), f"{prefix}/{os.path.basename(f)}"], check=True)
 
+    import sys; sys.path.insert(0, os.path.join(REPO, "src", "perf"))
+    import policy; policy.decide()  # re-derive adopted optimizations (torch.compile first) from latest results
     r = load("results/search/recipe.json", {})
     s = load("results/serve/best.json", {"config": "bf16", "args": []})
     train_cfg = {
@@ -59,6 +61,7 @@ def main():
     one, two = med_tok_s("s4-perf-experts-grouped"), med_tok_s("s4-perf-dp2")
     dp_nodes = 2 if (one and two and two / one >= 1.6) else 1
     train_cfg["experts_impl"] = "grouped_mm"  # phase B: 1.90x over the per-expert loop
+    train_cfg.update(load("results/perf/defaults.json", {}).get("adopted", {}))  # e.g. compile, fused_ce
     provenance = (f"recipe: {r.get('config', 'trainer defaults (search not run)')}, "
                   f"held-out loss {r.get('eval_loss', 'n/a')}; experts grouped_mm; "
                   f"train nodes {dp_nodes} ({one} -> {two} tok/s); serving: {s.get('config')}")

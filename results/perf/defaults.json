@@ -1,0 +1,17 @@
+{
+ "baseline": "s4-perf-experts-grouped",
+ "baseline_tok_s": 677.8,
+ "adopted": {},
+ "decisions": [
+  {
+   "candidate": "compile",
+   "adopted": false,
+   "reason": "not measured"
+  },
+  {
+   "candidate": "fused_ce",
+   "adopted": false,
+   "reason": "not measured"
+  }
+ ]
+}
