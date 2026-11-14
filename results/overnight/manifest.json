@@ -112,5 +112,17 @@
   "workflow": "f2860506-834a-42b4-b439-a939434f48a7",
   "job": "trial",
   "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack-seq8192-mb1",
+  "workflow": "57a98aed-ed67-4589-bab2-11b1034a185e",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack-seq8192-mb2",
+  "workflow": "d6043638-ef8c-4061-b710-46baa0d28d19",
+  "job": "trial",
+  "kind": "trial"
  }
 ]
