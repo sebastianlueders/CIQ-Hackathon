@@ -142,12 +142,19 @@ class RouterStats:
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--config", required=True)
     cfg = {**DEFAULTS, **json.load(open(ap.parse_args().config))}
+    # Data parallel across nodes (one GB10 GPU each): every rank trains on its own data stream
+    # and LoRA gradients are averaged once per step. Rank 0 evaluates, logs, and saves.
+    world, rank = int(os.environ.get("WORLD_SIZE", 1)), int(os.environ.get("RANK", 0))
+    dist = None
+    if world > 1:
+        import torch.distributed as dist
+        dist.init_process_group("nccl"); torch.cuda.set_device(0)
     os.makedirs(cfg["out"], exist_ok=True)
-    fh = open(os.path.join(cfg["out"], "metrics.jsonl"), "a")
-    log(fh, kind="config", **cfg)
-    torch.manual_seed(cfg["seed"]); rng = np.random.default_rng(cfg["seed"])
+    fh = open(os.path.join(cfg["out"], "metrics.jsonl") if rank == 0 else os.devnull, "a")
+    if rank == 0: log(fh, kind="config", world_size=world, **cfg)
+    torch.manual_seed(cfg["seed"]); rng = np.random.default_rng(cfg["seed"] + 1000 * rank)
 
-    start_mem_monitor(fh)
+    if rank == 0: start_mem_monitor(fh)
     from transformers import AutoModelForCausalLM
     from peft import LoraConfig, get_peft_model, PeftModel
     t0 = time.time()
@@ -188,11 +195,12 @@ def main():
         train_tokens_available=int(len(train)), eval_tokens=int(len(ev)),
         mem_gib=round(torch.cuda.memory_allocated() / 2**30, 1))
 
-    if not resumed and not cfg.get("skip_eval"):
+    if not resumed and not cfg.get("skip_eval") and rank == 0:
         e = evaluate(model, ev, cfg["seq_len"])
         log(fh, kind="eval", tokens=0, eval_loss=round(e, 5), ppl=round(math.exp(e), 4))
+    if dist: dist.barrier()
 
-    per_step = cfg["seq_len"] * cfg["micro_batch"] * cfg["grad_accum"]
+    per_step = cfg["seq_len"] * cfg["micro_batch"] * cfg["grad_accum"] * world  # cluster-wide tokens/step
     gen = batches(train, cfg["seq_len"], cfg["micro_batch"], rng)
     next_eval = (tokens_seen // cfg["eval_every_tokens"] + 1) * cfg["eval_every_tokens"]
     model.train(); torch.cuda.reset_peak_memory_stats()
@@ -203,13 +211,22 @@ def main():
             x = next(gen)
             loss = model(input_ids=x[:, :-1], labels=x[:, :-1], use_cache=False).loss  # HF shifts labels
             (loss / cfg["grad_accum"]).backward(); tot += loss.item() / cfg["grad_accum"]
+        comm_s = 0.0
+        if dist:  # one flattened all-reduce of the LoRA gradients (~13M params)
+            tc = time.time()
+            grads = [p.grad for p in params]
+            flat = torch._utils._flatten_dense_tensors(grads)
+            dist.all_reduce(flat); flat /= world
+            for g, f in zip(grads, torch._utils._unflatten_dense_tensors(flat, grads)): g.copy_(f)
+            torch.cuda.synchronize(); comm_s = time.time() - tc
         gn = torch.nn.utils.clip_grad_norm_(params, 1.0)
         opt.step(); opt.zero_grad(set_to_none=True)
         torch.cuda.synchronize(); dt = time.time() - t
         tokens_seen += per_step; step += 1
         rec = dict(kind="train", step=step, tokens=tokens_seen, loss=round(tot, 5), lr=opt.param_groups[0]["lr"],
                    grad_norm=round(float(gn), 4), step_s=round(dt, 3), tok_s=round(per_step / dt, 1),
-                   peak_mem_gib=round(torch.cuda.max_memory_allocated() / 2**30, 1))
+                   peak_mem_gib=round(torch.cuda.max_memory_allocated() / 2**30, 1),
+                   world_size=world, allreduce_s=round(comm_s, 4))
         if step % 10 == 0 or step == 1:
             rs = router.summary()
             if rs: rec.update(rs)
@@ -217,10 +234,14 @@ def main():
         if not math.isfinite(tot):
             log(fh, kind="abort", reason="non-finite loss"); break
         if not cfg.get("skip_eval") and (tokens_seen >= next_eval or tokens_seen >= cfg["train_tokens"]):
-            e = evaluate(model, ev, cfg["seq_len"])
-            log(fh, kind="eval", tokens=tokens_seen, eval_loss=round(e, 5), ppl=round(math.exp(e), 4))
+            if rank == 0:
+                e = evaluate(model, ev, cfg["seq_len"])
+                log(fh, kind="eval", tokens=tokens_seen, eval_loss=round(e, 5), ppl=round(math.exp(e), 4))
+            if dist: dist.barrier()
             next_eval += cfg["eval_every_tokens"]
 
+    if rank != 0:
+        dist.barrier(); dist.destroy_process_group(); return
     if cfg["save_adapter"]:
         model.save_pretrained(adapter_dir)
         torch.save({"opt": opt.state_dict(), "tokens_seen": tokens_seen, "step": step,
@@ -229,6 +250,7 @@ def main():
                    final_eval_loss=([json.loads(l)["eval_loss"] for l in open(fh.name) if '"kind": "eval"' in l] or [None])[-1])
     json.dump(summary, open(os.path.join(cfg["out"], "summary.json"), "w"), indent=1)
     log(fh, **summary)
+    if dist: dist.barrier(); dist.destroy_process_group()
 
 
 if __name__ == "__main__":
