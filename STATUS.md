@@ -38,15 +38,10 @@ Every number comes from `results/`; regenerate the table with `python src/report
 | Custom Triton fused linear + CE (V=151,936) | exact loss, grad rel. err 5e-6; **2.1–2.35× faster, 7.0 → 0.34 GiB** at 4k tokens | `results/kernel_fused_ce_*.json` |
 | Serving (vLLM 0.33), BF16 → FP8 at 16 concurrent | **113 → 203 tokens/s (1.79×)**, held-out loss +0.2% | `results/serve/` |
 
-## Running / automatic
-- Recipe search round 2 (`s3-recipe-r1-*`): top 2 configs to 750k tokens → `results/search/recipe.json`.
-- After that, automatically: re-emit `workflows/pipeline.yaml` and start `s6-pipeline-validate` (ingest → train 1M tokens → serve FP8 + LoRA and measure).
-- Queued, low priority: `s4-perf-compile` (torch.compile per layer), `s4-perf-fused-ce` (the kernel inside real training).
-
 ## Open work for the team (in priority order)
 1. **Grouped expert GEMM in Triton for sm_121.** Expert GEMMs are small (about 256 tokens per expert per layer) and dominate step time. Register it in transformers' `ExpertsInterface` and set `experts_impl` in a trial config; compare against `grouped_mm` with `configs/perf-experts-*.json`. Biggest training lever (we're at 9% of peak).
 2. **Tune vLLM's fused-MoE kernel for GB10.** The FP8 server logs `Using default MoE config ... Config file not found ... E=128,N=768,device_name=NVIDIA_GB10` (`results/serve/finding_moe_configs.json`). Run vLLM's `benchmarks/kernels/benchmark_moe.py --tune` (v0.33.0) for E=128, N=768 (auto + fp8_w8a8), save the JSONs to `/runs/serve/moe-configs`, serve with `VLLM_TUNED_CONFIG_FOLDER=/runs/serve/moe-configs`, and re-measure with `src/serve/serve_bench.py`.
-3. **2-node data parallel.** The code is ready (trainer + runner `nodes: 2`), but `s4-perf-dp2` hung at rendezvous: no output after `host=trial-0 master=trial-0 node_rank=0`. Check that `trial-0:29500` is reachable between the containers (try `--master-addr` as an IP, set `NCCL_SOCKET_IFNAME`). Fuzzball multinode pools hold at most 2 nodes.
+3. **2-node data parallel.** Launcher fixed (see the morning checklist); check `s4-perf-dp2-*-2` and `s4-train-dp2-winner`. Fuzzball multinode pools hold at most 2 nodes.
 4. **Enable the fused CE kernel in the pipeline** (`"fused_ce": true` in the train config) once `s4-perf-fused-ce` shows end-to-end gains. Same for torch.compile.
 5. **Full pipeline run** with `train_tokens` 8M (`workflows/pipeline.yaml`, about 3.5 h on one node at 675 tok/s).
 
