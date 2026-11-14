@@ -1,0 +1,6 @@
+.env
+fuzzball
+.DS_Store
+__pycache__/
+*.pyc
+docs/
