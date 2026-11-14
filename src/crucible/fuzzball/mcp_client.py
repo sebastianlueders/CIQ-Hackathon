@@ -191,6 +191,13 @@ class FuzzballMCPStdioClient:
         out = self.call_tool("workflow_validate", {"workflow": fuzzfile_yaml})
         return out if isinstance(out, dict) else {"valid": bool(out), "errors": [], "warnings": []}
 
+    def workflow_describe(self, workflow_id: str, include_spec: bool = False) -> dict[str, Any]:
+        out = self.call_tool(
+            "workflow_describe",
+            {"workflow_id": workflow_id, "include_spec": include_spec},
+        )
+        return out if isinstance(out, dict) else {"raw": str(out)}
+
     def workflow_wait(self, workflow_id: str, timeout_seconds: int = 7200) -> dict[str, Any]:
         out = self.call_tool(
             "workflow_wait",

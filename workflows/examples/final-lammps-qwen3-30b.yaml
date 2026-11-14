@@ -1,7 +1,10 @@
 # ==============================================================================
 # Crucible Turnkey Autoresearch Workflow (ingest -> train -> eval -> serve)
 # ==============================================================================
-# Cluster        : ciq-gb10-hackathon (2x NVIDIA GB10, sm_121)
+# Cluster        : ciq-gb10-team20 | definitionId: team20
+# Nodes          : CIQ-CHI-SPARK39 (192.168.99.48/7331), CIQ-CHI-SPARK40 (192.168.99.49/7331)
+# Node Hardware  : 1x NVIDIA-GB10 (Blackwell, sm_121), 20c (cpu/arm64/sve), 127.9 GiB/node
+# Per-Node Alloc : 16 cores, 112GiB RAM, 1x nvidia.com/gpu
 # Shared Storage : VAST persistent volume 'crucible-vast' mounted at /vast
 # Base Model     : Qwen/Qwen3-Coder-30B-A3B (MoE, 151,936 vocab, 57.0 GB BF16)
 # Dataset        : lammps-cpp (whole-file sealed held-out split; raw data never left VAST)
@@ -23,12 +26,14 @@
 #     max_num_seqs=96, low_prec_decode_kernel=True
 #     Serving throughput: 401.8 -> 3460.3 tok/s
 #
-# Launch end-to-end on CIQ Fuzzball:
+# Launch end-to-end on CIQ Fuzzball (Team 20):
 #   fuzzball workflow validate final-crucible-workflow.yaml
-#   fuzzball workflow start final-crucible-workflow.yaml -n lammps-qwen3-coder-30b-turnkey
+#   fuzzball workflow start final-crucible-workflow.yaml -n lammps-qwen3-coder-30b-team20
 # ==============================================================================
 
 version: v4
+annotations:
+  fuzzball.io/provisioner_definition_id: team20
 volumes:
   vast-shared:
     use: vast
@@ -36,7 +41,7 @@ volumes:
 jobs:
   ingest-lammps:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
     mounts:
       /vast: vast-shared
     env:
@@ -46,7 +51,9 @@ jobs:
         cores: 8
         affinity: NUMA
       memory:
-        size: 32GB
+        size: 32GiB
+      devices:
+        cpu/arm64/sve: 1
     policy:
       timeout:
         execute: 30m
@@ -61,7 +68,7 @@ jobs:
     - '2048'
   train-lora:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
     mounts:
       /vast: vast-shared
     depends-on:
@@ -71,16 +78,16 @@ jobs:
     - PYTHONUNBUFFERED=1
     - NCCL_IB_DISABLE=0
     - CUDA_DEVICE_MAX_CONNECTIONS=1
-    - TORCH_CUDA_ARCH_LIST=12.1
+    - TORCH_CUDA_ARCH_LIST=12.0;12.1
     resource:
       cpu:
-        cores: 20
+        cores: 16
         affinity: NUMA
       memory:
-        size: 112GB
+        size: 112GiB
       devices:
         nvidia.com/gpu: 1
-      exclusive: true
+        cpu/arm64/sve: 1
     policy:
       timeout:
         execute: 4h
@@ -107,7 +114,7 @@ jobs:
       procs-per-node: 1
   eval-held-out:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
     mounts:
       /vast: vast-shared
     depends-on:
@@ -117,13 +124,13 @@ jobs:
     - PYTHONUNBUFFERED=1
     resource:
       cpu:
-        cores: 20
+        cores: 16
         affinity: NUMA
       memory:
-        size: 112GB
+        size: 112GiB
       devices:
         nvidia.com/gpu: 1
-      exclusive: true
+        cpu/arm64/sve: 1
     policy:
       timeout:
         execute: 45m
@@ -136,7 +143,7 @@ jobs:
 services:
   serve-vllm:
     image:
-      uri: docker://nvcr.io/nvidia/vllm:25.09-py3
+      uri: docker://nvcr.io/nvidia/vllm:26.04-py3
     mounts:
       /vast: vast-shared
     depends-on:
@@ -144,6 +151,7 @@ services:
       status: FINISHED
     env:
     - PYTHONUNBUFFERED=1
+    - FLASHINFER_DISABLE_VERSION_CHECK=1
     - CRUCIBLE_USE_LOW_PREC_DECODE=1
     - CRUCIBLE_TARGET_REPLICAS=2
     command:
@@ -159,6 +167,8 @@ services:
     - '1'
     - --max-num-seqs
     - '96'
+    - --attention-backend
+    - TRITON_ATTN
     - --port
     - '8000'
     - --quantization
@@ -167,13 +177,13 @@ services:
     - fp8
     resource:
       cpu:
-        cores: 20
+        cores: 16
         affinity: NUMA
       memory:
-        size: 112GB
+        size: 112GiB
       devices:
         nvidia.com/gpu: 1
-      exclusive: true
+        cpu/arm64/sve: 1
     persist: true
     network:
       ports:

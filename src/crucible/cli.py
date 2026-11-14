@@ -91,7 +91,7 @@ def _cmd_discover(args: argparse.Namespace) -> int:
 
     print(
         f"Crucible Cluster Discovery -> cluster='{discovered_cfg.cluster_name}' "
-        f"(Fuzzfile {discovered_cfg.fuzzfile_version})"
+        f"| definitionId='{discovered_cfg.definition_id}' (Fuzzfile {discovered_cfg.fuzzfile_version})"
     )
     print(f"  fuzzball CLI on PATH : {report.fuzzball_cli_available}")
     print(f"  MCP source           : {report.mcp_source_used or 'none (using 00-fetch + config)'}")
@@ -100,9 +100,15 @@ def _cmd_discover(args: argparse.Namespace) -> int:
         f"  Active VAST volume   : {discovered_cfg.vast.persistent_volume_name} "
         f"(provisioner={discovered_cfg.vast.provisioner}, mount={discovered_cfg.vast.mount_path})"
     )
+    inv_str = ", ".join(f"{n.hostname} ({n.node_id})" for n in discovered_cfg.nodes.inventory)
     print(
-        f"  Nodes configured     : {discovered_cfg.nodes.count}x {discovered_cfg.nodes.gpu_model} "
-        f"({discovered_cfg.nodes.sm_arch})"
+        f"  Nodes configured     : {discovered_cfg.nodes.count}x {discovered_cfg.nodes.gpu_product} "
+        f"({discovered_cfg.nodes.sm_arch}, {discovered_cfg.nodes.arch_device}) -> [{inv_str}]"
+    )
+    print(
+        f"  Safe per-node alloc  : {discovered_cfg.nodes.cpu_cores_per_node}/{discovered_cfg.nodes.physical_cores_per_node} cores, "
+        f"{discovered_cfg.nodes.memory_gb_per_node}/{discovered_cfg.nodes.physical_memory_gib_per_node} GiB, "
+        f"{discovered_cfg.nodes.gpus_per_node}x nvidia.com/gpu"
     )
     if report.applied_overrides:
         print(f"  Applied overrides    : {report.applied_overrides}")
@@ -167,17 +173,21 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate_yaml(args: argparse.Namespace) -> int:
-    stages = validate_fuzzfile(args.fuzzfile)
-    print(f"VALID CIQ Fuzzfile ({args.fuzzfile}): stages={stages}")
+    cluster = ClusterConfig.load(args.cluster_config)
+    stages = validate_fuzzfile(args.fuzzfile, cluster=cluster)
+    print(
+        f"VALID CIQ Fuzzfile ({args.fuzzfile}) for definitionId='{cluster.definition_id}': stages={stages}"
+    )
     return 0
 
 
-def _cmd_ui(args: argparse.Namespace) -> int:
+def _cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     from crucible.server.app import create_app
 
     app = create_app(run_dir=args.run_dir)
+    print(f"Crucible Team 20 Live Studio -> http://{args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
@@ -255,13 +265,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_val = sub.add_parser("validate-yaml", help="Validate a CIQ Fuzzball workflow YAML file")
     p_val.add_argument("fuzzfile", type=Path)
+    p_val.add_argument(
+        "--cluster-config",
+        type=Path,
+        default=repo_root() / "configs" / "cluster.default.yaml",
+    )
     p_val.set_defaults(func=_cmd_validate_yaml)
 
-    p_ui = sub.add_parser("ui", help="Launch the interactive Crucible Web Studio")
-    p_ui.add_argument("--run-dir", type=Path, default=Path("runs/ui-default"))
+    p_srv = sub.add_parser(
+        "serve",
+        help="Launch the Crucible Team 20 Live Web Studio (default http://127.0.0.1:8000)",
+    )
+    p_srv.add_argument("--run-dir", type=Path, default=Path("runs/team20-live"))
+    p_srv.add_argument("--host", default="127.0.0.1")
+    p_srv.add_argument("--port", type=int, default=8000)
+    p_srv.set_defaults(func=_cmd_serve)
+
+    p_ui = sub.add_parser("ui", help="Alias for 'crucible serve'")
+    p_ui.add_argument("--run-dir", type=Path, default=Path("runs/team20-live"))
     p_ui.add_argument("--host", default="127.0.0.1")
-    p_ui.add_argument("--port", type=int, default=8080)
-    p_ui.set_defaults(func=_cmd_ui)
+    p_ui.add_argument("--port", type=int, default=8000)
+    p_ui.set_defaults(func=_cmd_serve)
 
     return parser
 

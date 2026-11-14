@@ -1,4 +1,4 @@
-"""Execution backends for CIQ Fuzzball workflows: live CLI backend + calibrated GB10 simulator."""
+"""Execution backends for CIQ Fuzzball workflows: MCP 4.2, CLI, local PyTorch, and GB10 simulator."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import subprocess
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 from crucible.config import (
     ClusterConfig,
@@ -36,6 +36,31 @@ from crucible.trainer.lora_trainer import (
 )
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+EventCallback = Callable[[dict[str, Any]], None]
+
+
+def _extract_placed_nodes(raw_describe: Any, cluster: ClusterConfig, requested_nodes: int, seq_idx: int) -> list[str]:
+    """Extract live Fuzzball node hostnames/IDs from `workflow_describe` output, falling back to
+    round-robin placement over `cluster.nodes.inventory` (`CIQ-CHI-SPARK39`, `CIQ-CHI-SPARK40`)."""
+    text_blob = json.dumps(raw_describe) if not isinstance(raw_describe, str) else raw_describe
+    matched: list[str] = []
+    for inv in cluster.nodes.inventory:
+        if (
+            inv.hostname in text_blob
+            or inv.node_id in text_blob
+            or inv.address in text_blob
+        ) and inv.hostname not in matched:
+            matched.append(inv.hostname)
+    if matched:
+        return matched
+
+    inv_names = [n.hostname for n in cluster.nodes.inventory] or [
+        f"gb10-node-{i + 1:02d}" for i in range(cluster.nodes.count)
+    ]
+    n_req = max(1, min(requested_nodes, len(inv_names)))
+    if n_req >= len(inv_names):
+        return list(inv_names)
+    return [inv_names[seq_idx % len(inv_names)]]
 
 
 class ExecutionBackend(Protocol):
@@ -71,11 +96,12 @@ class FuzzballCLIBackend:
         local_run_dir: Path,
         poll_interval_s: float = 5.0,
         fuzzball_bin: str = "fuzzball",
+        event_hook: EventCallback | None = None,
     ) -> None:
         if shutil.which(fuzzball_bin) is None:
             raise RuntimeError(
-                f"'{fuzzball_bin}' CLI not found on PATH. Authenticate on the CIQ Fuzzball workstation "
-                "or pass '--backend simulator' / '--backend local_torch' for local runs."
+                f"'{fuzzball_bin}' CLI not found on PATH. Authenticate on the Team 20 workstation "
+                "or select 'simulator' / 'local_torch' backend."
             )
         self.cluster = cluster
         self.exp = exp
@@ -83,9 +109,26 @@ class FuzzballCLIBackend:
         self.local_run_dir = local_run_dir
         self.poll_interval_s = poll_interval_s
         self.fuzzball_bin = fuzzball_bin
+        self.event_hook = event_hook
+        self._trial_counter = 0
 
-    def _submit_and_wait(self, fuzzfile_path: Path, workflow_name: str) -> str:
-        validate_fuzzfile(fuzzfile_path)
+    def _emit(self, payload: dict[str, Any]) -> None:
+        if self.event_hook is not None:
+            self.event_hook(payload)
+
+    def _submit_and_wait(
+        self,
+        fuzzfile_path: Path,
+        workflow_name: str,
+        trial_id: str,
+        kind: str,
+        requested_nodes: int,
+        object_uri: str,
+    ) -> tuple[str, list[str]]:
+        seq_idx = self._trial_counter
+        self._trial_counter += 1
+        yaml_text = fuzzfile_path.read_text(encoding="utf-8")
+        validate_fuzzfile(yaml_text, cluster=self.cluster)
         subprocess.run(
             [self.fuzzball_bin, "workflow", "validate", str(fuzzfile_path)],
             check=True,
@@ -102,7 +145,22 @@ class FuzzballCLIBackend:
         if not match:
             raise RuntimeError(f"Could not parse workflow UUID from fuzzball output: {started.stdout!r}")
         wf_uuid = match.group(0)
+        initial_nodes = _extract_placed_nodes("", self.cluster, requested_nodes, seq_idx)
+        self._emit(
+            {
+                "type": "trial_started",
+                "trial_id": trial_id,
+                "kind": kind,
+                "workflow_id": wf_uuid,
+                "workflow_name": workflow_name,
+                "definition_id": self.cluster.definition_id,
+                "nodes_assigned": initial_nodes,
+                "object_uri": object_uri,
+                "fuzzfile": yaml_text,
+            }
+        )
 
+        placed_nodes = initial_nodes
         while True:
             desc = subprocess.run(
                 [self.fuzzball_bin, "workflow", "describe", wf_uuid],
@@ -110,8 +168,9 @@ class FuzzballCLIBackend:
                 capture_output=True,
                 text=True,
             )
+            placed_nodes = _extract_placed_nodes(desc.stdout, self.cluster, requested_nodes, seq_idx)
             if "STAGE_STATUS_FINISHED" in desc.stdout:
-                return wf_uuid
+                return wf_uuid, placed_nodes
             if "STAGE_STATUS_FAILED" in desc.stdout or "STAGE_STATUS_CANCELED" in desc.stdout:
                 raise RuntimeError(f"Fuzzball workflow {wf_uuid} ({workflow_name}) failed:\n{desc.stdout}")
             time.sleep(self.poll_interval_s)
@@ -131,12 +190,29 @@ class FuzzballCLIBackend:
         )
         fz_path = trial_dir / "workflow.yaml"
         fz_path.write_text(yaml_text, encoding="utf-8")
-        self._submit_and_wait(fz_path, f"crucible-{trial_id}")
+        obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
+        wf_uuid, nodes = self._submit_and_wait(
+            fz_path, f"crucible-{trial_id}", trial_id, "train", perf.nodes, obj_uri
+        )
 
         vast_summary = (
             Path(self.cluster.vast.runs_dir) / self.run_id / "trials" / trial_id / "summary.json"
         )
         raw = json.loads(vast_summary.read_text(encoding="utf-8"))
+        (trial_dir / "placement.json").write_text(
+            json.dumps({"workflow_id": wf_uuid, "nodes": nodes, "object_uri": obj_uri}, indent=2),
+            encoding="utf-8",
+        )
+        self._emit(
+            {
+                "type": "trial_finished",
+                "trial_id": trial_id,
+                "kind": "train",
+                "workflow_id": wf_uuid,
+                "nodes_assigned": nodes,
+                "summary": raw,
+            }
+        )
         return TrainingTrialSummary(**raw)
 
     def run_serving_trial(
@@ -159,12 +235,30 @@ class FuzzballCLIBackend:
         )
         fz_path = srv_dir / "workflow.yaml"
         fz_path.write_text(yaml_text, encoding="utf-8")
-        self._submit_and_wait(fz_path, f"crucible-srv-{trial_id}")
+        srv_obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, f"serving-{trial_id}")
+        wf_uuid, nodes = self._submit_and_wait(
+            fz_path,
+            f"crucible-srv-{trial_id}",
+            trial_id,
+            "serve",
+            cand.total_gpus_required,
+            srv_obj_uri,
+        )
 
         vast_summary = (
             Path(self.cluster.vast.runs_dir) / self.run_id / "serving" / trial_id / "summary.json"
         )
         raw = json.loads(vast_summary.read_text(encoding="utf-8"))
+        self._emit(
+            {
+                "type": "trial_finished",
+                "trial_id": trial_id,
+                "kind": "serve",
+                "workflow_id": wf_uuid,
+                "nodes_assigned": nodes,
+                "summary": raw,
+            }
+        )
         return ServingTrialSummary(**raw)
 
 
@@ -173,7 +267,7 @@ class FuzzballMCPBackend:
 
     Follows CIQ's Fuzzball 4.2 MCP agent contract:
     1. `workflow_validate` -> checks rendered Fuzzfile server-side
-    2. `workflow_start`    -> launches trial workflow and obtains `workflowId`
+    2. `workflow_start`    -> launches trial workflow on `team20` and obtains `workflowId`
     3. `workflow_wait`     -> waits until terminal workflow state (`finished` / `STAGE_STATUS_FINISHED`)
     4. `object_get`        -> fetches compact numeric `metrics.json` egressed to the Fuzzball object cache
                               (never reading or egressing raw training data off VAST)
@@ -189,6 +283,7 @@ class FuzzballMCPBackend:
         local_run_dir: Path,
         mcp_command: list[str] | None = None,
         timeout_seconds: int = 7200,
+        event_hook: EventCallback | None = None,
     ) -> None:
         self.cluster = cluster
         self.exp = exp
@@ -196,14 +291,25 @@ class FuzzballMCPBackend:
         self.local_run_dir = local_run_dir
         self.mcp_command = mcp_command
         self.timeout_seconds = timeout_seconds
+        self.event_hook = event_hook
+        self._trial_counter = 0
+
+    def _emit(self, payload: dict[str, Any]) -> None:
+        if self.event_hook is not None:
+            self.event_hook(payload)
 
     def _execute_and_fetch_metrics(
         self,
         yaml_text: str,
         workflow_name: str,
+        trial_id: str,
+        kind: str,
+        requested_nodes: int,
         object_uri: str,
-    ) -> dict[str, object]:
-        validate_fuzzfile(yaml_text)
+    ) -> tuple[dict[str, object], str, list[str]]:
+        seq_idx = self._trial_counter
+        self._trial_counter += 1
+        validate_fuzzfile(yaml_text, cluster=self.cluster)
         with FuzzballMCPStdioClient(
             command=self.mcp_command,
             allow_write=True,
@@ -215,22 +321,46 @@ class FuzzballMCPBackend:
                     f"Fuzzball MCP workflow_validate rejected '{workflow_name}': {val_res.get('errors')}"
                 )
             wf_id = mcp.workflow_start(yaml_text, name=workflow_name)
+            desc_initial = (
+                mcp.workflow_describe(wf_id) if "workflow_describe" in mcp.advertised_tools else {}
+            )
+            nodes = _extract_placed_nodes(desc_initial, self.cluster, requested_nodes, seq_idx)
+            self._emit(
+                {
+                    "type": "trial_started",
+                    "trial_id": trial_id,
+                    "kind": kind,
+                    "workflow_id": wf_id,
+                    "workflow_name": workflow_name,
+                    "definition_id": self.cluster.definition_id,
+                    "nodes_assigned": nodes,
+                    "object_uri": object_uri,
+                    "fuzzfile": yaml_text,
+                }
+            )
+
             wait_res = mcp.workflow_wait(wf_id, timeout_seconds=self.timeout_seconds)
             status_str = str(wait_res.get("status", "")).upper()
             if status_str and ("FAIL" in status_str or "ERROR" in status_str or "CANCEL" in status_str):
                 raise FuzzballMCPError(
                     f"Fuzzball MCP workflow {wf_id} ({workflow_name}) ended with status={status_str}"
                 )
+            if "workflow_describe" in mcp.advertised_tools:
+                nodes = _extract_placed_nodes(
+                    mcp.workflow_describe(wf_id), self.cluster, requested_nodes, seq_idx
+                )
             obj_payload = mcp.object_get(object_uri, max_inline_bytes=65536)
             if isinstance(obj_payload, str):
-                return json.loads(obj_payload)
-            if isinstance(obj_payload, dict) and "content" in obj_payload and isinstance(
+                parsed = json.loads(obj_payload)
+            elif isinstance(obj_payload, dict) and "content" in obj_payload and isinstance(
                 obj_payload["content"], str
             ):
-                return json.loads(obj_payload["content"])
-            if isinstance(obj_payload, dict):
-                return obj_payload
-            raise FuzzballMCPError(f"Unexpected object_get payload from {object_uri}: {obj_payload!r}")
+                parsed = json.loads(obj_payload["content"])
+            elif isinstance(obj_payload, dict):
+                parsed = obj_payload
+            else:
+                raise FuzzballMCPError(f"Unexpected object_get payload from {object_uri}: {obj_payload!r}")
+            return parsed, wf_id, nodes
 
     def run_training_trial(
         self,
@@ -247,9 +377,25 @@ class FuzzballMCPBackend:
         )
         (trial_dir / "workflow.yaml").write_text(yaml_text, encoding="utf-8")
         obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
-        raw = self._execute_and_fetch_metrics(yaml_text, f"crucible-{trial_id}", obj_uri)
+        raw, wf_id, nodes = self._execute_and_fetch_metrics(
+            yaml_text, f"crucible-{trial_id}", trial_id, "train", perf.nodes, obj_uri
+        )
         (trial_dir / "summary.json").write_text(
             json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        (trial_dir / "placement.json").write_text(
+            json.dumps({"workflow_id": wf_id, "nodes": nodes, "object_uri": obj_uri}, indent=2),
+            encoding="utf-8",
+        )
+        self._emit(
+            {
+                "type": "trial_finished",
+                "trial_id": trial_id,
+                "kind": "train",
+                "workflow_id": wf_id,
+                "nodes_assigned": nodes,
+                "summary": raw,
+            }
         )
         return TrainingTrialSummary(**raw)
 
@@ -273,16 +419,38 @@ class FuzzballMCPBackend:
         )
         (srv_dir / "workflow.yaml").write_text(yaml_text, encoding="utf-8")
         srv_obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, f"serving-{trial_id}")
-        raw = self._execute_and_fetch_metrics(yaml_text, f"crucible-srv-{trial_id}", srv_obj_uri)
+        raw, wf_id, nodes = self._execute_and_fetch_metrics(
+            yaml_text,
+            f"crucible-srv-{trial_id}",
+            trial_id,
+            "serve",
+            cand.total_gpus_required,
+            srv_obj_uri,
+        )
         (srv_dir / "summary.json").write_text(
             json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        (srv_dir / "placement.json").write_text(
+            json.dumps({"workflow_id": wf_id, "nodes": nodes, "object_uri": srv_obj_uri}, indent=2),
+            encoding="utf-8",
+        )
+        self._emit(
+            {
+                "type": "trial_finished",
+                "trial_id": trial_id,
+                "kind": "serve",
+                "workflow_id": wf_id,
+                "nodes_assigned": nodes,
+                "summary": raw,
+            }
         )
         return ServingTrialSummary(**raw)
 
 
 class CalibratedSimulatorBackend:
-    """Deterministic GB10 (sm_121) simulator that renders & validates real CIQ Fuzzfiles for every
-    trial and models MoE LoRA convergence, memory footprint, kernel speedups, and quantization quality."""
+    """Deterministic Team 20 GB10 (`sm_121`) simulator that renders & validates real CIQ Fuzzfiles
+    for every trial across `CIQ-CHI-SPARK39` and `CIQ-CHI-SPARK40` and models MoE LoRA convergence,
+    memory footprint, kernel speedups, and quantization quality."""
 
     backend_name = "simulator"
 
@@ -295,18 +463,31 @@ class CalibratedSimulatorBackend:
         run_id: str,
         local_run_dir: Path,
         processed_data_dir: Path | None = None,
+        event_hook: EventCallback | None = None,
+        step_delay_s: float = 0.0,
     ) -> None:
         self.cluster = cluster
         self.exp = exp
         self.run_id = run_id
         self.local_run_dir = local_run_dir
         self.processed_data_dir = processed_data_dir
+        self.event_hook = event_hook
+        self.step_delay_s = step_delay_s
+        self._trial_counter = 0
+
+    def _emit(self, payload: dict[str, Any]) -> None:
+        if self.event_hook is not None:
+            self.event_hook(payload)
 
     @staticmethod
     def _jitter(key: str, scale: float = 0.003) -> float:
         digest = hashlib.sha256(key.encode("utf-8")).digest()
         unit = (int.from_bytes(digest[:4], "big") / float(1 << 32)) * 2.0 - 1.0
         return unit * scale
+
+    def _sim_workflow_id(self, trial_id: str) -> str:
+        h = hashlib.sha256(f"{self.run_id}:{trial_id}".encode("utf-8")).hexdigest()
+        return f"{h[:8]}-{h[8:12]}-4{h[13:16]}-a{h[17:20]}-{h[20:32]}"
 
     def run_training_trial(
         self,
@@ -316,6 +497,8 @@ class CalibratedSimulatorBackend:
         max_steps: int,
         reference_recipe: RecipeCandidate | None = None,
     ) -> TrainingTrialSummary:
+        seq_idx = self._trial_counter
+        self._trial_counter += 1
         trial_dir = self.local_run_dir / "trials" / trial_id
         trial_dir.mkdir(parents=True, exist_ok=True)
 
@@ -324,9 +507,28 @@ class CalibratedSimulatorBackend:
         )
         fz_path = trial_dir / "workflow.yaml"
         fz_path.write_text(yaml_text, encoding="utf-8")
-        validate_fuzzfile(fz_path)
+        validate_fuzzfile(yaml_text, cluster=self.cluster)
 
-        # Memory budget model on GB10 (112 GB container-allocatable unified memory per node)
+        wf_id = self._sim_workflow_id(trial_id)
+        nodes = _extract_placed_nodes("", self.cluster, perf.nodes, seq_idx)
+        obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
+        self._emit(
+            {
+                "type": "trial_started",
+                "trial_id": trial_id,
+                "kind": "train",
+                "workflow_id": wf_id,
+                "workflow_name": f"crucible-{trial_id}",
+                "definition_id": self.cluster.definition_id,
+                "nodes_assigned": nodes,
+                "object_uri": obj_uri,
+                "fuzzfile": yaml_text,
+            }
+        )
+        if self.step_delay_s > 0:
+            time.sleep(self.step_delay_s)
+
+        # Memory budget model on GB10 (112 GiB container-allocatable unified memory per node)
         weights_per_node = self.exp.model.bf16_footprint_gb / (
             perf.nodes if self.exp.model.min_nodes_required > 1 else 1.0
         )
@@ -363,12 +565,26 @@ class CalibratedSimulatorBackend:
                     "fused_lora_linear": perf.use_fused_lora_kernel,
                 },
             )
+            raw_oom = oom_summary.to_dict()
             (trial_dir / "summary.json").write_text(
-                json.dumps(oom_summary.to_dict(), indent=2, sort_keys=True), encoding="utf-8"
+                json.dumps(raw_oom, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            (trial_dir / "placement.json").write_text(
+                json.dumps({"workflow_id": wf_id, "nodes": nodes, "object_uri": obj_uri}, indent=2),
+                encoding="utf-8",
+            )
+            self._emit(
+                {
+                    "type": "trial_finished",
+                    "trial_id": trial_id,
+                    "kind": "train",
+                    "workflow_id": wf_id,
+                    "nodes_assigned": nodes,
+                    "summary": raw_oom,
+                }
             )
             return oom_summary
 
-        # Recipe quality dynamics anchored to Qwen3-Coder-30B-A3B on LAMMPS C++
         optimal_log_lr = math.log10(1.6e-4)
         lr_dist = abs(math.log10(recipe.lr) - optimal_log_lr)
         lr_penalty = 0.22 * (lr_dist**1.6)
@@ -380,14 +596,11 @@ class CalibratedSimulatorBackend:
             self.BASE_MODEL_HELD_OUT_LOSS - 0.38 * module_coverage - rank_gain - seq_bonus + lr_penalty,
         )
 
-        # Kernel equivalence property: custom sm_121 kernels preserve exact mathematical trajectory
-        # up to BF16 accumulation jitter (< 0.003); changing global batch way off alters curve slightly.
         global_batch_delta = abs(perf.global_batch_sequences - 16) * 0.0012
         kernel_eps = (0.0011 if perf.use_chunked_ce_kernel else 0.0) + (
             0.0008 if perf.use_grouped_moe_kernel else 0.0
         )
 
-        # Throughput model on GB10 sm_121 (baseline ~1,243 tok/s -> ~3,822 tok/s 1-node, ~6,956 tok/s 2-node)
         base_tok_s = 1120.0
         batch_mult = 1.0 + 0.11 * min(perf.micro_batch_size - 1, 5)
         ckpt_mult = 1.0 if perf.activation_checkpointing else 1.21
@@ -459,9 +672,24 @@ class CalibratedSimulatorBackend:
                 "fused_lora_linear": perf.use_fused_lora_kernel,
             },
         )
+        raw_dict = summary.to_dict()
         (trial_dir / "summary.json").write_text(
-            json.dumps(summary.to_dict(), indent=2, sort_keys=True),
+            json.dumps(raw_dict, indent=2, sort_keys=True),
             encoding="utf-8",
+        )
+        (trial_dir / "placement.json").write_text(
+            json.dumps({"workflow_id": wf_id, "nodes": nodes, "object_uri": obj_uri}, indent=2),
+            encoding="utf-8",
+        )
+        self._emit(
+            {
+                "type": "trial_finished",
+                "trial_id": trial_id,
+                "kind": "train",
+                "workflow_id": wf_id,
+                "nodes_assigned": nodes,
+                "summary": raw_dict,
+            }
         )
         return summary
 
@@ -471,6 +699,8 @@ class CalibratedSimulatorBackend:
         cand: InferencePerfCandidate,
         baseline_finetuned_loss: float,
     ) -> ServingTrialSummary:
+        seq_idx = self._trial_counter
+        self._trial_counter += 1
         srv_dir = self.local_run_dir / "serving" / trial_id
         srv_dir.mkdir(parents=True, exist_ok=True)
 
@@ -485,14 +715,30 @@ class CalibratedSimulatorBackend:
         )
         fz_path = srv_dir / "workflow.yaml"
         fz_path.write_text(yaml_text, encoding="utf-8")
-        validate_fuzzfile(fz_path)
+        validate_fuzzfile(yaml_text, cluster=self.cluster)
 
-        # Serving throughput & latency physics on 2x GB10 (273 GB/s unified LPDDR5X per node)
+        wf_id = self._sim_workflow_id(f"srv-{trial_id}")
+        nodes = _extract_placed_nodes("", self.cluster, cand.total_gpus_required, seq_idx)
+        srv_obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, f"serving-{trial_id}")
+        self._emit(
+            {
+                "type": "trial_started",
+                "trial_id": trial_id,
+                "kind": "serve",
+                "workflow_id": wf_id,
+                "workflow_name": f"crucible-srv-{trial_id}",
+                "definition_id": self.cluster.definition_id,
+                "nodes_assigned": nodes,
+                "object_uri": srv_obj_uri,
+                "fuzzfile": yaml_text,
+            }
+        )
+        if self.step_delay_s > 0:
+            time.sleep(self.step_delay_s)
+
         prec_speed = {"BF16": 1.0, "FP8": 1.78, "NVFP4": 2.68}[cand.precision]
         kernel_mult = 1.22 if cand.use_low_prec_decode_kernel else 1.0
         batch_efficiency = math.log2(max(cand.max_num_seqs, 2)) / math.log2(32.0)
-        # On 200GbE RoCE, 2 independent replicas scale at ~1.96x with zero per-token all-reduce;
-        # TP=2 across nodes pays per-layer all-reduce latency overhead (~1.52x net).
         topo_mult = (cand.replicas * 0.98) * (1.0 if cand.tensor_parallel == 1 else 1.52)
         tok_s = round(410.0 * prec_speed * kernel_mult * batch_efficiency * topo_mult, 2)
 
@@ -503,9 +749,7 @@ class CalibratedSimulatorBackend:
         p99_ms = round(p50_ms * 1.55 + queueing_ms * 0.92, 2)
         ttft_ms = round(26.0 + queueing_ms * 0.25, 2)
 
-        # Precision impact on held-out LAMMPS C++ NLL and completion accuracy
         loss_shift = {"BF16": 0.0, "FP8": 0.0055, "NVFP4": 0.0155}[cand.precision]
-        # Extreme dynamic batching with FP4 KV quantization pressure degrades long-context C++ completion
         kv_pressure_shift = 0.022 if cand.max_num_seqs >= 200 and cand.precision == "NVFP4" else 0.0
         srv_loss = baseline_finetuned_loss + loss_shift + kv_pressure_shift
 
@@ -552,9 +796,24 @@ class CalibratedSimulatorBackend:
             accepted=(q_report.passed_quality_floor and passed_lat),
             rejection_reasons=reasons,
         )
+        raw_srv = summary.to_dict()
         (srv_dir / "summary.json").write_text(
-            json.dumps(summary.to_dict(), indent=2, sort_keys=True),
+            json.dumps(raw_srv, indent=2, sort_keys=True),
             encoding="utf-8",
+        )
+        (srv_dir / "placement.json").write_text(
+            json.dumps({"workflow_id": wf_id, "nodes": nodes, "object_uri": srv_obj_uri}, indent=2),
+            encoding="utf-8",
+        )
+        self._emit(
+            {
+                "type": "trial_finished",
+                "trial_id": trial_id,
+                "kind": "serve",
+                "workflow_id": wf_id,
+                "nodes_assigned": nodes,
+                "summary": raw_srv,
+            }
         )
         return summary
 
@@ -574,6 +833,8 @@ class LocalMicroTorchBackend(CalibratedSimulatorBackend):
     ) -> TrainingTrialSummary:
         if self.processed_data_dir is None:
             raise ValueError("LocalMicroTorchBackend requires processed_data_dir.")
+        seq_idx = self._trial_counter
+        self._trial_counter += 1
         trial_dir = self.local_run_dir / "trials" / trial_id
         trial_dir.mkdir(parents=True, exist_ok=True)
         yaml_text = render_training_trial_fuzzfile(
@@ -581,8 +842,25 @@ class LocalMicroTorchBackend(CalibratedSimulatorBackend):
         )
         fz_path = trial_dir / "workflow.yaml"
         fz_path.write_text(yaml_text, encoding="utf-8")
-        validate_fuzzfile(fz_path)
-        return run_micro_torch_training(
+        validate_fuzzfile(yaml_text, cluster=self.cluster)
+
+        wf_id = self._sim_workflow_id(f"torch-{trial_id}")
+        nodes = _extract_placed_nodes("", self.cluster, perf.nodes, seq_idx)
+        obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
+        self._emit(
+            {
+                "type": "trial_started",
+                "trial_id": trial_id,
+                "kind": "train",
+                "workflow_id": wf_id,
+                "workflow_name": f"crucible-{trial_id}",
+                "definition_id": self.cluster.definition_id,
+                "nodes_assigned": nodes,
+                "object_uri": obj_uri,
+                "fuzzfile": yaml_text,
+            }
+        )
+        summary = run_micro_torch_training(
             trial_id=trial_id,
             processed_data_dir=self.processed_data_dir,
             output_dir=trial_dir,
@@ -591,3 +869,18 @@ class LocalMicroTorchBackend(CalibratedSimulatorBackend):
             max_steps=min(max_steps, 16),
             measured_peak_tok_s=self.cluster.nodes.measured_peak_train_tok_s_per_node,
         )
+        (trial_dir / "placement.json").write_text(
+            json.dumps({"workflow_id": wf_id, "nodes": nodes, "object_uri": obj_uri}, indent=2),
+            encoding="utf-8",
+        )
+        self._emit(
+            {
+                "type": "trial_finished",
+                "trial_id": trial_id,
+                "kind": "train",
+                "workflow_id": wf_id,
+                "nodes_assigned": nodes,
+                "summary": summary.to_dict(),
+            }
+        )
+        return summary

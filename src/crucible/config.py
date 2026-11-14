@@ -10,18 +10,77 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class ClusterNodeSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hostname: str
+    node_id: str
+    address: str
+    status: str = "READY"
+    gpu_product: str = "NVIDIA-GB10"
+    gpus: int = Field(default=1, ge=0)
+    cores: int = Field(default=20, ge=1)
+    memory_gib: float = Field(default=127.9, gt=0)
+
+
+DEFAULT_TEAM20_INVENTORY = [
+    ClusterNodeSpec(
+        hostname="CIQ-CHI-SPARK39",
+        node_id="192.168.99.48/7331",
+        address="192.168.99.48",
+        status="READY",
+        gpu_product="NVIDIA-GB10",
+        gpus=1,
+        cores=20,
+        memory_gib=127.9,
+    ),
+    ClusterNodeSpec(
+        hostname="CIQ-CHI-SPARK40",
+        node_id="192.168.99.49/7331",
+        address="192.168.99.49",
+        status="READY",
+        gpu_product="NVIDIA-GB10",
+        gpus=1,
+        cores=20,
+        memory_gib=127.9,
+    ),
+]
+
+
 class NodeTopologyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     count: int = Field(default=2, ge=1)
     gpu_model: str = "NVIDIA GB10"
+    gpu_product: str = "NVIDIA-GB10"
+    gpu_arch: str = "Blackwell"
     sm_arch: str = "sm_121"
+    arch_device: str = "cpu/arm64/sve"
     gpus_per_node: int = Field(default=1, ge=1)
-    cpu_cores_per_node: int = Field(default=20, ge=1)
+    physical_cores_per_node: int = Field(default=20, ge=1)
+    cpu_cores_per_node: int = Field(default=16, ge=1)
+    physical_memory_gib_per_node: float = Field(default=127.9, gt=0)
     memory_gb_per_node: int = Field(default=112, ge=8)
     measured_peak_bf16_tflops: float = Field(default=198.0, gt=0)
     measured_peak_train_tok_s_per_node: float = Field(default=4150.0, gt=0)
     interconnect: str = "NCCL-RoCE-200GbE"
+    inventory: list[ClusterNodeSpec] = Field(
+        default_factory=lambda: [n.model_copy() for n in DEFAULT_TEAM20_INVENTORY]
+    )
+
+    @model_validator(mode="after")
+    def _validate_safe_headroom(self) -> "NodeTopologyConfig":
+        if self.cpu_cores_per_node > self.physical_cores_per_node:
+            raise ValueError(
+                f"Requested cpu_cores_per_node ({self.cpu_cores_per_node}) exceeds "
+                f"physical_cores_per_node ({self.physical_cores_per_node})."
+            )
+        if float(self.memory_gb_per_node) > self.physical_memory_gib_per_node:
+            raise ValueError(
+                f"Requested memory_gb_per_node ({self.memory_gb_per_node} GiB) exceeds "
+                f"physical_memory_gib_per_node ({self.physical_memory_gib_per_node} GiB)."
+            )
+        return self
 
 
 class VastStorageConfig(BaseModel):
@@ -41,15 +100,17 @@ class VastStorageConfig(BaseModel):
 class ContainerImagesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    fetch: str = "docker://nvcr.io/nvidia/pytorch:25.09-py3"
-    train: str = "docker://nvcr.io/nvidia/pytorch:25.09-py3"
-    serve: str = "docker://nvcr.io/nvidia/vllm:25.09-py3"
+    fetch: str = "docker://nvcr.io/nvidia/pytorch:26.03-py3"
+    train: str = "docker://nvcr.io/nvidia/pytorch:26.03-py3"
+    serve: str = "docker://nvcr.io/nvidia/vllm:26.04-py3"
 
 
 class ClusterConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cluster_name: str = "ciq-gb10-hackathon"
+    cluster_name: str = "ciq-gb10-team20"
+    definition_id: str = "team20"
+    pin_definition_annotation: bool = True
     fuzzfile_version: Literal["v4", "v1"] = "v4"
     nodes: NodeTopologyConfig = Field(default_factory=NodeTopologyConfig)
     vast: VastStorageConfig = Field(default_factory=VastStorageConfig)
@@ -68,6 +129,10 @@ class ClusterConfig(BaseModel):
         data = self.model_dump()
         if os.getenv("CRUCIBLE_FUZZFILE_VERSION") in {"v4", "v1"}:
             data["fuzzfile_version"] = os.environ["CRUCIBLE_FUZZFILE_VERSION"]
+        if os.getenv("CRUCIBLE_DEFINITION_ID"):
+            data["definition_id"] = os.environ["CRUCIBLE_DEFINITION_ID"]
+        if os.getenv("CRUCIBLE_PIN_DEFINITION") in {"0", "false", "False"}:
+            data["pin_definition_annotation"] = False
         if os.getenv("CRUCIBLE_VAST_VOLUME"):
             data["vast"]["persistent_volume_name"] = os.environ["CRUCIBLE_VAST_VOLUME"]
         if os.getenv("CRUCIBLE_VAST_PROVISIONER"):
@@ -209,6 +274,7 @@ class ExperimentConfig(BaseModel):
 
     experiment_id: str
     description: str = ""
+    target_definition_id: str = "team20"
     model: ModelProfileConfig
     dataset: DatasetSplitConfig
     stage_a_recipe: StageARecipeConfig

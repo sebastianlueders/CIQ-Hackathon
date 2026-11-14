@@ -1,7 +1,8 @@
 {
-  "cluster_name": "ciq-gb10-hackathon",
+  "cluster_name": "ciq-gb10-team20",
+  "definition_id": "team20",
   "fuzzfile_version": "v4",
-  "provisioners": ["vast", "local-scratch"],
+  "provisioners": ["vast"],
   "volumes": [
     {
       "name": "crucible-vast",
@@ -11,31 +12,61 @@
     }
   ],
   "images": {
-    "fetch": "docker://nvcr.io/nvidia/pytorch:25.09-py3",
-    "train": "docker://nvcr.io/nvidia/pytorch:25.09-py3",
-    "serve": "docker://nvcr.io/nvidia/vllm:25.09-py3"
+    "fetch": "docker://nvcr.io/nvidia/pytorch:26.03-py3",
+    "train": "docker://nvcr.io/nvidia/pytorch:26.03-py3",
+    "serve": "docker://nvcr.io/nvidia/vllm:26.04-py3"
   },
   "nodes": [
     {
-      "name": "gb10-node-01",
-      "gpu_model": "NVIDIA GB10",
-      "gpus": 1,
-      "cores": 20,
-      "memory_gb": 112
+      "node": {
+        "id": "192.168.99.48/7331",
+        "hostname": "CIQ-CHI-SPARK39",
+        "status": 2
+      },
+      "resource": {
+        "total": {
+          "cpu": { "cores": 20, "sockets": 1 },
+          "mem": { "bytes": 137331589120 },
+          "devices": {
+            "nvidia.com/gpu": 1,
+            "cpu/arm64": 1,
+            "cpu/arm64/sve": 1
+          }
+        },
+        "annotations": {
+          "fuzzball.io/provisioner_backend": "static",
+          "fuzzball.io/provisioner_definition_id": "team20"
+        }
+      }
     },
     {
-      "name": "gb10-node-02",
-      "gpu_model": "NVIDIA GB10",
-      "gpus": 1,
-      "cores": 20,
-      "memory_gb": 112
+      "node": {
+        "id": "192.168.99.49/7331",
+        "hostname": "CIQ-CHI-SPARK40",
+        "status": 2
+      },
+      "resource": {
+        "total": {
+          "cpu": { "cores": 20, "sockets": 1 },
+          "mem": { "bytes": 137331589120 },
+          "devices": {
+            "nvidia.com/gpu": 1,
+            "cpu/arm64": 1,
+            "cpu/arm64/sve": 1
+          }
+        },
+        "annotations": {
+          "fuzzball.io/provisioner_backend": "static",
+          "fuzzball.io/provisioner_definition_id": "team20"
+        }
+      }
     }
   ],
   "workflows": [
     {
       "id": "8c1f402a-91d4-4c3b-b82e-52f9a10e2d11",
       "name": "crucible-00-fetch",
-      "status": "Finished"
+      "status": "finished"
     }
   ]
 }

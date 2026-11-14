@@ -1,5 +1,6 @@
 # workflows/00-fetch.yaml
-# One-time CIQ Fuzzball bootstrap workflow that populates the shared VAST volume with:
+# One-time CIQ Fuzzball v4 bootstrap workflow targeting Team 20 (definitionId: team20,
+# CIQ-CHI-SPARK39 & CIQ-CHI-SPARK40, arm64 cpu/arm64/sve) that populates the shared VAST volume:
 #   1. Base model weights: Qwen/Qwen3-Coder-30B-A3B (~57 GB BF16 safetensors)
 #   2. Public HPC stand-in corpus: LAMMPS C++ repository (~15,605 source/doc files)
 #
@@ -9,6 +10,9 @@
 
 version: v4
 
+annotations:
+  fuzzball.io/provisioner_definition_id: team20
+
 volumes:
   vast-shared:
     use: vast
@@ -17,7 +21,7 @@ volumes:
 jobs:
   fetch-base-model:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
     mounts:
       /vast: vast-shared
     env:
@@ -28,7 +32,9 @@ jobs:
         cores: 8
         affinity: NUMA
       memory:
-        size: 32GB
+        size: 32GiB
+      devices:
+        cpu/arm64/sve: 1
     policy:
       timeout:
         execute: 2h
@@ -49,7 +55,7 @@ jobs:
 
   fetch-lammps-source:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
     mounts:
       /vast: vast-shared
     resource:
@@ -57,7 +63,9 @@ jobs:
         cores: 4
         affinity: CORE
       memory:
-        size: 16GB
+        size: 16GiB
+      devices:
+        cpu/arm64/sve: 1
     policy:
       timeout:
         execute: 45m

@@ -132,6 +132,26 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     discover_res = client.get("/api/discover")
     assert discover_res.status_code == 200
     assert discover_res.json()["cluster_config"]["fuzzfile_version"] == "v4"
+    assert discover_res.json()["cluster_config"]["definition_id"] == "team20"
+
+    live_res = client.get("/api/live-status")
+    assert live_res.status_code == 200
+    live_json = live_res.json()
+    assert live_json["definition_id"] == "team20"
+    assert [n["hostname"] for n in live_json["nodes"]] == ["CIQ-CHI-SPARK39", "CIQ-CHI-SPARK40"]
+
+    sync_run = client.post(
+        "/api/run",
+        json={
+            "profile": "demo_30b",
+            "backend": "simulator",
+            "fuzzfile_version": "v4",
+            "definition_id": "team20",
+            "async_mode": False,
+        },
+    )
+    assert sync_run.status_code == 200
+    assert sync_run.json()["cluster"]["definition_id"] == "team20"
 
     probe = client.post("/api/firewall-probe", json={"inject_cpp_snippet": True}).json()
     assert probe["blocked"] is True

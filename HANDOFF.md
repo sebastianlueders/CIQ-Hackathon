@@ -1,76 +1,50 @@
 # Crucible Cluster & Architecture Handoff (`HANDOFF.md`)
 
-**Team**: Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania  
+**Team 20**: Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania  
 **Track**: Multi-Node Training (NVIDIA GB10 · CIQ Fuzzball · VAST Data)
 
 ---
 
-## 1. Cluster Facts & VAST Volume Layout
+## 1. Team 20 Live Cluster Facts (`definitionId: team20`) & VAST Layout
 
-- **Compute Nodes**: 2x NVIDIA GB10 Grace Blackwell nodes (`aarch64` 20-core Grace CPU + Blackwell `sm_121` GPU with 128 GB unified LPDDR5X memory per node; ~112 GB safely allocatable to containers).
-- **Shared Storage (VAST Data)**: Persistent Fuzzball volume `crucible-vast` (`provisioner: vast`) mounted at `/vast` across every trial and both nodes with zero per-trial data copying:
-  - `/vast/models/Qwen3-Coder-30B-A3B` — 57 GB BF16 base weights (fetched by `workflows/00-fetch.yaml`)
-  - `/vast/data/lammps` — 15,605-file LAMMPS C++ repository (fetched by `workflows/00-fetch.yaml`)
-  - `/vast/data/lammps-packed` — deterministically split (`train` / `val` / sealed `held_out`) packed chunks + SHA-256 manifest
-  - `/vast/runs/<run_id>/` — per-trial Fuzzfiles, JSONL step metrics, LoRA adapters, benchmark logs, privacy audit trail, and final emitted workflow
-- **Overriding Cluster Identifiers**: Edit `configs/cluster.default.yaml` or set `CRUCIBLE_VAST_VOLUME`, `CRUCIBLE_VAST_PROVISIONER`, `CRUCIBLE_TRAIN_IMAGE`, `CRUCIBLE_SERVE_IMAGE`, or `CRUCIBLE_FUZZFILE_VERSION` (`v4` or `v1`).
-
----
-
-## 2. CIQ Fuzzball Syntax Rules & Hardware Pitfalls
-
-1. **Unique Stage Namespace**: In Fuzzball `v4`, volumes, jobs, and services share one allocation namespace — never give a job and a service or volume the same name (`crucible validate-yaml` enforces this automatically).
-2. **`mounts` Map (`v4` vs `v1`)**:
-   - `version: v4` maps container path to volume key: `mounts: { /vast: vast-shared }` and uses `depends-on: [{ name: ..., status: FINISHED }]`.
-   - `version: v1` maps volume key to `{ location: /vast }` and uses `requires: [...]`.
-   - `crucible` renders `v4` by default and supports `--fuzzfile-version v1`.
-3. **GB10 (`sm_121`) Unified Memory & Logit Spikes**:
-   - `Qwen3-Coder-30B-A3B` has a `151,936`-entry vocabulary. Materializing full `[B, T, 151936]` FP32 logits for cross-entropy consumes `~4.9 GB` at `B=4, T=2048`, starving unified memory bandwidth and forcing small micro-batches or heavy activation checkpointing.
-   - Our **Kernel 1 (`chunked_cross_entropy`)** tiles hidden states and computes online log-sum-exp in Triton on `sm_121` without ever materializing the `[B*T, V]` logit tensor, unlocking larger micro-batches without activation checkpointing while matching PyTorch loss to `< 1e-4`.
-4. **Multi-Node Training (`torchrun` + NCCL)**:
-   - Multi-node Fuzzball jobs specify `multinode: { nodes: 2, implementation: generic, procs-per-node: 1 }` and coordinate rank-0 rendezvous over shared VAST (`/vast/runs/<run_id>/rdzv`) so `torchrun` initializes NCCL reliably without hardcoding node IPs.
+- **Provisioner Definition**: `definitionId: team20` — pinned in Fuzzball `v4` workflows via the auto-exempt platform annotation `fuzzball.io/provisioner_definition_id: team20`.
+- **Compute Nodes (2 READY, idle)**:
+  - `CIQ-CHI-SPARK39` (`192.168.99.48/7331`) — `1x NVIDIA GB10` (`NVIDIA-GB10`, Blackwell, `sm_121`), `nvidia.com/gpu: 1`, `20` cores (`cpu/arm64/sve: 1`), `127.9 GiB` unified LPDDR5X
+  - `CIQ-CHI-SPARK40` (`192.168.99.49/7331`) — `1x NVIDIA GB10` (`NVIDIA-GB10`, Blackwell, `sm_121`), `nvidia.com/gpu: 1`, `20` cores (`cpu/arm64/sve: 1`), `127.9 GiB` unified LPDDR5X
+  - **Team 20 Total**: `2x nvidia.com/gpu`, `40` cores, `255.8 GiB`
+- **Safe Per-Node Container Envelope (`16 cores / 112GiB`)**:
+  - GPU jobs/services request `cores: 16`, `memory.size: 112GiB`, `devices: { nvidia.com/gpu: 1, cpu/arm64/sve: 1 }`.
+  - Leaving `4` cores and `15.9 GiB` headroom per node guarantees Fuzzball never rejects for Substrate/host overhead and allows lightweight CPU helper jobs (`bench-*` at `2c / 8GiB`, `crucible-studio` at `2c / 8GiB`) to co-schedule cleanly even during 2-node jobs.
+- **Verified `linux/arm64` + `sm_121` NGC Container Images**:
+  - Training / Ingest / Eval: `docker://nvcr.io/nvidia/pytorch:26.03-py3` (CUDA 13.2 + PyTorch 2.11 verified clean on DGX Spark GB10; `TORCH_CUDA_ARCH_LIST="12.0;12.1"`).
+  - Serving: `docker://nvcr.io/nvidia/vllm:26.04-py3` (multi-arch `arm64` + `sm_121` PyTorch; launched with `--attention-backend TRITON_ATTN` and `FLASHINFER_DISABLE_VERSION_CHECK=1`).
+- **Shared Storage (VAST Data)**: Persistent Fuzzball volume `crucible-vast` (`provisioner: vast`) mounted at `/vast` across both Spark nodes, with compact numeric `summary.json` egressed to `fuzzball://user/crucible/<run_id>/<trial_id>/metrics.json` for `object_get` (zero raw dataset/weight egress).
 
 ---
 
-## 3. Custom `sm_121` Kernel Library (`src/crucible/kernels/`)
+## 2. CIQ Fuzzball v4 Rules Enforced by `crucible validate-yaml`
 
-| # | Kernel | Bottleneck Addressed on GB10 `sm_121` | Verification |
-|---|---|---|---|
-| 1 | `chunked_cross_entropy` | Eliminates 152k-vocab FP32 logit materialization; tiles projection + online softmax CE | Forward + autograd backward vs `F.cross_entropy` |
-| 2 | `grouped_moe_gemm` | Coalesces top-8-of-128 active expert projections in `Qwen3-Coder-30B-A3B` | Numerical parity vs per-expert reference loop |
-| 3 | `fused_lora` | Fuses base projection + low-rank adapter `Wx + (alpha/r) B(Ax)` to cut HBM/LPDDR5X round-trips | Forward + `dX, dA, dB` gradient parity |
-| 4 | `low_prec_decode` | Block-scaled FP8 / NVFP4 weight dequant-GEMV for memory-bound batch-decode serving | Bounded quantization error + quality-floor check |
-
-Every kernel auto-detects Triton + CUDA `sm_121` at runtime and falls back cleanly to exact reference PyTorch kernels on non-Blackwell GPUs or CPU CI environments.
+1. **Single Allocation Namespace**: Volumes, jobs, and services never share names.
+2. **Strict Annotation Allowlist**: Only `fuzzball.io/provisioner_definition_id` (and platform-enumerated keys) use the reserved `fuzzball.io/*` prefix so scheduler annotation matching never silently rejects `team20` nodes.
+3. **Hardware Envelope Gate**: Rejects any job/service requesting `> 1` GPU/node, `> 20` cores/node, `> 127.9 GiB`/node, or `multinode.nodes > 2`.
+4. **Data-Isolation Egress Gate**: Blocks any volume `egress:` rule whose source path references raw LAMMPS files, JSONL splits, or adapter/model weights.
 
 ---
 
-## 4. Privacy Guarantee (Hard Schema Firewall)
-
-The LLM advisor (`src/crucible/optimizer/advisor.py`) communicates exclusively through `src/crucible/firewall.py`:
-- Only strongly-typed numeric metrics, enum identifiers, and hyperparameter grids can cross the boundary.
-- Any payload containing C++ source tokens, filesystem snippets, long free-text strings, or non-allowlisted keys raises `DataIsolationViolation` before serialization and is logged to `privacy_audit.jsonl` with SHA-256 payload digests.
-
----
-
-## 5. Quick Commands
+## 3. Quick Commands (`team20`)
 
 ```bash
-# Run full 4-stage autoresearch loop in offline calibrated simulator mode (completes in seconds)
-crucible run --config configs/demo_lammps_30b.yaml --backend simulator --output-dir runs/demo
+# One-command launch: discover team20, start Live Studio on http://127.0.0.1:8000, and run
+./scripts/run_team20.sh
 
-# Auto-discover cluster volumes/nodes via `fuzzball mcp serve` + `workflows/00-fetch.yaml`
-crucible discover
+# Start the Live Web Studio on http://127.0.0.1:8000 and launch fuzzball_mcp runs from the browser
+crucible serve --port 8000
 
-# Run against live CIQ Fuzzball 4.2 MCP (`fuzzball mcp serve --allow-write --allow-exec`)
-crucible run --config configs/demo_lammps_30b.yaml --backend fuzzball_mcp --output-dir runs/live-01
+# Run via CLI directly against CIQ Fuzzball 4.2 MCP (`fuzzball mcp serve --allow-write --allow-exec`)
+crucible run --config configs/demo_lammps_30b.yaml --backend fuzzball_mcp --output-dir runs/team20-01
 
-# Benchmark custom kernels (runs Triton on GPU or PyTorch verification on CPU)
-crucible bench-kernels
-
-# Validate any generated Fuzzfile
-crucible validate-yaml runs/demo/final-crucible-workflow.yaml
-
-# Launch interactive live dashboard
-crucible ui --run-dir runs/demo --port 8080
+# Validate all Fuzzfiles against Team 20 hardware bounds
+crucible validate-yaml workflows/00-fetch.yaml
+crucible validate-yaml workflows/crucible-studio.yaml
+crucible validate-yaml workflows/examples/final-lammps-qwen3-30b.yaml
 ```

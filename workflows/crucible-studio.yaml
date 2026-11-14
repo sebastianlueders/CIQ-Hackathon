@@ -1,0 +1,61 @@
+# workflows/crucible-studio.yaml
+# Optional CIQ Fuzzball v4 persistent service workflow hosting the Crucible Live Studio UI
+# directly on Team 20 (definitionId: team20, cpu/arm64/sve) with an HTTP endpoint.
+# Consumes 0 GPUs (2 cores / 8GiB RAM), leaving both NVIDIA-GB10 GPUs on
+# CIQ-CHI-SPARK39 and CIQ-CHI-SPARK40 free for training and vLLM serving trials.
+#
+# Launch with:
+#   fuzzball workflow validate workflows/crucible-studio.yaml
+#   fuzzball workflow start workflows/crucible-studio.yaml -n crucible-team20-studio
+
+version: v4
+
+annotations:
+  fuzzball.io/provisioner_definition_id: team20
+
+volumes:
+  vast-shared:
+    use: vast
+    name: crucible-vast
+
+services:
+  crucible-studio:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
+    mounts:
+      /vast: vast-shared
+    env:
+      - PYTHONUNBUFFERED=1
+      - CRUCIBLE_DEFINITION_ID=team20
+    resource:
+      cpu:
+        cores: 2
+        affinity: CORE
+      memory:
+        size: 8GiB
+      devices:
+        cpu/arm64/sve: 1
+    persist: true
+    network:
+      ports:
+        - name: http
+          port: 8000
+      endpoints:
+        - name: crucible-team20-studio
+          port-name: http
+          protocol: http
+          type: path
+          scope: group
+    readiness-probe:
+      http-get:
+        path: /api/health
+        port: 8000
+      initial-delay-seconds: 5
+      period-seconds: 10
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      if [ -d /vast/crucible ]; then
+        python3 -m pip install --quiet --no-deps -e "/vast/crucible"
+      fi
+      exec crucible serve --run-dir /vast/runs/team20-live --host 0.0.0.0 --port 8000

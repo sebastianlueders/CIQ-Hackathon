@@ -1,11 +1,14 @@
-"""Structural and security validator for CIQ Fuzzball workflows (`v4` and `v1`)."""
+"""Structural, resource-ceiling, and security validator for CIQ Fuzzball workflows (`v4` and `v1`)."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from crucible.config import ClusterConfig
 
 VALID_IMAGE_SCHEMES = ("docker://", "oras://")
 VALID_EGRESS_SCHEMES = ("fuzzball://", "fb://", "s3://", "http://", "https://")
@@ -25,14 +28,66 @@ FORBIDDEN_RAW_DATA_EGRESS_MARKERS = (
     "lora_adapter",
 )
 VALID_DEPENDS_STATUS = frozenset({"RUNNING", "FINISHED", "FAILED"})
-SUSPICIOUS_ENV_PREFIXES = ("OPENAI_API_KEY=", "ANTHROPIC_API_KEY=", "HF_TOKEN=", "PASSWORD=", "SECRET=")
+SUSPICIOUS_ENV_PREFIXES = (
+    "OPENAI_API_KEY=",
+    "ANTHROPIC_API_KEY=",
+    "HF_TOKEN=",
+    "PASSWORD=",
+    "SECRET=",
+)
+ALLOWED_PLATFORM_ANNOTATION_KEYS = frozenset(
+    {
+        "fuzzball.io/provisioner_definition_id",
+        "fuzzball.io/provisioner_cluster_id",
+        "fuzzball.io/workflow.id",
+        "fuzzball.io/job.name",
+    }
+)
+MEMORY_SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(GiB|GB|MiB|MB|TiB|TB)\s*$")
 
 
 class FuzzfileValidationError(ValueError):
-    """Raised when a Fuzzball workflow violates CIQ Fuzzball schema or security invariants."""
+    """Raised when a Fuzzball workflow violates CIQ Fuzzball schema, hardware bounds, or security invariants."""
 
 
-def validate_fuzzfile(workflow_or_path: dict[str, Any] | str | Path) -> list[str]:
+def _parse_memory_gib(size_str: str) -> float:
+    match = MEMORY_SIZE_RE.match(str(size_str))
+    if not match:
+        raise FuzzfileValidationError(f"Invalid memory.size format: {size_str!r}")
+    val = float(match.group(1))
+    unit = match.group(2)
+    factors = {
+        "GiB": 1.0,
+        "GB": 1000**3 / float(1024**3),
+        "MiB": 1.0 / 1024.0,
+        "MB": 1000**2 / float(1024**3),
+        "TiB": 1024.0,
+        "TB": 1000**4 / float(1024**3),
+    }
+    return val * factors[unit]
+
+
+def _validate_annotations_map(ann: Any, where: str) -> None:
+    if ann is None:
+        return
+    if not isinstance(ann, dict):
+        raise FuzzfileValidationError(f"Annotations at '{where}' must be a mapping.")
+    for key in ann:
+        if not isinstance(key, str):
+            raise FuzzfileValidationError(f"Non-string annotation key at '{where}'.")
+        if key.startswith("fuzzball.io/") and not (
+            key in ALLOWED_PLATFORM_ANNOTATION_KEYS or key.startswith("fuzzball.io/connect/")
+        ):
+            raise FuzzfileValidationError(
+                f"Custom key '{key}' at '{where}' uses reserved 'fuzzball.io/' prefix and is not in "
+                f"Fuzzball's auto-exempt platform allowlist {sorted(ALLOWED_PLATFORM_ANNOTATION_KEYS)}."
+            )
+
+
+def validate_fuzzfile(
+    workflow_or_path: dict[str, Any] | str | Path,
+    cluster: ClusterConfig | None = None,
+) -> list[str]:
     if isinstance(workflow_or_path, Path):
         raw_text = workflow_or_path.read_text(encoding="utf-8")
         doc = yaml.safe_load(raw_text)
@@ -50,6 +105,8 @@ def validate_fuzzfile(workflow_or_path: dict[str, Any] | str | Path) -> list[str
     version = doc.get("version")
     if version not in {"v4", "v1"}:
         raise FuzzfileValidationError(f"Fuzzfile 'version' must be 'v4' or 'v1', got {version!r}")
+
+    _validate_annotations_map(doc.get("annotations"), "workflow.annotations")
 
     volumes = doc.get("volumes") or {}
     jobs = doc.get("jobs") or {}
@@ -130,11 +187,43 @@ def validate_fuzzfile(workflow_or_path: dict[str, Any] | str | Path) -> list[str
                         f"{kind.capitalize()} '{stage_name}' env entry {env_entry!r} must be 'KEY=VALUE'."
                     )
                 for bad_prefix in SUSPICIOUS_ENV_PREFIXES:
-                    if env_entry.upper().startswith(bad_prefix) and not env_entry.split("=", 1)[1].startswith(
-                        "secret://"
-                    ):
+                    if env_entry.upper().startswith(bad_prefix) and not env_entry.split("=", 1)[
+                        1
+                    ].startswith("secret://"):
                         raise FuzzfileValidationError(
                             f"Hardcoded secret forbidden in '{stage_name}' env: {bad_prefix}..."
+                        )
+
+            # Resource block validation (+ optional cluster envelope check)
+            res = spec.get("resource")
+            mnode_count = int((spec.get("multinode") or {}).get("nodes", 1))
+            if isinstance(res, dict):
+                _validate_annotations_map(res.get("annotations"), f"{stage_name}.resource.annotations")
+                cores = int((res.get("cpu") or {}).get("cores", 0))
+                mem_gib = _parse_memory_gib((res.get("memory") or {}).get("size", ""))
+                gpus = int((res.get("devices") or {}).get("nvidia.com/gpu", 0))
+                if cores <= 0:
+                    raise FuzzfileValidationError(f"'{stage_name}' resource.cpu.cores must be > 0.")
+                if cluster is not None:
+                    if mnode_count > cluster.nodes.count:
+                        raise FuzzfileValidationError(
+                            f"'{stage_name}' requests multinode.nodes={mnode_count}, exceeding "
+                            f"cluster node count ({cluster.nodes.count})."
+                        )
+                    if cores > cluster.nodes.physical_cores_per_node:
+                        raise FuzzfileValidationError(
+                            f"'{stage_name}' requests {cores} cores/node, exceeding node physical limit "
+                            f"{cluster.nodes.physical_cores_per_node}."
+                        )
+                    if mem_gib > cluster.nodes.physical_memory_gib_per_node:
+                        raise FuzzfileValidationError(
+                            f"'{stage_name}' requests {mem_gib:.1f} GiB/node, exceeding node physical limit "
+                            f"{cluster.nodes.physical_memory_gib_per_node} GiB."
+                        )
+                    if gpus > cluster.nodes.gpus_per_node:
+                        raise FuzzfileValidationError(
+                            f"'{stage_name}' requests {gpus} GPUs/node, exceeding node physical limit "
+                            f"{cluster.nodes.gpus_per_node}."
                         )
 
             mounts = spec.get("mounts") or {}
@@ -156,7 +245,9 @@ def validate_fuzzfile(workflow_or_path: dict[str, Any] | str | Path) -> list[str
                         raise FuzzfileValidationError(
                             f"v1 mount in '{stage_name}' references undefined volume '{vol_ref}'."
                         )
-                    if not isinstance(loc_obj, dict) or not str(loc_obj.get("location", "")).startswith("/"):
+                    if not isinstance(loc_obj, dict) or not str(loc_obj.get("location", "")).startswith(
+                        "/"
+                    ):
                         raise FuzzfileValidationError(
                             f"v1 mount '{vol_ref}' in '{stage_name}' requires 'location: /abs/path'."
                         )

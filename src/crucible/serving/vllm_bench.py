@@ -62,6 +62,8 @@ def build_vllm_launch_args(
         str(cand.tensor_parallel),
         "--max-num-seqs",
         str(cand.max_num_seqs),
+        "--attention-backend",
+        "TRITON_ATTN",
         "--port",
         str(port),
     ]

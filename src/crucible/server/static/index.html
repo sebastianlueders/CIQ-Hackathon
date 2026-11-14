@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crucible — Local Autoresearch &amp; sm_121 Performance Studio</title>
+  <title>Crucible — Team 20 Autoresearch &amp; sm_121 Live Control Plane</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -13,15 +13,15 @@
       <div>
         <div class="brand-title-row">
           <h1>Crucible</h1>
-          <span class="badge badge-accent">Autoresearch Control Plane</span>
+          <span class="badge badge-accent">Team 20 Live Control Plane</span>
         </div>
-        <p class="subtitle">Bring your private codebase, base model &amp; GB10 cluster — get one tuned CIQ Fuzzball workflow. Raw data never leaves VAST.</p>
+        <p class="subtitle">Local autoresearch &amp; Grace Blackwell <code>sm_121</code> optimization on CIQ Fuzzball + VAST — raw code never leaves <code>/vast</code>.</p>
       </div>
     </div>
     <div class="stack-pills">
-      <span class="pill"><span class="dot dot-green"></span>2x NVIDIA GB10 (<code>sm_121</code>)</span>
-      <span class="pill"><span class="dot dot-cyan"></span>CIQ Fuzzball <code id="pill-fz-ver">v4</code></span>
-      <span class="pill"><span class="dot dot-violet"></span>VAST Volume <code>/vast</code></span>
+      <span class="pill"><span class="dot dot-green"></span><code>definitionId: <span id="pill-def-id">team20</span></code></span>
+      <span class="pill"><span class="dot dot-cyan"></span>2&times; NVIDIA-GB10 · <code>cpu/arm64/sve</code> (40c / 255.8 GiB)</span>
+      <span class="pill"><span class="dot dot-violet"></span>Fuzzfile <code id="pill-fz-ver">v4</code> · VAST <code>/vast</code></span>
       <span class="pill pill-shield" id="pill-privacy"><span class="dot dot-green"></span>Schema Firewall: 0 Bytes Leaked</span>
     </div>
     <div class="actions">
@@ -29,12 +29,33 @@
         <option value="demo_30b">Qwen3-Coder-30B-A3B · LAMMPS C++</option>
         <option value="stretch_80b">Qwen3-Coder-Next-80B · 2-Node Stretch</option>
       </select>
-      <button id="btn-run" class="btn btn-primary">Re-run 4-Stage Loop</button>
-      <button id="btn-probe" class="btn btn-outline" title="Simulate an accidental raw C++ snippet leak and verify the schema firewall blocks it">Test Firewall Guard</button>
+      <select id="backend-select" aria-label="Execution Backend">
+        <option value="fuzzball_mcp">Fuzzball 4.2 MCP · team20 Live</option>
+        <option value="fuzzball">Fuzzball CLI · team20 Live</option>
+        <option value="simulator" selected>Team 20 GB10 Calibrated Sim</option>
+        <option value="local_torch">Local PyTorch Kernels</option>
+      </select>
+      <button id="btn-run" class="btn btn-primary">Launch on team20</button>
+      <button id="btn-probe" class="btn btn-outline" title="Inject a simulated raw C++ snippet and verify the schema firewall blocks it">Test Firewall Guard</button>
     </div>
   </header>
 
   <main class="container">
+    <section class="cluster-strip">
+      <div class="node-cards-wrap" id="node-cards"></div>
+      <div class="live-stream-card">
+        <div class="live-stream-header">
+          <div>
+            <span class="stage-tag">LIVE FUZZBALL TELEMETRY · OBJECT-CACHE METRICS EGRESS</span>
+            <div class="live-stage-title" id="live-stage-label">Ready on Team 20</div>
+          </div>
+          <span class="badge" id="live-run-state">COMPLETED</span>
+        </div>
+        <div id="live-error-banner" class="error-banner hidden"></div>
+        <div class="event-feed" id="live-event-feed"></div>
+      </div>
+    </section>
+
     <section class="funnel-grid" id="funnel-cards">
       <article class="stage-card">
         <div class="stage-header">
@@ -69,11 +90,11 @@
       <article class="stage-card stage-card-highlight">
         <div class="stage-header">
           <span class="stage-tag">STAGE D · TURNKEY ARTIFACT</span>
-          <span class="stage-status status-ok">Validated DAG</span>
+          <span class="stage-status status-ok">Validated Team 20 DAG</span>
         </div>
         <div class="metric-big" id="kpi-dag">4-Stage Fuzzfile</div>
         <div class="metric-label"><code>ingest &rarr; train &rarr; eval &rarr; serve</code></div>
-        <div class="stage-meta" id="meta-stage-d">Reproducible on next month's code drop</div>
+        <div class="stage-meta" id="meta-stage-d">Pinned to definitionId: team20</div>
       </article>
     </section>
 
@@ -81,8 +102,8 @@
       <div class="panel">
         <div class="panel-header">
           <div>
-            <h2>Training Loss-Curve Equivalence &amp; Successive Halving</h2>
-            <p class="panel-sub">Stage B accepts custom <code>sm_121</code> kernels &amp; multi-node configs only when trajectory deviation &le; 0.025</p>
+            <h2>Training Loss-Curve Equivalence &amp; Live Trajectories</h2>
+            <p class="panel-sub">Stage B accepts custom <code>sm_121</code> kernels &amp; 2-node NCCL DDP across SPARK39 + SPARK40 only when trajectory &Delta; &le; 0.025</p>
           </div>
           <span class="badge" id="curve-badge">Max &Delta; = 0.0067</span>
         </div>
@@ -94,7 +115,7 @@
         <div class="panel-header">
           <div>
             <h2>Stage B Training Throughput &amp; Kernel Waterfall</h2>
-            <p class="panel-sub">Measured tokens/sec across PyTorch baseline, 152k-vocab chunked CE, grouped MoE + fused LoRA, and 2-node NCCL DDP</p>
+            <p class="panel-sub">Measured tokens/sec across PyTorch baseline, 152k-vocab chunked CE, grouped MoE + fused LoRA, and 2-node SPARK39+SPARK40 DDP</p>
           </div>
           <span class="badge badge-green" id="util-badge">83.8% Cluster Peak</span>
         </div>
@@ -107,7 +128,7 @@
         <div class="panel-header">
           <div>
             <h2>Stage C vLLM Serving Sweep (Precision &times; Replicas vs. TP)</h2>
-            <p class="panel-sub">Enforces held-out perplexity regression &le; +2.5%, C++ completion pass &ge; 84%, and P99 &le; 450 ms</p>
+            <p class="panel-sub"><code>nvcr.io/nvidia/vllm:26.04-py3</code> (<code>TRITON_ATTN</code>) gated on PPL &Delta; &le; +2.5%, C++ completion &ge; 84%, P99 &le; 450 ms</p>
           </div>
         </div>
         <table class="data-table" id="serving-table">
@@ -152,10 +173,14 @@
     <section class="panel yaml-panel">
       <div class="panel-header">
         <div>
-          <h2>Emitted Turnkey CIQ Fuzzball Workflow (<code>final-crucible-workflow.yaml</code>)</h2>
-          <p class="panel-sub">Single reproducible deliverable mounting shared VAST storage across ingestion, LoRA training, held-out verification, and persistent vLLM serving</p>
+          <h2>Emitted CIQ Fuzzball v4 Workflow (<code>definitionId: team20</code>)</h2>
+          <p class="panel-sub">Pinned via <code>fuzzball.io/provisioner_definition_id: team20</code> · <code>16c / 112GiB / cpu/arm64/sve: 1 / nvidia.com/gpu: 1</code> per node</p>
         </div>
-        <button id="btn-copy-yaml" class="btn btn-outline">Copy Fuzzfile YAML</button>
+        <div class="yaml-controls">
+          <button id="btn-tab-turnkey" class="btn btn-outline active-tab">Turnkey Production YAML</button>
+          <button id="btn-tab-trial" class="btn btn-outline">Latest Trial YAML</button>
+          <button id="btn-copy-yaml" class="btn btn-outline">Copy YAML</button>
+        </div>
       </div>
       <pre class="code-viewer" id="yaml-viewer">Loading workflow...</pre>
     </section>

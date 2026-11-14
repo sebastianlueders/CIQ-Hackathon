@@ -35,10 +35,17 @@ def render_markdown_run_report(
     allowed_count = sum(1 for r in firewall_records if r.status == "ALLOWED")
     blocked_count = sum(1 for r in firewall_records if r.status == "BLOCKED")
 
+    inv_summary = (
+        ", ".join(f"`{n.hostname}` (`{n.node_id}`)" for n in cluster.nodes.inventory)
+        if cluster.nodes.inventory
+        else f"{cluster.nodes.count}x {cluster.nodes.gpu_model}"
+    )
+
     lines = [
         f"# Crucible Autoresearch Measured Report — `{exp.experiment_id}`",
         "",
-        f"- **Cluster**: `{cluster.cluster_name}` ({cluster.nodes.count}x {cluster.nodes.gpu_model}, `{cluster.nodes.sm_arch}`)",
+        f"- **Cluster**: `{cluster.cluster_name}` · `definitionId: {cluster.definition_id}` ({cluster.nodes.count}x `{cluster.nodes.gpu_product}`, `{cluster.nodes.sm_arch}`, `{cluster.nodes.arch_device}`)",
+        f"- **Compute Nodes**: {inv_summary}",
         f"- **Shared Storage**: VAST persistent volume `{cluster.vast.persistent_volume_name}` mounted at `{cluster.vast.mount_path}`",
         f"- **Base Model**: `{exp.model.name}` ({exp.model.bf16_footprint_gb} GB BF16, {exp.model.vocab_size:,} vocab)",
         f"- **Turnkey Deliverable**: `{workflow_filename}` (`ingest-lammps -> train-lora -> eval-held-out -> serve-vllm`)",

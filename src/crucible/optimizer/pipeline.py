@@ -1,11 +1,11 @@
-"""End-to-end 4-stage Crucible autoresearch orchestrator."""
+"""End-to-end 4-stage Crucible autoresearch orchestrator with live progress event hooks."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Callable, Literal
 
 from crucible.config import ClusterConfig, ExperimentConfig, repo_root
 from crucible.data.lammps_ingest import DatasetManifest, ingest_lammps_corpus
@@ -18,6 +18,7 @@ from crucible.firewall import (
 from crucible.fuzzball.renderer import render_final_turnkey_fuzzfile
 from crucible.fuzzball.runner import (
     CalibratedSimulatorBackend,
+    EventCallback,
     ExecutionBackend,
     FuzzballCLIBackend,
     FuzzballMCPBackend,
@@ -58,6 +59,8 @@ def _build_backend(
     run_id: str,
     output_dir: Path,
     processed_data_dir: Path,
+    event_hook: EventCallback | None = None,
+    sim_step_delay_s: float = 0.0,
 ) -> ExecutionBackend:
     if backend_kind == "fuzzball_mcp":
         return FuzzballMCPBackend(
@@ -65,6 +68,7 @@ def _build_backend(
             exp=exp,
             run_id=run_id,
             local_run_dir=output_dir,
+            event_hook=event_hook,
         )
     if backend_kind == "fuzzball":
         return FuzzballCLIBackend(
@@ -72,6 +76,7 @@ def _build_backend(
             exp=exp,
             run_id=run_id,
             local_run_dir=output_dir,
+            event_hook=event_hook,
         )
     if backend_kind == "local_torch":
         return LocalMicroTorchBackend(
@@ -80,6 +85,8 @@ def _build_backend(
             run_id=run_id,
             local_run_dir=output_dir,
             processed_data_dir=processed_data_dir,
+            event_hook=event_hook,
+            step_delay_s=sim_step_delay_s,
         )
     return CalibratedSimulatorBackend(
         cluster=cluster,
@@ -87,6 +94,8 @@ def _build_backend(
         run_id=run_id,
         local_run_dir=output_dir,
         processed_data_dir=processed_data_dir,
+        event_hook=event_hook,
+        step_delay_s=sim_step_delay_s,
     )
 
 
@@ -97,11 +106,29 @@ def run_autoresearch_pipeline(
     backend_kind: Literal["simulator", "fuzzball", "fuzzball_mcp", "local_torch"] = "simulator",
     source_data_dir: Path | None = None,
     run_id: str | None = None,
+    event_hook: Callable[[dict[str, Any]], None] | None = None,
+    sim_step_delay_s: float = 0.0,
 ) -> AutoresearchPipelineResult:
     resolved_run_id = run_id or f"{exp.experiment_id}-run"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    def _emit(payload: dict[str, Any]) -> None:
+        if event_hook is not None:
+            event_hook(payload)
+
+    _emit(
+        {
+            "type": "run_started",
+            "run_id": resolved_run_id,
+            "experiment_id": exp.experiment_id,
+            "backend": backend_kind,
+            "definition_id": cluster.definition_id,
+            "cluster": cluster.model_dump(),
+        }
+    )
+
     # 1. Data Ingestion & Whole-File Sealed Split (local/VAST only)
+    _emit({"type": "stage_started", "stage": "ingest", "label": "Ingesting LAMMPS C++ & sealing held-out split"})
     if source_data_dir is None:
         vast_candidate = Path(cluster.vast.datasets_dir) / exp.dataset.raw_subpath
         source_data_dir = (
@@ -135,9 +162,18 @@ def run_autoresearch_pipeline(
         run_id=resolved_run_id,
         output_dir=output_dir,
         processed_data_dir=processed_dir,
+        event_hook=event_hook,
+        sim_step_delay_s=sim_step_delay_s,
     )
 
     # 4. Stage A: Parallel LoRA Recipe Search with Successive Halving
+    _emit(
+        {
+            "type": "stage_started",
+            "stage": "stage_a_recipe",
+            "label": f"Stage A: Parallel LoRA Recipe Search on {cluster.definition_id}",
+        }
+    )
     baseline_perf = exp.stage_b_training_perf.candidates[0]
     stage_a = run_stage_a_recipe_search(
         cfg=exp.stage_a_recipe,
@@ -178,8 +214,22 @@ def run_autoresearch_pipeline(
         ),
         selected_label=stage_a.winning_label,
     )
+    _emit(
+        {
+            "type": "firewall_audit",
+            "record": firewall.records[-1].model_dump(),
+            "explanation": exp_a.model_dump(),
+        }
+    )
 
     # 5. Stage B: Training Performance Search (Batching, Checkpointing, 1v2 Node, sm_121 Kernels)
+    _emit(
+        {
+            "type": "stage_started",
+            "stage": "stage_b_training_perf",
+            "label": "Stage B: Training Perf & sm_121 Kernels (Loss-Curve Equivalence Gate)",
+        }
+    )
     stage_b = run_stage_b_training_perf_search(
         cfg=exp.stage_b_training_perf,
         winning_recipe=stage_a.winning_recipe,
@@ -225,8 +275,22 @@ def run_autoresearch_pipeline(
         ),
         selected_label=stage_b.winning_candidate.label,
     )
+    _emit(
+        {
+            "type": "firewall_audit",
+            "record": firewall.records[-1].model_dump(),
+            "explanation": exp_b.model_dump(),
+        }
+    )
 
     # 6. Stage C: vLLM Inference Performance Search (BF16/FP8/NVFP4, Replicas vs TP, Batching)
+    _emit(
+        {
+            "type": "stage_started",
+            "stage": "stage_c_inference_perf",
+            "label": "Stage C: vLLM Precision & Topology Sweep (Quality-Floor Gate)",
+        }
+    )
     stage_c = run_stage_c_inference_perf_search(
         cfg=exp.stage_c_inference_perf,
         baseline_finetuned_loss=stage_a.winning_summary.held_out_eval_loss,
@@ -266,10 +330,18 @@ def run_autoresearch_pipeline(
         ),
         selected_label=stage_c.winning_candidate_label,
     )
+    _emit(
+        {
+            "type": "firewall_audit",
+            "record": firewall.records[-1].model_dump(),
+            "explanation": exp_c.model_dump(),
+        }
+    )
 
     explanations = [exp_a, exp_b, exp_c]
 
     # 7. Stage D: Emit Turnkey Fuzzball Workflow + Measured Report
+    _emit({"type": "stage_started", "stage": "stage_d_emit", "label": "Stage D: Emitting Turnkey Team 20 Fuzzfile"})
     win_serve_cand = next(
         c for c in exp.stage_c_inference_perf.candidates if c.label == stage_c.winning_candidate_label
     )
@@ -296,7 +368,7 @@ def run_autoresearch_pipeline(
         metrics_summary=metrics_header,
         production_steps=exp.stage_a_recipe.rung_steps[-1],
     )
-    validate_fuzzfile(turnkey_yaml)
+    validate_fuzzfile(turnkey_yaml, cluster=cluster)
 
     workflow_path = output_dir / "final-crucible-workflow.yaml"
     workflow_path.write_text(turnkey_yaml, encoding="utf-8")
@@ -354,6 +426,15 @@ def run_autoresearch_pipeline(
     }
     summary_json_path = output_dir / "run_summary.json"
     summary_json_path.write_text(json.dumps(full_summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    _emit(
+        {
+            "type": "run_completed",
+            "run_id": resolved_run_id,
+            "output_dir": str(output_dir),
+            "turnkey_fuzzfile": turnkey_yaml,
+        }
+    )
 
     return AutoresearchPipelineResult(
         run_id=resolved_run_id,

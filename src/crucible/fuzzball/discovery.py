@@ -79,6 +79,13 @@ def inspect_fetch_workflow(
         cfg_data["fuzzfile_version"] = ver
         report.applied_overrides["fuzzfile_version"] = ver
 
+    annotations = doc.get("annotations")
+    if isinstance(annotations, dict):
+        def_id = _clean_ident(annotations.get("fuzzball.io/provisioner_definition_id"))
+        if def_id:
+            cfg_data["definition_id"] = def_id
+            report.applied_overrides["definition_id"] = def_id
+
     volumes = doc.get("volumes")
     if isinstance(volumes, dict) and volumes:
         vol_key, vol_spec = next(iter(volumes.items()))
@@ -247,6 +254,11 @@ def apply_mcp_discovery_payload(
         cfg_data["cluster_name"] = cluster_name
         report.applied_overrides["cluster_name"] = cluster_name
 
+    def_id = _clean_ident(payload.get("definition_id") or payload.get("definitionId"))
+    if def_id:
+        cfg_data["definition_id"] = def_id
+        report.applied_overrides["definition_id"] = def_id
+
     fz_ver = payload.get("fuzzfile_version")
     if fz_ver in {"v4", "v1"}:
         cfg_data["fuzzfile_version"] = fz_ver
@@ -292,23 +304,88 @@ def apply_mcp_discovery_payload(
     if isinstance(nodes_list, list) and nodes_list:
         valid_nodes = [n for n in nodes_list if isinstance(n, dict)]
         if valid_nodes:
-            report.discovered_node_queues = [
-                {
-                    "name": _clean_ident(n.get("name")) or f"node-{idx}",
-                    "gpu_model": str(n.get("gpu_model", "NVIDIA GB10"))[:64],
-                    "gpus": int(n.get("gpus", 1)),
+            inventory: list[dict[str, Any]] = []
+            discovered_queues: list[dict[str, Any]] = []
+            detected_def_id: str | None = None
+            detected_arch_dev: str | None = None
+
+            for idx, n in enumerate(valid_nodes):
+                # Support both Fuzzball 4.2 nested `{"node": {...}, "resource": {...}}` and flat dicts
+                node_meta = n.get("node") if isinstance(n.get("node"), dict) else {}
+                res_meta = n.get("resource") if isinstance(n.get("resource"), dict) else {}
+                total_res = res_meta.get("total") if isinstance(res_meta.get("total"), dict) else res_meta
+                ann = res_meta.get("annotations") if isinstance(res_meta.get("annotations"), dict) else {}
+
+                if detected_def_id is None:
+                    cand_def = _clean_ident(ann.get("fuzzball.io/provisioner_definition_id"))
+                    if cand_def:
+                        detected_def_id = cand_def
+
+                raw_id = _clean_ident(node_meta.get("id") or n.get("node_id") or n.get("id") or n.get("name"))
+                hostname = _clean_ident(node_meta.get("hostname") or n.get("hostname") or n.get("name")) or (
+                    raw_id or f"node-{idx}"
+                )
+                node_id = raw_id or hostname
+                address = node_id.split("/")[0] if "/" in node_id else str(n.get("address", hostname))[:64]
+
+                raw_status = node_meta.get("status", n.get("status", "READY"))
+                status_str = "READY" if raw_status in (2, "2", "READY", "Ready", "ready") else str(raw_status)
+
+                devices = total_res.get("devices") if isinstance(total_res.get("devices"), dict) else {}
+                gpus = int(devices.get("nvidia.com/gpu", n.get("gpus", 1)) or 0)
+                for dev_key in ("cpu/arm64/sve", "cpu/arm64", "cpu/x86_64", "cpu/x86"):
+                    if dev_key in devices and detected_arch_dev is None:
+                        detected_arch_dev = dev_key
+
+                cpu_block = total_res.get("cpu") if isinstance(total_res.get("cpu"), dict) else {}
+                phys_cores = int(cpu_block.get("cores") or n.get("cores") or 20)
+                mem_block = total_res.get("mem") if isinstance(total_res.get("mem"), dict) else {}
+                if isinstance(mem_block.get("bytes"), (int, float)) and mem_block["bytes"] > 0:
+                    phys_mem_gib = round(float(mem_block["bytes"]) / float(1024**3), 1)
+                else:
+                    phys_mem_gib = float(n.get("memory_gib") or n.get("memory_gb") or 127.9)
+
+                gpu_prod = str(n.get("gpu_product") or n.get("gpu_model") or "NVIDIA-GB10")[:64]
+                inv_entry = {
+                    "hostname": hostname,
+                    "node_id": node_id,
+                    "address": address,
+                    "status": status_str,
+                    "gpu_product": gpu_prod,
+                    "gpus": max(gpus, 1) if "gpu" in gpu_prod.lower() or "gb10" in gpu_prod.lower() else gpus,
+                    "cores": max(1, min(phys_cores, 256)),
+                    "memory_gib": max(8.0, min(phys_mem_gib, 4096.0)),
                 }
-                for idx, n in enumerate(valid_nodes)
-            ]
-            cfg_data["nodes"]["count"] = len(valid_nodes)
-            report.applied_overrides["nodes.count"] = len(valid_nodes)
-            first = valid_nodes[0]
-            if isinstance(first.get("cores"), int) and 1 <= first["cores"] <= 256:
-                cfg_data["nodes"]["cpu_cores_per_node"] = first["cores"]
-                report.applied_overrides["nodes.cpu_cores_per_node"] = first["cores"]
-            if isinstance(first.get("memory_gb"), int) and 8 <= first["memory_gb"] <= 4096:
-                cfg_data["nodes"]["memory_gb_per_node"] = first["memory_gb"]
-                report.applied_overrides["nodes.memory_gb_per_node"] = first["memory_gb"]
+                inventory.append(inv_entry)
+                discovered_queues.append(inv_entry)
+
+            # Filter to target definition_id when multiple node pools exist on the cluster
+            target_def = cfg_data.get("definition_id")
+            if detected_def_id and (not target_def or detected_def_id == target_def):
+                cfg_data["definition_id"] = detected_def_id
+                report.applied_overrides["definition_id"] = detected_def_id
+
+            report.discovered_node_queues = discovered_queues
+            cfg_data["nodes"]["inventory"] = inventory
+            cfg_data["nodes"]["count"] = len(inventory)
+            report.applied_overrides["nodes.count"] = len(inventory)
+
+            first_inv = inventory[0]
+            phys_c = int(first_inv["cores"])
+            phys_m = float(first_inv["memory_gib"])
+            cfg_data["nodes"]["physical_cores_per_node"] = phys_c
+            cfg_data["nodes"]["physical_memory_gib_per_node"] = phys_m
+            # Leave safe Substrate/OS & helper co-scheduling headroom (e.g. 16 of 20 cores, 112 of 127.9 GiB)
+            safe_c = max(1, phys_c - 4) if phys_c >= 8 else phys_c
+            safe_m = max(8, int(phys_m * 0.88))
+            cfg_data["nodes"]["cpu_cores_per_node"] = min(cfg_data["nodes"]["cpu_cores_per_node"], phys_c) or safe_c
+            if cfg_data["nodes"]["cpu_cores_per_node"] > safe_c:
+                cfg_data["nodes"]["cpu_cores_per_node"] = safe_c
+            if float(cfg_data["nodes"]["memory_gb_per_node"]) > phys_m - 4.0:
+                cfg_data["nodes"]["memory_gb_per_node"] = safe_m
+            if detected_arch_dev:
+                cfg_data["nodes"]["arch_device"] = detected_arch_dev
+                report.applied_overrides["nodes.arch_device"] = detected_arch_dev
 
     for wf in payload.get("workflows") or []:
         if isinstance(wf, dict):
@@ -405,28 +482,23 @@ def probe_fuzzball_mcp_stdio(
                     if isinstance(nodes_raw, dict)
                     else (nodes_raw if isinstance(nodes_raw, list) else [])
                 )
-                normalized_nodes: list[dict[str, Any]] = []
-                for idx, n in enumerate(raw_list):
-                    if not isinstance(n, dict):
-                        continue
-                    res = n.get("resource") if isinstance(n.get("resource"), dict) else {}
-                    devices = res.get("devices") if isinstance(res.get("devices"), dict) else {}
-                    gpus = int(devices.get("nvidia.com/gpu", n.get("gpus", 1)) or 1)
-                    cores = int(
-                        (res.get("cpu") or {}).get("cores", n.get("cores", 0))
-                        if isinstance(res.get("cpu"), dict)
-                        else n.get("cores", 0)
-                    )
-                    normalized_nodes.append(
-                        {
-                            "name": n.get("id") or n.get("name") or f"node-{idx}",
-                            "gpu_model": n.get("gpu_model", "NVIDIA GB10"),
-                            "gpus": gpus,
-                            **({"cores": cores} if cores > 0 else {}),
-                        }
-                    )
-                if normalized_nodes:
-                    payload["nodes"] = normalized_nodes
+                valid_raw = [n for n in raw_list if isinstance(n, dict)]
+                target_def = cfg_data.get("definition_id")
+                if target_def:
+                    matched_def = [
+                        n
+                        for n in valid_raw
+                        if (
+                            isinstance(n.get("resource"), dict)
+                            and isinstance(n["resource"].get("annotations"), dict)
+                            and n["resource"]["annotations"].get("fuzzball.io/provisioner_definition_id")
+                            == target_def
+                        )
+                    ]
+                    if matched_def:
+                        valid_raw = matched_def
+                if valid_raw:
+                    payload["nodes"] = valid_raw
 
             if "workflow_list" in mcp.advertised_tools:
                 wfs_raw = mcp.workflow_list()
