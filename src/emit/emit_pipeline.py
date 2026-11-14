@@ -27,6 +27,8 @@ def main():
     ap.add_argument("--train-tokens", type=int, default=8_000_000)
     ap.add_argument("--out", default="workflows/pipeline.yaml")
     a = ap.parse_args()
+    if "validate" in a.out:  # short end-to-end check: small budget, fast eval set
+        a.train_tokens = min(a.train_tokens, 500_000)
     sha = subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     prefix = f"fuzzball://group/code/{sha}"
     if a.upload:
@@ -42,12 +44,13 @@ def main():
         "targets": r.get("targets", ["q_proj", "k_proj", "v_proj", "o_proj"]),
         "seq_len": r.get("seq_len", 4096), "micro_batch": r.get("micro_batch", 1), "grad_accum": r.get("grad_accum", 8),
         "warmup_tokens": 250_000, "schedule": "cosine", "train_tokens": a.train_tokens,
-        "eval_every_tokens": 2_000_000, "eval_set": "eval.bin", "save_adapter": True,
+        "eval_every_tokens": 2_000_000, "eval_set": "eval_small.bin" if "validate" in a.out else "eval.bin",
+        "save_adapter": True,
     }
     serve_cfg = [{"name": "final", "args": [*s.get("args", []), "--enable-lora", "--max-lora-rank",
                                             str(max(16, train_cfg["lora_r"])),
-                                            "--lora-modules", "m=/runs/pipeline/train/adapter"],
-                  "served_model": "m"}]
+                                            "--lora-modules", "ft=/runs/pipeline/train/adapter"],
+                  "served_model": "ft"}]  # requests to "ft" use the fine-tuned adapter
     # Phase B: use 2-node data parallel only if it measured >= 1.6x the single-node tokens/s.
     def med_tok_s(name):
         p = os.path.join(REPO, "results", "trials", f"{name}.jsonl")
