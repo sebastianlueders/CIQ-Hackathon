@@ -17,11 +17,12 @@ FB = os.path.join(REPO, "fuzzball")
 RESULTS = os.path.join(REPO, "results", "trials")
 TERMINAL = {"Finished", "Errored", "Canceled", "Failed"}
 
-# Execution environment for training trials (VERIFY: chosen by the stage-0 probe).
+# Execution environment for training trials: NGC PyTorch (Triton works; the slim image lacks a C
+# compiler) + venv on the envs volume with transformers/peft. Chosen from the stage-0 probes.
 ENV = {
-    "image": os.environ.get("TRIAL_IMAGE", "docker://python:3.12"),
-    "python": os.environ.get("TRIAL_PYTHON", "/envs/train-cu130/bin/python"),
-    "cores": 16, "memory": "100GiB",
+    "image": os.environ.get("TRIAL_IMAGE", "docker://nvcr.io/nvidia/pytorch:26.10-py3"),
+    "python": os.environ.get("TRIAL_PYTHON", "/envs/train-pt2610/bin/python"),
+    "cores": 16, "memory": os.environ.get("TRIAL_MEMORY", "112GiB"),
 }
 
 

@@ -62,6 +62,26 @@ def lr_at(cfg, tokens_seen):
     return cfg["lr"]  # constant after warmup: lets successive-halving rungs resume cleanly
 
 
+def start_mem_monitor(fh, every=20):
+    """Background thread: log process RSS, cgroup usage and CUDA memory (load-time OOM diagnosis)."""
+    import threading
+    def cg():
+        for f in ("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+            try: return round(int(open(f).read()) / 2**30, 1)
+            except Exception: pass
+    def rss():
+        for l in open("/proc/self/status"):
+            if l.startswith("VmRSS"): return round(int(l.split()[1]) / 2**20, 1)
+    def loop():
+        while True:
+            free, total = torch.cuda.mem_get_info()
+            log(fh, kind="mem", rss_gib=rss(), cgroup_gib=cg(),
+                cuda_alloc_gib=round(torch.cuda.memory_allocated() / 2**30, 1),
+                device_used_gib=round((total - free) / 2**30, 1))
+            time.sleep(every)
+    threading.Thread(target=loop, daemon=True).start()
+
+
 class RouterStats:
     """Counts top-k expert selections per MoE layer (router-collapse monitor)."""
     def __init__(self, model):
@@ -92,6 +112,7 @@ def main():
     log(fh, kind="config", **cfg)
     torch.manual_seed(cfg["seed"]); rng = np.random.default_rng(cfg["seed"])
 
+    start_mem_monitor(fh)
     from transformers import AutoModelForCausalLM
     from peft import LoraConfig, get_peft_model, PeftModel
     t0 = time.time()
