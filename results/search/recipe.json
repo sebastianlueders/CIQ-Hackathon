@@ -1,0 +1,60 @@
+{
+ "config": "c1-lr1e-3-r8",
+ "seq_len": 4096,
+ "micro_batch": 1,
+ "grad_accum": 8,
+ "warmup_tokens": 65536,
+ "schedule": "constant",
+ "eval_every_tokens": 250000,
+ "save_adapter": true,
+ "resume": true,
+ "lr": 0.001,
+ "lora_r": 8,
+ "targets": [
+  "q_proj",
+  "k_proj",
+  "v_proj",
+  "o_proj"
+ ],
+ "lora_alpha": 16,
+ "eval_loss": 1.03734,
+ "adapter": "/runs/trials/s3-recipe-c1-lr1e-3-r8/adapter",
+ "all_scores": {
+  "c1-lr1e-3-r8": {
+   "rung": 1,
+   "tokens": 750000,
+   "eval_loss": 1.03734,
+   "lr": 0.001,
+   "lora_r": 8,
+   "targets": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj"
+   ],
+   "lora_alpha": 16
+  },
+  "c3-lr2e-4-r64": {
+   "rung": 1,
+   "tokens": 750000,
+   "eval_loss": 1.03937,
+   "lr": 0.0002,
+   "lora_r": 64,
+   "targets": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj"
+   ],
+   "lora_alpha": 128
+  },
+  "c2-lr5e-4-r64": {
+   "rung": 0,
+   "eval_loss": 1.0813
+  },
+  "c0-lr1e-4-r16": {
+   "rung": 0,
+   "eval_loss": 1.12069
+  }
+ }
+}
