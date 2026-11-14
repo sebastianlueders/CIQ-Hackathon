@@ -42,18 +42,6 @@
   "kind": "serve"
  },
  {
-  "id": "s6-pipeline-full-train",
-  "workflow": "73f9c275-5122-4938-8b0d-c54df38f5db2",
-  "job": "train",
-  "kind": "pipeline"
- },
- {
-  "id": "s6-pipeline-full-serve",
-  "workflow": "73f9c275-5122-4938-8b0d-c54df38f5db2",
-  "job": "serve-and-verify",
-  "kind": "pipeline"
- },
- {
   "id": "s6-pipeline-validate-2-train",
   "workflow": "7f86c8ff-ba3b-4ded-8e1c-f7466bac38cc",
   "job": "train",
@@ -82,18 +70,6 @@
   "workflow": "652b8c11-3857-4b9a-ba19-b795b32c8fd6",
   "job": "trial",
   "kind": "trial"
- },
- {
-  "id": "s4-train-dp2-winner",
-  "workflow": "8e3c8935-25f2-4121-9537-9ecc34c94e8b",
-  "job": "trial",
-  "kind": "trial"
- },
- {
-  "id": "s5-tune-moe-gb10-2",
-  "workflow": "e501d609-f41a-4a0c-a7d7-180624fd35b6",
-  "job": "run",
-  "kind": "serve"
  },
  {
   "id": "s4-perf-dp2-stack-nockpt",
@@ -130,5 +106,29 @@
   "workflow": "2d936225-4938-463b-91b7-a51275dc0593",
   "job": "trial",
   "kind": "trial"
+ },
+ {
+  "id": "s4-train-dp2-winner-2",
+  "workflow": "011bd0ce-00a7-408f-aefe-8ce5d1f3ad42",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s6-pipeline-4m-train",
+  "workflow": "c849caec-afcb-48e8-ad1f-1b43e7c79e68",
+  "job": "train",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s6-pipeline-4m-serve",
+  "workflow": "c849caec-afcb-48e8-ad1f-1b43e7c79e68",
+  "job": "serve-and-verify",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s5-tune-moe-gb10-3",
+  "workflow": "4fdd9f40-01af-4f46-9db0-a0dfb728d3ea",
+  "job": "run",
+  "kind": "serve"
  }
 ]

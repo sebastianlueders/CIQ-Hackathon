@@ -1,5 +1,7 @@
 # Morning checklist (overnight queue submitted Sat ~4:20 PM)
 
+**GPU nodes are off 7 PM – 9 AM.** Before 7 PM, the short high-priority jobs run. The long ones (`s6-pipeline-4m`, `s4-train-dp2-winner-2`, `s5-tune-moe-gb10-3`) have `policy.retry: {attempts: 2}`, so if they are killed by the shutdown they should restart when the nodes come back (unverified: check their status at 9 AM). Jobs without retry that were running at 7 PM will show as Errored: resubmit with `TRIAL_RETRY=1 python3 src/runner/runner.py configs/<trial>.json --submit-only results/overnight/manifest.json`.
+
 All overnight jobs are listed in `results/overnight/manifest.json` (Fuzzball workflow IDs). In the morning:
 
 ```bash
@@ -12,15 +14,15 @@ bash docs/build/build-pdfs.sh                                           # one-pa
 | Overnight job | What to look at |
 |---|---|
 | `s4-perf-dp2-ip-2`, `s4-perf-dp2-c10d-2` | **2-node DP throughput** (tok_s is cluster-wide; compare to 1011 single-node with compile). `DIAG` lines and `== worker log` show both ranks. `allreduce_s` = gradient sync time per step. (`s4-perf-dp2-ip` / `-c10d` without `-2` were the broken launcher: ignore.) |
-| `s4-train-dp2-winner` | **Winning recipe trained on 2 nodes** (4M tokens, cosine schedule, evals every 1M): the "second node unlocked" result. |
+| `s4-train-dp2-winner-2` | **Winning recipe trained on 2 nodes** (4M tokens, cosine schedule, evals every 1M): the "second node unlocked" result. |
 | **`s4-perf-dp2-stack-nockpt-mb1`** | **Likely best config**: 2 nodes, compile + fused CE + checkpointing off, micro-batch 1. 1-node checkpointing off measured 1366 tok/s (+35%, 85.8 GiB peak), so expect ~2700 tok/s on 2 nodes. |
 | `s4-perf-dp2-stack-nockpt` / `s4-perf-dp2-stack` / `s4-perf-compile-stack` | **Stacked** best config: compile + fused CE + micro-batch 2 (+ checkpointing off, 110 GiB) on 2 nodes, plus the same stack on 1 node. Expect the nockpt one to OOM if activations exceed memory; the `-stack` one is the fallback. Judge batch changes by held-out eval, not per-step loss. |
 | `s4-perf-dp2-stack-seq8192-mb1` / `-mb2` | Stack + seq 8192 on 2 nodes: mb1 keeps 8192 tokens per micro-batch (same memory as mb2 at seq 4096); mb2 doubles it (110 GiB, may OOM). Same 65,536 tokens per optimizer step across the cluster. |
 | `s4-perf-compile-{fused-ce,mb2,nockpt,seq8192}` | What stacks on top of compile (1011 tok/s). Run `policy.py` after adding them to `CANDIDATES`. |
 | `s5-serve-ft-adapter` | Fine-tuned model served: FP8 vs BF16 + LoRA at C=1/16/64, held-out loss. |
-| `s5-tune-moe-gb10` | vLLM fused-MoE tile tuning for GB10 (`/runs/serve/moe-configs/`), then FP8 serving re-measured with tuned tiles (compare to 203 tok/s at C=16). |
-| `s6-pipeline-full` | **`workflows/pipeline.yaml` end to end**: 8M tokens (winning recipe + grouped_mm + compile), then FP8 + LoRA serving. |
-| `s6-pipeline-validate-2` | Short end-to-end check (500k tokens). Note: it shares `/runs/pipeline/train` with `s6-pipeline-full`; trust the full run's adapter. |
+| `s5-tune-moe-gb10-3` | vLLM fused-MoE tile tuning for GB10 (`/runs/serve/moe-configs/`), then FP8 serving re-measured with tuned tiles (compare to 203 tok/s at C=16). |
+| `s6-pipeline-4m` | **`pipeline.yaml` end to end at 4M tokens** (`workflows/dev/pipeline-run-4m.yaml`; committed `pipeline.yaml` keeps 8M): winning recipe + grouped_mm + compile, then FP8 + LoRA serving. Cut from 8M so it can finish before 7 PM. |
+| `s6-pipeline-validate-2` | Done: 500k-token end-to-end check (loss 1.175 → 1.057; FP8 + LoRA 190 tok/s at C=16). Shares `/runs/pipeline/train` with `s6-pipeline-4m`; trust the 4M run's adapter. |
 
 **2-node root cause (fixed):** with `implementation: generic`, Fuzzball runs the job script on the head node only; workers must be started with `"$MULTINODE_SSH_WRAPPER" "$host" "<one shell string>"` (see `/multinode/generic-helper` inside any multinode job). Multinode containers do see RDMA devices (`/dev/infiniband/uverbs0-3`), so NCCL over RoCE is worth testing (`c10d` variant leaves IB enabled).
 

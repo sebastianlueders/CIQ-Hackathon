@@ -62,7 +62,9 @@ def render(t: Trial) -> dict:
                           "/opt/fused_ce.py": "file://fused_ce.py"},
                 "mounts": {"/models": {"volume": "models"}, "/data": {"volume": "data"},
                            "/runs": {"volume": "runs"}, "/envs": {"volume": "envs"}},
-                "policy": {"timeout": {"execute": t.timeout}},
+                "policy": {"timeout": {"execute": t.timeout},
+                           # GPU nodes power down 7 PM-9 AM: re-run a job whose node disappears.
+                           **({"retry": {"attempts": 2}} if os.environ.get("TRIAL_RETRY") else {})},
                 "resource": {"cpu": {"cores": ENV["cores"]}, "memory": {"size": ENV["memory"]},
                              "devices": {"nvidia.com/gpu": 1}},
                 "script": launch_script(t),
