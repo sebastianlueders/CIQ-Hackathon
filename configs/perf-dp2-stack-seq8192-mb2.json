@@ -1,0 +1,17 @@
+{
+ "id": "s4-perf-dp2-stack-seq8192-mb2",
+ "nodes": 2,
+ "config": {
+  "experts_impl": "grouped_mm",
+  "compile": true,
+  "fused_ce": true,
+  "seq_len": 8192,
+  "dp_launch": "ip",
+  "train_tokens": 655360,
+  "warmup_tokens": 65536,
+  "skip_eval": true,
+  "save_adapter": false,
+  "micro_batch": 2,
+  "grad_accum": 2
+ }
+}
