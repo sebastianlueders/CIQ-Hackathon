@@ -1,35 +1,6 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-
-# Packaging / virtual environments
-build/
-dist/
-*.egg-info/
-.eggs/
-.venv/
-venv/
-ENV/
-
-# Pytest / coverage / mypy / ruff
-.pytest_cache/
-.coverage
-htmlcov/
-.mypy_cache/
-.ruff_cache/
-
-# Crucible runtime outputs (kept on VAST or local scratch, out of git)
-runs/
-state/
-artifacts/
-*.safetensors
-*.pt
-*.pth
-*.gguf
-*.bin
-
-# OS / editor
+.env
+fuzzball
 .DS_Store
-Thumbs.db
+__pycache__/
+*.pyc
+docs/
