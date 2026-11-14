@@ -17,8 +17,8 @@ SPACE = {  # initial space; the LLM layer may narrow or extend it between rounds
     "lora_r": [8, 16, 64],
     "targets": [["q_proj", "k_proj", "v_proj", "o_proj"]],
 }
-FIXED = {"seq_len": 4096, "micro_batch": 1, "grad_accum": 8, "warmup_tokens": 250_000,
-         "schedule": "constant", "eval_every_tokens": 500_000, "save_adapter": True, "resume": True}
+FIXED = {"seq_len": 4096, "micro_batch": 1, "grad_accum": 8, "warmup_tokens": 65_536,
+         "schedule": "constant", "eval_every_tokens": 250_000, "save_adapter": True, "resume": True}
 
 
 def sample(n, seed=0):
