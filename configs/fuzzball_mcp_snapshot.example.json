@@ -1,12 +1,12 @@
 {
-  "cluster_name": "ciq-gb10-team20",
-  "definition_id": "team20",
+  "cluster_name": "ciq-gb10-team3",
+  "definition_id": "team3",
   "fuzzfile_version": "v4",
-  "provisioners": ["team20"],
+  "provisioners": ["team3"],
   "volumes": [
     {
-      "name": "crucible-vast",
-      "provisioner": "team20",
+      "name": "runs",
+      "provisioner": "team3",
       "mount_path": "/vast",
       "selected": true
     }
@@ -19,8 +19,8 @@
   "nodes": [
     {
       "node": {
-        "id": "192.168.99.48/7331",
-        "hostname": "CIQ-CHI-SPARK39",
+        "id": "gb10-01",
+        "hostname": "gb10-node-01",
         "status": 2
       },
       "resource": {
@@ -35,8 +35,8 @@
     },
     {
       "node": {
-        "id": "192.168.99.49/7331",
-        "hostname": "CIQ-CHI-SPARK40",
+        "id": "gb10-02",
+        "hostname": "gb10-node-02",
         "status": 2
       },
       "resource": {
@@ -52,7 +52,7 @@
   ],
   "workflows": [
     {
-      "id": "8c1f402a-91d4-4c3b-b82e-52f9a10e2d11",
+      "id": "eba24c59-ab6b-42b5-83f8-4c2900266070",
       "name": "crucible-00-fetch",
       "status": "finished"
     }

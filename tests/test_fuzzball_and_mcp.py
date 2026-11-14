@@ -30,6 +30,10 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
 
         TOOLS = [
             {
+                "name": "context_show",
+                "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+            {
                 "name": "cluster_list",
                 "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
             },
@@ -157,10 +161,12 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                     sys.stdout.flush()
                     continue
 
-                if tname == "cluster_list":
-                    payload = {"clusters": [{"name": "ciq-gb10-team20"}]}
+                if tname == "context_show":
+                    payload = {"user": "team3@fb-hack.local", "group": "team3@fb-hack.local"}
+                elif tname == "cluster_list":
+                    payload = {"clusters": [{"name": "ciq-gb10-team3"}]}
                 elif tname == "volume_list":
-                    payload = {"volumes": [{"name": "vast-live-vol", "provisioner": "vast-nvme", "mount_path": "/vast"}]}
+                    payload = {"volumes": [{"name": "runs", "provisioner": "team3", "mount_path": "/vast"}]}
                 elif tname == "node_list":
                     payload = {
                         "nodes": [
@@ -172,7 +178,7 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                                         "mem": {"bytes": 137331589120},
                                         "devices": {"nvidia.com/gpu": 1, "cpu/arm64/sve": 1},
                                     },
-                                    "annotations": {"fuzzball.io/provisioner_definition_id": "team20"},
+                                    "annotations": {},
                                 },
                             },
                             {
@@ -183,7 +189,7 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                                         "mem": {"bytes": 137331589120},
                                         "devices": {"nvidia.com/gpu": 1, "cpu/arm64/sve": 1},
                                     },
-                                    "annotations": {"fuzzball.io/provisioner_definition_id": "team20"},
+                                    "annotations": {},
                                 },
                             },
                         ]
@@ -313,10 +319,10 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
     return script_path
 
 
-def test_team20_fuzzfile_pinning_devices_and_egress_isolation() -> None:
+def test_team3_fuzzfile_pinning_devices_and_egress_isolation() -> None:
     cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
-    assert cluster.definition_id == "team20"
-    assert [n.hostname for n in cluster.nodes.inventory] == ["CIQ-CHI-SPARK39", "CIQ-CHI-SPARK40"]
+    assert cluster.definition_id == "team3"
+    assert cluster.vast.provisioner == "team3"
 
     exp = ExperimentConfig.load(repo_root() / "configs" / "demo_lammps_30b.yaml")
     yml = render_training_trial_fuzzfile(
@@ -332,12 +338,12 @@ def test_team20_fuzzfile_pinning_devices_and_egress_isolation() -> None:
     assert stages == ["train-t01"]
     parsed = yaml.safe_load(yml)
     assert "annotations" not in parsed
-    assert parsed["volumes"]["vast"] == {"name": "crucible-vast", "use": "team20"}
+    assert parsed["volumes"]["vast"] == {"name": "runs", "use": "team3"}
     assert parsed["jobs"]["train-t01"]["mounts"] == {"/vast": {"volume": "vast"}}
     res = parsed["jobs"]["train-t01"]["resource"]
     assert res == {
-        "cpu": {"cores": 16},
-        "memory": {"size": "112GiB"},
+        "cpu": {"cores": 8},
+        "memory": {"size": "104GiB"},
         "devices": {"nvidia.com/gpu": 1},
     }
 
@@ -455,15 +461,21 @@ def test_native_fuzzball_mcp_stdio_team20_discovery_and_live_events(tmp_path: Pa
         assert "workflow_validate" in client.advertised_tools
         assert "object_get" in client.advertised_tools
 
-    discovered_cfg, report = discover_cluster_config(mcp_command=mcp_cmd)
+    # Start from a mismatched `team20` config and verify `context_show` (`team3@fb-hack.local`) auto-switches to `team3`!
+    wrong_base = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+    wrong_base.definition_id = "team20"
+    wrong_base.vast.provisioner = "team20"
+
+    discovered_cfg, report = discover_cluster_config(base_config=wrong_base, mcp_command=mcp_cmd)
     assert report.mcp_source_used == "fuzzball_mcp_stdio"
-    assert discovered_cfg.definition_id == "team20"
+    assert discovered_cfg.definition_id == "team3"
+    assert discovered_cfg.vast.provisioner == "team3"
     assert discovered_cfg.nodes.arch_device == ""
     assert [n.hostname for n in discovered_cfg.nodes.inventory] == [
         "CIQ-CHI-SPARK39",
         "CIQ-CHI-SPARK40",
     ]
-    assert discovered_cfg.vast.persistent_volume_name == "vast-live-vol"
+    assert discovered_cfg.vast.persistent_volume_name == "runs"
     assert discovered_cfg.nodes.count == 2
 
     events: list[dict] = []

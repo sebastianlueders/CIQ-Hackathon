@@ -3,202 +3,194 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CRUCIBLE // TEAM20 SOVEREIGN AUTORESEARCH TERMINAL</title>
+  <title>CRUCIBLE — Local Autoresearch</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <div class="scanlines" aria-hidden="true"></div>
-
-  <header class="cmd-header">
-    <div class="cmd-brand">
-      <pre class="ascii-sig" aria-hidden="true">┌─┐
-│C│
-└─┘</pre>
-      <div>
-        <div class="cmd-title-row">
-          <h1>CRUCIBLE<span class="dim">//</span>SOVEREIGN_AUTORESEARCH</h1>
-          <span class="reg-tag reg-green">ENCLAVE::SEALED</span>
-        </div>
-        <p class="cmd-sub">AIR-GAPPED DATA BOUNDARY ON VAST &middot; BARE-METAL <code>sm_121</code> KERNEL FORGE &middot; CIQ FUZZBALL ORCHESTRATOR</p>
-      </div>
+  <!-- ZONE 1: TOP COMMAND BAR -->
+  <header class="topbar">
+    <div class="brand-group">
+      <span class="brand-mark">CRUCIBLE</span>
+      <span class="status-tag" id="live-run-state">IDLE</span>
+      <span class="status-tag tag-seal" id="pill-privacy">ZERO-EGRESS · 0 B LEAKED</span>
     </div>
 
-    <div class="reg-strip">
-      <span class="reg-cell"><span class="led led-on"></span>DEF_ID::<strong id="pill-def-id">team20</strong></span>
-      <span class="reg-cell">HW::<strong>2&times;NVIDIA-GB10</strong> [sm_121 / arm64_sve]</span>
-      <span class="reg-cell">SPEC::<strong id="pill-fz-ver">v4</strong> &middot; VOL::<strong>/vast</strong></span>
-      <span class="reg-cell reg-cell-guard" id="pill-privacy"><span class="led led-on"></span>FIREWALL::<strong>0x00_BYTES_LEAKED</strong></span>
-    </div>
+    <div class="controls-group">
+      <label class="field">
+        <span>TEAM</span>
+        <input id="team-input" type="text" value="team3" spellcheck="false" aria-label="Fuzzball Storage Provisioner / Team" />
+      </label>
 
-    <div class="cmd-controls">
-      <label class="ctrl-wrap">
-        <span class="ctrl-prefix">TARGET&gt;</span>
-        <select id="profile-select" aria-label="Experiment Profile">
-          <option value="demo_30b">QWEN3-CODER-30B-A3B :: LAMMPS_CPP</option>
-          <option value="stretch_80b">QWEN3-CODER-NEXT-80B :: 2N_FSDP</option>
+      <label class="field">
+        <span>MODEL</span>
+        <select id="profile-select" aria-label="Model Profile">
+          <option value="demo_30b">Qwen3-30B-A3B · LAMMPS</option>
+          <option value="stretch_80b">Qwen3-80B · 2-Node</option>
         </select>
       </label>
-      <label class="ctrl-wrap">
-        <span class="ctrl-prefix">DRIVER&gt;</span>
+
+      <label class="field">
+        <span>BACKEND</span>
         <select id="backend-select" aria-label="Execution Backend">
-          <option value="fuzzball_mcp">FUZZBALL_4.2_MCP [LIVE]</option>
-          <option value="fuzzball">FUZZBALL_CLI [LIVE]</option>
-          <option value="simulator" selected>TEAM20_GB10_CALIBRATED_SIM</option>
-          <option value="local_torch">LOCAL_TORCH_KERNELS</option>
+          <option value="fuzzball_mcp">Fuzzball MCP (Live)</option>
+          <option value="fuzzball">Fuzzball CLI (Live)</option>
+          <option value="simulator" selected>GB10 Simulator</option>
+          <option value="local_torch">Local PyTorch</option>
         </select>
       </label>
-      <button id="btn-run" class="btn-exec">[ EXEC // TEAM20 ]</button>
-      <button id="btn-probe" class="btn-ghost" title="Inject raw C++ code into outbound advisor frame to verify cryptographic schema rejection">[ PROBE // LEAK_GUARD ]</button>
+
+      <button id="btn-run" class="btn-launch">[ LAUNCH ]</button>
     </div>
   </header>
 
-  <main class="terminal-grid">
-    <!-- BARE-METAL NODE BLADES + LIVE RPC STREAM -->
-    <section class="rack-grid">
-      <div class="blade-pair" id="node-cards"></div>
+  <main class="workspace">
+    <!-- ZONE 2: MAIN TELEMETRY ROW (2 CLEAN COLUMNS) -->
+    <section class="main-grid">
+      <!-- LEFT COLUMN: 4-STAGE PIPELINE TRACKER + LOSS CURVE -->
+      <div class="col-stack">
+        <div class="box">
+          <div class="box-head">
+            <h2>PIPELINE PROGRESS</h2>
+            <span class="meta-inline" id="live-wf-meta">VAST /vast · GB10 sm_121</span>
+          </div>
 
-      <div class="frame">
-        <div class="frame-bar">
-          <span class="frame-id">0x00 // FUZZBALL_RPC_BUS &amp; OBJECT_CACHE_EGRESS</span>
-          <span class="state-flag" id="live-run-state">STATE::IDLE</span>
+          <div class="stepper" id="stage-stepper">
+            <div class="step" data-step="stage_a_recipe">
+              <span class="step-num">1</span>
+              <div>
+                <div class="step-name">Recipe</div>
+                <div class="step-sub" id="step-sub-a">ASHA LoRA</div>
+              </div>
+            </div>
+            <div class="step" data-step="stage_b_training_perf">
+              <span class="step-num">2</span>
+              <div>
+                <div class="step-name">Train Perf</div>
+                <div class="step-sub" id="step-sub-b">sm_121 Kernels</div>
+              </div>
+            </div>
+            <div class="step" data-step="stage_c_inference_perf">
+              <span class="step-num">3</span>
+              <div>
+                <div class="step-name">Serve Perf</div>
+                <div class="step-sub" id="step-sub-c">BF16 / FP8 / NVFP4</div>
+              </div>
+            </div>
+            <div class="step" data-step="stage_d_emit">
+              <span class="step-num">4</span>
+              <div>
+                <div class="step-name">Emit</div>
+                <div class="step-sub" id="step-sub-d">Turnkey Fuzzfile</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="status-line" id="live-stage-label">Ready on team3</div>
+          <div id="live-error-banner" class="error-box hidden"></div>
         </div>
-        <div class="live-Headline" id="live-stage-label">&gt; AWAITING DISPATCH ON DEFINITION_ID=team20</div>
-        <div id="live-error-banner" class="fault-box hidden"></div>
-        <div class="tty-log" id="live-event-feed"></div>
+
+        <div class="box">
+          <div class="box-head">
+            <h2>LOSS EQUIVALENCE TRACE</h2>
+            <span class="meta-inline" id="curve-badge">&Delta; &le; 0.025</span>
+          </div>
+          <div id="loss-chart-wrap" class="chart-area"></div>
+          <div class="chart-legend" id="loss-legend"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: HEADLINE SPEEDUPS + UNIFIED TRIALS TABLE -->
+      <div class="col-stack">
+        <div class="kpi-row">
+          <div class="kpi-box">
+            <div class="kpi-label">HELD-OUT PPL</div>
+            <div class="kpi-val" id="kpi-ppl">—</div>
+            <div class="kpi-sub" id="meta-stage-a">—</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">TRAIN SPEED</div>
+            <div class="kpi-val" id="kpi-train-speed">—</div>
+            <div class="kpi-sub" id="meta-stage-b">—</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">SERVE SPEED</div>
+            <div class="kpi-val" id="kpi-serve-speed">—</div>
+            <div class="kpi-sub" id="meta-stage-c">—</div>
+          </div>
+        </div>
+
+        <div class="box box-grow">
+          <div class="box-head">
+            <h2>TRIALS &amp; WINNERS</h2>
+            <span class="meta-inline" id="util-badge">—</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="trials-table">
+              <thead>
+                <tr>
+                  <th>STAGE</th>
+                  <th>CONFIGURATION</th>
+                  <th>QUALITY / GATE</th>
+                  <th>TOK/S</th>
+                  <th>STATUS</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- 4-STAGE FUNNEL REGISTERS -->
-    <section class="stage-strip" id="funnel-cards">
-      <article class="frame stage-cell">
-        <div class="frame-bar">
-          <span class="frame-id">0x01 // STAGE_A.RECIPE</span>
-          <span class="dim">ASHA_HALVING</span>
+    <!-- ZONE 3: BOTTOM TABBED DRAWER -->
+    <section class="box drawer">
+      <div class="drawer-bar">
+        <div class="tab-strip">
+          <button class="tab-btn active" data-drawer="yaml">EMITTED FUZZFILE YAML</button>
+          <button class="tab-btn" data-drawer="cluster">CLUSTER NODES &amp; VOLUMES</button>
+          <button class="tab-btn" data-drawer="audit">ZERO-EGRESS AUDIT LOG</button>
         </div>
-        <div class="kpi-readout" id="kpi-ppl">--</div>
-        <div class="kpi-unit">HELD_OUT_PPL [BASE &rarr; TUNED]</div>
-        <div class="kpi-foot" id="meta-stage-a">SCANNING...</div>
-      </article>
 
-      <article class="frame stage-cell">
-        <div class="frame-bar">
-          <span class="frame-id">0x02 // STAGE_B.TRAIN_PERF</span>
-          <span class="dim">CURVE_LOCKED</span>
+        <div class="drawer-actions" id="yaml-actions">
+          <button id="btn-yaml-mode" class="btn-small">VIEW: TURNKEY</button>
+          <button id="btn-copy-yaml" class="btn-small">[ COPY YAML ]</button>
         </div>
-        <div class="kpi-readout" id="kpi-train-speed">--</div>
-        <div class="kpi-unit">TRAIN_TOK/S &amp; SM_121_GAIN</div>
-        <div class="kpi-foot" id="meta-stage-b">SCANNING...</div>
-      </article>
-
-      <article class="frame stage-cell">
-        <div class="frame-bar">
-          <span class="frame-id">0x03 // STAGE_C.SERVE_PERF</span>
-          <span class="dim">FLOOR_GATED</span>
-        </div>
-        <div class="kpi-readout" id="kpi-serve-speed">--</div>
-        <div class="kpi-unit">VLLM_TOK/S [BF16 &rarr; NVFP4]</div>
-        <div class="kpi-foot" id="meta-stage-c">SCANNING...</div>
-      </article>
-
-      <article class="frame stage-cell stage-cell-armed">
-        <div class="frame-bar">
-          <span class="frame-id">0x04 // STAGE_D.ARTIFACT</span>
-          <span class="reg-green">DAG::VERIFIED</span>
-        </div>
-        <div class="kpi-readout" id="kpi-dag">INGEST&rarr;SERVE</div>
-        <div class="kpi-unit">SINGLE REPRODUCIBLE FUZZFILE</div>
-        <div class="kpi-foot" id="meta-stage-d">PINNED :: definitionId=team20</div>
-      </article>
-    </section>
-
-    <!-- OSCILLOSCOPE + WATERFALL -->
-    <section class="split-two">
-      <div class="frame">
-        <div class="frame-bar">
-          <div>
-            <span class="frame-id">0x05 // LOSS_EQUIVALENCE_OSCILLOSCOPE</span>
-            <div class="frame-sub">INVARIANT: ACCEPT <code>sm_121</code> KERNELS + 2-NODE DDP IFF |L_OPT(t) - L_REF(t)| &le; 0.0250</div>
-          </div>
-          <span class="reg-tag" id="curve-badge">&Delta;_MAX = --</span>
-        </div>
-        <div id="loss-chart-wrap" class="scope-screen"></div>
-        <div class="scope-legend" id="loss-legend"></div>
       </div>
 
-      <div class="frame">
-        <div class="frame-bar">
-          <div>
-            <span class="frame-id">0x06 // SM121_THROUGHPUT_WATERFALL [SPARK39 + SPARK40]</span>
-            <div class="frame-sub">PYTORCH FP32_CE &rarr; 152K_CHUNKED_CE &rarr; GROUPED_MOE + FUSED_LORA &rarr; 2-NODE NCCL</div>
-          </div>
-          <span class="reg-tag reg-green" id="util-badge">--% HW_PEAK</span>
-        </div>
-        <div id="train-bars" class="meter-stack"></div>
-      </div>
-    </section>
-
-    <!-- SERVING MATRIX + KERNEL PARITY & SHA-256 FIREWALL LEDGER -->
-    <section class="split-two">
-      <div class="frame">
-        <div class="frame-bar">
-          <div>
-            <span class="frame-id">0x07 // VLLM_QUANTIZATION_AND_TOPOLOGY_MATRIX</span>
-            <div class="frame-sub">CONSTRAINTS: PPL_REGRESSION &le; +2.50% &middot; CPP_AST_PASS &ge; 84.0% &middot; P99_LATENCY &le; 450ms</div>
-          </div>
-        </div>
-        <table class="wire-table" id="serving-table">
-          <thead>
-            <tr>
-              <th>CANDIDATE_ID</th>
-              <th>PREC</th>
-              <th>TOPOLOGY</th>
-              <th>TOK/S</th>
-              <th>P99_MS</th>
-              <th>PPL_&Delta;</th>
-              <th>VERDICT</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <!-- TAB 1: YAML -->
+      <div class="drawer-pane" id="pane-yaml">
+        <pre class="yaml-pre" id="yaml-viewer"># Loading Fuzzfile...</pre>
       </div>
 
-      <div class="frame">
-        <div class="frame-bar">
-          <div>
-            <span class="frame-id">0x08 // SM121_KERNEL_PARITY &amp; SHA256_FIREWALL_LEDGER</span>
-            <div class="frame-sub">ZERO-RAW-DATA SCHEMA ENFORCEMENT BETWEEN /vast CORPUS AND EXTERNAL ADVISOR</div>
-          </div>
+      <!-- TAB 2: CLUSTER NODES & EVENT LOG -->
+      <div class="drawer-pane hidden" id="pane-cluster">
+        <div class="cluster-pane-grid">
+          <div id="node-cards" class="nodes-list"></div>
+          <div class="event-log" id="live-event-feed"></div>
         </div>
-        <table class="wire-table wire-table-compact" id="kernel-table">
-          <thead>
-            <tr>
-              <th>KERNEL_SYMBOL</th>
-              <th>MAX_ABS_ERR</th>
-              <th>MEM_GAIN</th>
-              <th>PARITY</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        <div class="ledger-rationales" id="advisor-rationales"></div>
-        <div class="crypto-seal" id="firewall-audit-box"></div>
       </div>
-    </section>
 
-    <!-- RAW FUZZFILE BUFFER -->
-    <section class="frame">
-      <div class="frame-bar">
-        <div>
-          <span class="frame-id">0x09 // EMITTED_FUZZBALL_V4_WORKFLOW_BUFFER</span>
-          <div class="frame-sub">STORAGE_PROVISIONER: <code>use: team20</code> &middot; ENVELOPE: <code>16c / 112GiB / nvidia.com/gpu:1</code></div>
+      <!-- TAB 3: ZERO-EGRESS AUDIT LOG -->
+      <div class="drawer-pane hidden" id="pane-audit">
+        <div class="audit-header-row">
+          <div id="firewall-audit-box" class="audit-status"></div>
+          <button id="btn-probe" class="btn-small">[ TEST FIREWALL ]</button>
         </div>
-        <div class="buf-tabs">
-          <button id="btn-tab-turnkey" class="btn-ghost active-tab">[ BUF::TURNKEY_PROD.YAML ]</button>
-          <button id="btn-tab-trial" class="btn-ghost">[ BUF::LATEST_TRIAL.YAML ]</button>
-          <button id="btn-copy-yaml" class="btn-ghost">[ YANK // CLIPBOARD ]</button>
+        <div class="audit-grid">
+          <div id="advisor-rationales" class="rationales-list"></div>
+          <table class="data-table" id="kernel-table">
+            <thead>
+              <tr>
+                <th>SM_121 KERNEL</th>
+                <th>MAX ERR</th>
+                <th>MEM SAVING</th>
+                <th>PARITY</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
-      <pre class="raw-yaml" id="yaml-viewer"># INITIALIZING BUFFER...</pre>
     </section>
   </main>
 

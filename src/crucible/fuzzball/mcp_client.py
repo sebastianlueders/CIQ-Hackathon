@@ -395,6 +395,9 @@ class FuzzballMCPStdioClient:
 
     # --- CIQ Fuzzball 4.2 Official Read-Tier Tools ---
 
+    def context_show(self) -> Any:
+        return self.call_tool("context_show", {})
+
     def cluster_list(self) -> Any:
         return self.call_tool("cluster_list", {})
 

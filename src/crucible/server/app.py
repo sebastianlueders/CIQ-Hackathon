@@ -28,7 +28,7 @@ class TriggerRunRequest(BaseModel):
     profile: Literal["demo_30b", "stretch_80b"] = "demo_30b"
     backend: Literal["simulator", "local_torch", "fuzzball_mcp", "fuzzball"] = "simulator"
     fuzzfile_version: Literal["v4", "v1"] = "v4"
-    definition_id: str = "team20"
+    definition_id: str = "team3"
     async_mode: bool = False
 
 
@@ -47,7 +47,7 @@ class LiveRunState:
         self.profile: str = "demo_30b"
         self.definition_id: str = initial_cluster.definition_id
         self.current_stage: str = "idle"
-        self.stage_label: str = "Ready on Team 20"
+        self.stage_label: str = f"Ready ({initial_cluster.definition_id})"
         self.error: str | None = None
         self.active_workflows: dict[str, dict[str, Any]] = {}
         self.completed_trials: list[dict[str, Any]] = []
@@ -349,8 +349,11 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         else:
             cluster = base_cluster
         cluster.fuzzfile_version = req.fuzzfile_version
-        if req.definition_id:
-            cluster.definition_id = req.definition_id
+        clean_team = req.definition_id.strip()
+        if clean_team and clean_team.lower() != "auto":
+            cluster.definition_id = clean_team
+            if not cluster.vast.ephemeral:
+                cluster.vast.provisioner = clean_team
 
         target_dir = app.state.run_dir.parent / f"ui-{req.profile}-{req.backend}-{req.fuzzfile_version}"
         live_state.begin_run(cluster, req.profile, req.backend)

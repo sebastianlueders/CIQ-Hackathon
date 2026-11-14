@@ -24,6 +24,13 @@ from crucible.fuzzball.mcp_client import FuzzballMCPStdioClient
 
 SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_./:\-]{1,128}$")
 SAFE_IMAGE_RE = re.compile(r"^(docker|oras)://[A-Za-z0-9_./:@\-]{1,240}$")
+TEAM_ID_RE = re.compile(r"\b(team\d+)\b", re.I)
+
+
+def extract_team_from_text(blob: Any) -> str | None:
+    text = blob if isinstance(blob, str) else json.dumps(blob, default=str)
+    m = TEAM_ID_RE.search(text)
+    return m.group(1).lower() if m else None
 
 
 def _clean_ident(val: Any) -> str | None:
@@ -176,6 +183,12 @@ def probe_fuzzball_cli(
 
     ctx_out = _run_fuzzball_read_cmd(fuzzball_bin, ["context", "list"])
     if ctx_out:
+        ctx_team = extract_team_from_text(ctx_out)
+        if ctx_team:
+            cfg_data["definition_id"] = ctx_team
+            cfg_data["vast"]["provisioner"] = ctx_team
+            report.applied_overrides["definition_id"] = ctx_team
+            report.applied_overrides["vast.provisioner"] = ctx_team
         for row in _parse_pipe_table(ctx_out):
             name = _clean_ident(row.get("name") or row.get("context") or row.get("cluster"))
             is_current = "*" in "".join(row.values()) or row.get("current", "").lower() in {"true", "yes", "*"}
@@ -257,7 +270,9 @@ def apply_mcp_discovery_payload(
     def_id = _clean_ident(payload.get("definition_id") or payload.get("definitionId"))
     if def_id:
         cfg_data["definition_id"] = def_id
+        cfg_data["vast"]["provisioner"] = def_id
         report.applied_overrides["definition_id"] = def_id
+        report.applied_overrides["vast.provisioner"] = def_id
 
     fz_ver = payload.get("fuzzfile_version")
     if fz_ver in {"v4", "v1"}:
@@ -293,16 +308,24 @@ def apply_mcp_discovery_payload(
 
         if parsed_vols:
             cfg_data["vast"]["ephemeral"] = False
-            preferred = [
+            active_prov = str(cfg_data.get("definition_id") or cfg_data["vast"].get("provisioner") or "")
+            prov_matched = [
                 v
                 for v in parsed_vols
+                if active_prov and (v["provisioner"] or "").lower() == active_prov.lower()
+            ]
+            pool = prov_matched if prov_matched else parsed_vols
+            preferred = [
+                v
+                for v in pool
                 if v["raw"].get("selected")
+                or v["name"].lower() in ("runs", "crucible-vast", "vast")
                 or any(
                     tok in v["name"].lower() or tok in (v["provisioner"] or "").lower()
-                    for tok in ("vast", "crucible", "team20", "lammps", "shared", "data", "runs")
+                    for tok in ("runs", "vast", "crucible", "lammps", "shared", "data")
                 )
             ]
-            chosen = preferred[0] if preferred else parsed_vols[0]
+            chosen = preferred[0] if preferred else pool[0]
             cfg_data["vast"]["persistent_volume_name"] = chosen["name"]
             report.applied_overrides["vast.persistent_volume_name"] = chosen["name"]
             if chosen["provisioner"]:
@@ -481,6 +504,16 @@ def probe_fuzzball_mcp_stdio(
     try:
         with FuzzballMCPStdioClient(command=mcp_command, allow_write=False, allow_exec=False) as mcp:
             payload: dict[str, Any] = {}
+            if "context_show" in mcp.advertised_tools:
+                try:
+                    ctx_raw = mcp.context_show()
+                    ctx_team = extract_team_from_text(ctx_raw)
+                    if ctx_team:
+                        payload["definition_id"] = ctx_team
+                        cfg_data["definition_id"] = ctx_team
+                        cfg_data["vast"]["provisioner"] = ctx_team
+                except Exception:
+                    pass
             if "cluster_list" in mcp.advertised_tools:
                 clusters_raw = mcp.cluster_list()
                 clusters = (

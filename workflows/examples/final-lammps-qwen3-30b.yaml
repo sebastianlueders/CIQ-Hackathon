@@ -1,11 +1,11 @@
 # ==============================================================================
 # Crucible Turnkey Autoresearch Workflow (ingest -> train -> eval -> serve)
 # ==============================================================================
-# Cluster        : ciq-gb10-team20 | VAST Storage Provisioner: use=team20
-# Nodes          : CIQ-CHI-SPARK39 (192.168.99.48/7331), CIQ-CHI-SPARK40 (192.168.99.49/7331)
+# Cluster        : ciq-gb10-team3 | VAST Storage Provisioner: use=team3
+# Nodes          : gb10-node-01 (gb10-01), gb10-node-02 (gb10-02)
 # Node Hardware  : 1x NVIDIA-GB10 (Blackwell, sm_121), 20c arm64, 127.9 GiB/node
-# Per-Node Alloc : 16 cores, 112GiB RAM, 1x nvidia.com/gpu
-# Shared Storage : VAST persistent volume 'crucible-vast' (use: team20) mounted at /vast
+# Per-Node Alloc : 8 cores, 104GiB RAM, 1x nvidia.com/gpu
+# Shared Storage : VAST persistent volume 'runs' (use: team3) mounted at /vast
 # Base Model     : Qwen/Qwen3-Coder-30B-A3B (MoE, 151,936 vocab, 57.0 GB BF16)
 # Dataset        : lammps-cpp (whole-file sealed held-out split; raw data never left VAST)
 #
@@ -34,8 +34,8 @@
 version: v4
 volumes:
   vast:
-    name: crucible-vast
-    use: team20
+    name: runs
+    use: team3
 jobs:
   ingest-lammps:
     image:
@@ -119,9 +119,9 @@ jobs:
     - PYTHONUNBUFFERED=1
     resource:
       cpu:
-        cores: 16
+        cores: 8
       memory:
-        size: 112GiB
+        size: 104GiB
       devices:
         nvidia.com/gpu: 1
     policy:
@@ -171,9 +171,9 @@ services:
     - fp8
     resource:
       cpu:
-        cores: 16
+        cores: 8
       memory:
-        size: 112GiB
+        size: 104GiB
       devices:
         nvidia.com/gpu: 1
     persist: true

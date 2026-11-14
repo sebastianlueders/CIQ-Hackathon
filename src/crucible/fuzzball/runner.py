@@ -21,6 +21,7 @@ from crucible.config import (
     TrainingPerfCandidate,
 )
 from crucible.eval.evaluator import evaluate_quality_floor
+from crucible.fuzzball.discovery import extract_team_from_text
 from crucible.fuzzball.mcp_client import FuzzballMCPError, FuzzballMCPStdioClient
 from crucible.fuzzball.renderer import (
     render_serving_trial_fuzzfile,
@@ -370,10 +371,46 @@ class FuzzballMCPBackend:
                     val_res = mcp.workflow_validate(yaml_text, fuzzfile_path=fz_path)
 
             if not val_res.get("valid", True):
+                err_txt = json.dumps(val_res.get("errors") or [])
+                inferred_team = extract_team_from_text(err_txt)
+                if inferred_team and inferred_team != self.cluster.vast.provisioner:
+                    self.cluster.definition_id = inferred_team
+                    self.cluster.vast.provisioner = inferred_team
+                    yaml_text = render_fn(self.cluster)
+                    fz_path.write_text(yaml_text, encoding="utf-8")
+                    val_res = mcp.workflow_validate(yaml_text, fuzzfile_path=fz_path)
+            if not val_res.get("valid", True):
                 raise FuzzballMCPError(
                     f"Fuzzball MCP workflow_validate rejected '{workflow_name}': {val_res.get('errors')}"
                 )
-            wf_id = mcp.workflow_start(yaml_text, name=workflow_name, fuzzfile_path=fz_path)
+            try:
+                wf_id = mcp.workflow_start(yaml_text, name=workflow_name, fuzzfile_path=fz_path)
+            except FuzzballMCPError as start_exc:
+                msg_low = str(start_exc).lower()
+                retried = False
+                # Auto-heal team provisioner mismatch (e.g. logged in as team3@fb-hack.local vs team20)
+                inferred_team = extract_team_from_text(str(start_exc))
+                if "cannot access provisioner" in msg_low and inferred_team:
+                    self.cluster.definition_id = inferred_team
+                    self.cluster.vast.provisioner = inferred_team
+                    retried = True
+                # Auto-heal missing persistent volume name by adopting first existing volume or ephemeral
+                elif ("volume" in msg_low and ("not exist" in msg_low or "not found" in msg_low)):
+                    if "volume_list" in mcp.advertised_tools:
+                        vraw = mcp.volume_list()
+                        vlist = vraw.get("volumes", []) if isinstance(vraw, dict) else []
+                        if isinstance(vlist, list) and vlist and isinstance(vlist[0], dict) and vlist[0].get("name"):
+                            self.cluster.vast.persistent_volume_name = str(vlist[0]["name"])
+                            retried = True
+                    if not retried:
+                        self.cluster.vast.ephemeral = True
+                        retried = True
+                if not retried:
+                    raise
+                yaml_text = render_fn(self.cluster)
+                fz_path.write_text(yaml_text, encoding="utf-8")
+                validate_fuzzfile(yaml_text, cluster=self.cluster)
+                wf_id = mcp.workflow_start(yaml_text, name=workflow_name, fuzzfile_path=fz_path)
             desc_initial = (
                 mcp.workflow_describe(wf_id) if "workflow_describe" in mcp.advertised_tools else {}
             )

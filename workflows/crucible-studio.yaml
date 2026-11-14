@@ -1,17 +1,17 @@
 # workflows/crucible-studio.yaml
-# Optional CIQ Fuzzball v4 persistent service workflow hosting the Crucible Cypherpunk Studio UI
-# on Team 20 (`use: team20`) with an HTTP endpoint (0 GPUs consumed).
+# Optional CIQ Fuzzball v4 persistent service workflow hosting the Crucible Studio UI
+# on Team 3 (`use: team3`) with an HTTP endpoint (0 GPUs consumed).
 #
 # Launch with:
 #   fuzzball workflow validate workflows/crucible-studio.yaml
-#   fuzzball workflow start workflows/crucible-studio.yaml --name crucible-team20-studio
+#   fuzzball workflow start workflows/crucible-studio.yaml --name crucible-team3-studio
 
 version: v4
 
 volumes:
   vast:
-    name: crucible-vast
-    use: team20
+    name: runs
+    use: team3
 
 services:
   crucible-studio:
@@ -23,7 +23,7 @@ services:
     env:
       - HOME=/tmp/home
       - PYTHONUNBUFFERED=1
-      - CRUCIBLE_DEFINITION_ID=team20
+      - CRUCIBLE_DEFINITION_ID=team3
     resource:
       cpu:
         cores: 2
@@ -35,7 +35,7 @@ services:
         - name: http
           port: 8000
       endpoints:
-        - name: crucible-team20-studio
+        - name: crucible-team3-studio
           port-name: http
           protocol: http
           type: path
@@ -57,4 +57,4 @@ services:
         tar -xzf /tmp/c.tgz -C /vast/crucible-src --strip-components=1
       fi
       export PYTHONPATH="/vast/crucible-src/src"
-      exec python3 -m crucible.cli serve --run-dir /vast/runs/team20-live --host 0.0.0.0 --port 8000
+      exec python3 -m crucible.cli serve --run-dir /vast/runs/team3-live --host 0.0.0.0 --port 8000

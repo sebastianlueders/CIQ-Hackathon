@@ -23,11 +23,11 @@ class ClusterNodeSpec(BaseModel):
     memory_gib: float = Field(default=127.9, gt=0)
 
 
-DEFAULT_TEAM20_INVENTORY = [
+DEFAULT_GB10_INVENTORY = [
     ClusterNodeSpec(
-        hostname="CIQ-CHI-SPARK39",
-        node_id="192.168.99.48/7331",
-        address="192.168.99.48",
+        hostname="gb10-node-01",
+        node_id="gb10-01",
+        address="192.168.99.101",
         status="READY",
         gpu_product="NVIDIA-GB10",
         gpus=1,
@@ -35,9 +35,9 @@ DEFAULT_TEAM20_INVENTORY = [
         memory_gib=127.9,
     ),
     ClusterNodeSpec(
-        hostname="CIQ-CHI-SPARK40",
-        node_id="192.168.99.49/7331",
-        address="192.168.99.49",
+        hostname="gb10-node-02",
+        node_id="gb10-02",
+        address="192.168.99.102",
         status="READY",
         gpu_product="NVIDIA-GB10",
         gpus=1,
@@ -58,14 +58,14 @@ class NodeTopologyConfig(BaseModel):
     arch_device: str = ""
     gpus_per_node: int = Field(default=1, ge=1)
     physical_cores_per_node: int = Field(default=20, ge=1)
-    cpu_cores_per_node: int = Field(default=16, ge=1)
+    cpu_cores_per_node: int = Field(default=8, ge=1)
     physical_memory_gib_per_node: float = Field(default=127.9, gt=0)
-    memory_gb_per_node: int = Field(default=112, ge=8)
+    memory_gb_per_node: int = Field(default=104, ge=8)
     measured_peak_bf16_tflops: float = Field(default=198.0, gt=0)
     measured_peak_train_tok_s_per_node: float = Field(default=4150.0, gt=0)
     interconnect: str = "NCCL-RoCE-200GbE"
     inventory: list[ClusterNodeSpec] = Field(
-        default_factory=lambda: [n.model_copy() for n in DEFAULT_TEAM20_INVENTORY]
+        default_factory=lambda: [n.model_copy() for n in DEFAULT_GB10_INVENTORY]
     )
 
     @model_validator(mode="after")
@@ -87,8 +87,8 @@ class VastStorageConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     volume_key: str = "vast"
-    persistent_volume_name: str = "crucible-vast"
-    provisioner: str = "team20"
+    persistent_volume_name: str = "runs"
+    provisioner: str = "team3"
     ephemeral: bool = False
     ephemeral_size: str = "64GiB"
     mount_path: str = "/vast"
@@ -110,8 +110,8 @@ class ContainerImagesConfig(BaseModel):
 class ClusterConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cluster_name: str = "ciq-gb10-team20"
-    definition_id: str = "team20"
+    cluster_name: str = "ciq-gb10-team3"
+    definition_id: str = "team3"
     pin_definition_annotation: bool = False
     fuzzfile_version: Literal["v4", "v1"] = "v4"
     nodes: NodeTopologyConfig = Field(default_factory=NodeTopologyConfig)
@@ -280,7 +280,7 @@ class ExperimentConfig(BaseModel):
 
     experiment_id: str
     description: str = ""
-    target_definition_id: str = "team20"
+    target_definition_id: str = "team3"
     model: ModelProfileConfig
     dataset: DatasetSplitConfig
     stage_a_recipe: StageARecipeConfig

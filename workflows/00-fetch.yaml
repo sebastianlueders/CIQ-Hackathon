@@ -1,5 +1,5 @@
 # workflows/00-fetch.yaml
-# One-time CIQ Fuzzball v4 bootstrap workflow targeting Team 20 VAST storage (`use: team20`):
+# One-time CIQ Fuzzball v4 bootstrap workflow targeting Team 3 VAST storage (`use: team3`):
 #   1. Base model weights: Qwen/Qwen3-Coder-30B-A3B (~57 GB BF16 safetensors)
 #   2. Public HPC stand-in corpus: LAMMPS C++ repository (~15,605 source/doc files)
 #
@@ -11,8 +11,8 @@ version: v4
 
 volumes:
   vast:
-    name: crucible-vast
-    use: team20
+    name: runs
+    use: team3
 
 jobs:
   fetch-base-model:
