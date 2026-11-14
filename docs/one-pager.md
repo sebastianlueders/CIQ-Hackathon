@@ -24,14 +24,13 @@ A deterministic optimizer decides which experiments run and a measured adoption 
 
 | Result (all measured on GB10, logged in `results/`) | Value |
 |----------------------------|------------------------------------------|
-| Held-out LAMMPS loss (perplexity), base → fine-tuned | 1.175 (3.24) → **1.037 (2.82)**, −11.7%, after 750k tokens (4% of the data) |
-| Recipe search: configs run / stopped early | 4 configs → 2 → 1 by successive halving, trials in parallel as Fuzzball workflows |
-| Training throughput: stock → grouped experts → + torch.compile → 2 nodes | 356 → 675 → 1,011 → **~2,000 tokens/s (5.6×)**, loss unchanged; + no activation checkpointing: 1,366 on 1 node (+35%) |
-| `pipeline.yaml` end to end (train → FP8 + LoRA serving in vLLM) | ran in ~35 min; fine-tuned model served at 190 tokens/s (16 concurrent), held-out loss 1.293 → 1.193 vs base |
+| Held-out LAMMPS loss (perplexity), base → fine-tuned | 1.175 (3.24) → **1.037 (2.82)**, −11.7%, after 750k tokens; 4 → 2 → 1 configs by successive halving |
+| Training throughput: stock → grouped experts → + torch.compile → 2 nodes | 356 → 675 → 1,011 → **~2,000 tokens/s (5.6×)**, loss unchanged; on 1 node, no activation checkpointing 1,366 (+35%), micro-batch 2 1,140 (+13%) |
+| `pipeline.yaml` end to end | ran in ~35 min: ingest → train → FP8 + LoRA serving in vLLM |
 | Custom Triton fused linear + cross-entropy (152k vocab) | 2.1–2.35× faster and 7.0 → 0.34 GiB alone; in training −6.2 GiB peak memory, exact loss |
-| Serving (vLLM), BF16 → FP8 at 16 concurrent requests | 113 → 203 tokens/s (1.79×), held-out loss +0.2%; LoRA adapter costs ~6% |
+| Serving (vLLM): base BF16 → FP8; fine-tuned FP8 + LoRA | 113 → 203 tokens/s at 16 concurrent (1.79×, loss +0.2%); fine-tuned: 188 at 16, **441 at 64 concurrent**, held-out loss 1.293 → **1.168** |
 
-**What did the second node unlock?** Data-parallel training across both GB10 nodes as one Fuzzball multinode job: 1,011 → ~2,000 tokens/s (1.98×, 99% scaling efficiency; gradient sync 0.05 s of a 33 s step), plus parallel search trials sharing one copy of weights and data on VAST.
+**What did the second node unlock?** Data-parallel training across both GB10 nodes as one Fuzzball multinode job: 1,011 → ~2,000 tokens/s (1.98×, 99% scaling efficiency; gradient sync 0.05–0.5 s of a 33 s step), plus parallel search trials sharing one copy of weights and data on VAST.
 
 ### Built on NVIDIA, CIQ, and VAST Data
 **CIQ Fuzzball:** the agent's entire experiment loop runs as Fuzzball workflows, and its deliverable *is* a Fuzzball workflow. **VAST Data:** Fuzzball volumes on VAST hold the weights, dataset, adapters, checkpoints, and results, shared by every trial on every node with no copying. That shared storage is what makes a parallel search cheap. **NVIDIA:** GB10 Grace Blackwell nodes, custom kernels written for sm_121, NCCL, and FP8 serving on Blackwell. **Next:** the agent generates and validates new kernels for hardware it hasn't seen.
