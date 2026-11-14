@@ -1,0 +1,67 @@
+# Tune vLLM fused-MoE tiles for GB10, then re-measure FP8 (+LoRA) serving. Retries if the node goes away.
+{
+ "version": "v4",
+ "files": {
+  "serve_bench.py": "\"\"\"Phase C: serving search. For each serving config, start vLLM, measure speed and quality, stop.\n\nUsage (inside the vLLM image): python serve_bench.py --configs configs.json --out /runs/serve/<name>\n\nconfigs.json: [{\"name\": \"bf16\", \"args\": []}, {\"name\": \"fp8\", \"args\": [\"--quantization\", \"fp8\"]}, ...]\nEach config is measured on the same held-out LAMMPS prompts:\n  speed:   output tok/s (aggregate) and per-request latency at each concurrency in --concurrency\n  quality: mean next-token loss on held-out files from vLLM's prompt logprobs (same tokens for\n           every config), so a faster config is only accepted if quality stays within a tolerance.\nEvery record prints as \"RESULT {...}\".\n\"\"\"\nimport argparse, json, math, os, statistics, subprocess, threading, time, urllib.request\nimport numpy as np\n\nURL = \"http://127.0.0.1:8000\"\n\n\ndef out(**kw):\n    print(\"RESULT \" + json.dumps(kw), flush=True)\n\n\ndef post(path, body, timeout=900):\n    req = urllib.request.Request(URL + path, json.dumps(body).encode(), {\"Content-Type\": \"application/json\"})\n    return json.load(urllib.request.urlopen(req, timeout=timeout))\n\n\ndef wait_ready(proc, limit=1500):\n    t0 = time.time()\n    while time.time() - t0 < limit:\n        if proc.poll() is not None: return None\n        try:\n            urllib.request.urlopen(URL + \"/health\", timeout=5); return time.time() - t0\n        except Exception:\n            time.sleep(5)\n    return None\n\n\ndef held_out(data, n, plen):\n    \"\"\"n prompts of plen tokens, each from a different held-out file (same for every config).\"\"\"\n    ev = np.fromfile(os.path.join(data, \"eval.bin\"), dtype=np.uint32)\n    idx = [e for e in json.load(open(os.path.join(data, \"eval_index.json\"))) if e[\"end\"] - e[\"start\"] >= plen + 1]\n    return [ev[e[\"start\"]:e[\"start\"] + plen].tolist() for e in idx[:n]]\n\n\ndef quality(model, prompts):\n    \"\"\"Mean NLL of prompt tokens (excluding the first) from vLLM prompt logprobs.\"\"\"\n    nll, cnt = 0.0, 0\n    for p in prompts:\n        r = post(\"/v1/completions\", {\"model\": model, \"prompt\": p, \"max_tokens\": 1, \"temperature\": 0,\n                                     \"echo\": True, \"logprobs\": 0})\n        lps = r[\"choices\"][0][\"logprobs\"][\"token_logprobs\"][1:len(p)]\n        lps = [x for x in lps if x is not None]\n        nll -= sum(lps); cnt += len(lps)\n    return nll / max(cnt, 1)\n\n\ndef speed(model, prompts, conc, gen):\n    lat, toks, lock = [], [0], threading.Lock()\n    work = list(prompts)\n    def worker():\n        while True:\n            with lock:\n                if not work: return\n                p = work.pop()\n            t = time.time()\n            r = post(\"/v1/completions\", {\"model\": model, \"prompt\": p, \"max_tokens\": gen, \"temperature\": 0,\n                                         \"ignore_eos\": True})\n            with lock:\n                lat.append(time.time() - t); toks[0] += r[\"usage\"][\"completion_tokens\"]\n    t0 = time.time()\n    th = [threading.Thread(target=worker) for _ in range(conc)]\n    [x.start() for x in th]; [x.join() for x in th]\n    wall = time.time() - t0\n    return {\"concurrency\": conc, \"requests\": len(prompts), \"out_tok_s\": round(toks[0] / wall, 1),\n            \"latency_p50_s\": round(statistics.median(lat), 2),\n            \"latency_p95_s\": round(sorted(lat)[max(0, int(0.95 * len(lat)) - 1)], 2),\n            \"per_request_tok_s\": round(gen / statistics.median(lat), 1)}\n\n\ndef main():\n    ap = argparse.ArgumentParser()\n    ap.add_argument(\"--configs\", required=True); ap.add_argument(\"--out\", required=True)\n    ap.add_argument(\"--model\", default=\"/models/Qwen/Qwen3-Coder-30B-A3B-Instruct\")\n    ap.add_argument(\"--data\", default=\"/data/tok/lammps\")\n    ap.add_argument(\"--concurrency\", default=\"1,16\"); ap.add_argument(\"--gen\", type=int, default=256)\n    ap.add_argument(\"--plen\", type=int, default=1024); ap.add_argument(\"--n-quality\", type=int, default=24)\n    a = ap.parse_args()\n    os.makedirs(a.out, exist_ok=True)\n    concs = [int(c) for c in a.concurrency.split(\",\")]\n    qprompts = held_out(a.data, a.n_quality, a.plen)\n    sprompts = held_out(a.data, max(concs) * 3, 512)\n    for cfg in json.load(open(a.configs)):\n        name, served = cfg[\"name\"], cfg.get(\"served_model\", \"m\")\n        cmd = [\"vllm\", \"serve\", a.model, \"--served-model-name\", \"m\", \"--host\", \"127.0.0.1\", \"--port\", \"8000\",\n               \"--max-model-len\", \"4096\", \"--gpu-memory-utilization\", str(cfg.get(\"gpu_util\", 0.80)),\n               *cfg.get(\"args\", [])]\n        log = open(os.path.join(a.out, f\"{name}.server.log\"), \"w\")\n        t0 = time.time()\n        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)\n        ready = wait_ready(proc)\n        if ready is None:\n            out(kind=\"serve\", config=name, ok=False, error=\"server did not start\",\n                log_tail=open(log.name).read()[-1500:]); proc.kill(); continue\n        rec = {\"kind\": \"serve\", \"config\": name, \"ok\": True, \"args\": cfg.get(\"args\", []), \"startup_s\": round(ready, 1)}\n        try:\n            post(\"/v1/completions\", {\"model\": served, \"prompt\": \"int main() {\", \"max_tokens\": 8})  # warm-up\n            e = quality(served, qprompts)\n            rec.update(eval_loss=round(e, 5), ppl=round(math.exp(e), 4), quality_tokens=len(qprompts) * (a.plen - 1))\n            rec[\"speed\"] = [speed(served, sprompts[:c * 3], c, a.gen) for c in concs]\n        except Exception as ex:\n            rec.update(ok=False, error=str(ex)[:500])\n        out(**rec)\n        json.dump(rec, open(os.path.join(a.out, f\"{name}.json\"), \"w\"), indent=1)\n        proc.terminate()\n        try: proc.wait(60)\n        except subprocess.TimeoutExpired: proc.kill()\n        time.sleep(10)\n\n\nif __name__ == \"__main__\":\n    main()\n",
+  "serve-ft-tuned.json": "[\n {\n  \"name\": \"fp8-lora-tunedmoe\",\n  \"args\": [\n   \"--quantization\",\n   \"fp8\",\n   \"--enable-lora\",\n   \"--max-lora-rank\",\n   \"16\",\n   \"--lora-modules\",\n   \"ft=/runs/trials/s3-recipe-c1-lr1e-3-r8/adapter\"\n  ],\n  \"served_model\": \"ft\"\n },\n {\n  \"name\": \"fp8-tunedmoe\",\n  \"args\": [\n   \"--quantization\",\n   \"fp8\"\n  ]\n }\n]"
+ },
+ "jobs": {
+  "run": {
+   "image": {
+    "uri": "docker://vllm/vllm-openai:v0.33.0"
+   },
+   "env": [
+    "HOME=/tmp"
+   ],
+   "files": {
+    "/opt/serve_bench.py": "file://serve_bench.py",
+    "/opt/serve-ft-tuned.json": "file://serve-ft-tuned.json"
+   },
+   "mounts": {
+    "/models": {
+     "volume": "models"
+    },
+    "/data": {
+     "volume": "data"
+    },
+    "/runs": {
+     "volume": "runs"
+    }
+   },
+   "policy": {
+    "timeout": {
+     "execute": "8h"
+    },
+    "retry": {
+     "attempts": 2
+    }
+   },
+   "resource": {
+    "cpu": {
+     "cores": 16
+    },
+    "memory": {
+     "size": "80GiB"
+    },
+    "devices": {
+     "nvidia.com/gpu": 1
+    }
+   },
+   "script": "#!/bin/bash\n# Tune vLLM's fused-MoE Triton kernel tile configs for GB10 (sm_121) on our expert shape\n# (E=128, N=768, top-8) with vLLM's own tuner for the vLLM version we serve, then re-run the\n# serving benchmark with the tuned configs loaded (VLLM_TUNED_CONFIG_FOLDER).\n# The vLLM server log reports \"Using default MoE config ... NVIDIA_GB10\" without this.\nset -uo pipefail\nOUT=/runs/serve/moe-configs; mkdir -p $OUT; cd $OUT\nV=$(python3 -c \"import vllm; print(vllm.__version__)\"); echo \"vllm=$V\"\nfor f in benchmark_moe.py utils.py; do\n  curl -sfL -o /tmp/$f \"https://raw.githubusercontent.com/vllm-project/vllm/v${V}/benchmarks/kernels/$f\" || echo \"fetch $f failed\"\ndone\n# vLLM's tuner imports ray, which the vLLM image does not ship; install it per-user (no root needed).\nexport PYTHONUSERBASE=/tmp/pyuser PATH=/tmp/pyuser/bin:$PATH\npython3 -c \"import ray\" 2>/dev/null || pip install --quiet --user ray 2>&1 | tail -3\npython3 -c \"import ray; print('RESULT {\\\"kind\\\": \\\"moe_tune_ray\\\", \\\"ok\\\": true}')\" || echo 'RESULT {\"kind\": \"moe_tune_ray\", \"ok\": false}'\n\nM=/models/Qwen/Qwen3-Coder-30B-A3B-Instruct\nfor DT in fp8_w8a8 auto; do\n  t=$(date +%s)\n  (cd /tmp && python3 benchmark_moe.py --model $M --tp-size 1 --dtype $DT --tune \\\n      --batch-size 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 --trust-remote-code) 2>&1 | tail -30\n  echo \"RESULT {\\\"kind\\\": \\\"moe_tune\\\", \\\"dtype\\\": \\\"$DT\\\", \\\"seconds\\\": $(( $(date +%s) - t ))}\"\ndone\ncp /tmp/E=*.json $OUT/ 2>/dev/null; ls -la $OUT\necho \"RESULT {\\\"kind\\\": \\\"moe_tune_files\\\", \\\"files\\\": \\\"$(ls $OUT | tr '\\n' ' ')\\\"}\"\nexport VLLM_TUNED_CONFIG_FOLDER=$OUT\npython3 /opt/serve_bench.py --configs /opt/serve-ft-tuned.json --out /runs/serve/ft-tuned --concurrency 1,16,64\n"
+  }
+ },
+ "volumes": {
+  "models": {
+   "name": "models",
+   "use": "team3"
+  },
+  "data": {
+   "name": "data",
+   "use": "team3"
+  },
+  "runs": {
+   "name": "runs",
+   "use": "team3"
+  }
+ }
+}

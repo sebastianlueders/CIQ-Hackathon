@@ -144,7 +144,7 @@ jobs:
     image: {{uri: docker://nvcr.io/nvidia/pytorch:26.10-py3}}
     files: {{/opt/train.json: file://train.json}}
     mounts: {{/models: {{volume: models}}, /data: {{volume: data}}, /runs: {{volume: runs}}, /envs: {{volume: envs}}, /code: {{volume: code}}}}
-    policy: {{timeout: {{execute: 12h}}}}
+    policy: {{timeout: {{execute: 12h}}, retry: {{attempts: 2}}}}   # re-run if the node goes away
     resource: {{cpu: {{cores: 16}}, memory: {{size: 80GiB}}, devices: {{nvidia.com/gpu: 1}}}}
     script: |
 {train_script}
@@ -154,6 +154,7 @@ jobs:
   serve-and-verify:
     depends-on: [{{name: train, status: FINISHED}}]
     image: {{uri: docker://vllm/vllm-openai:v0.33.0}}
+    policy: {{retry: {{attempts: 2}}}}   # re-run if the node goes away
     files: {{/opt/serve.json: file://serve.json}}
     mounts: {{/models: {{volume: models}}, /data: {{volume: data}}, /runs: {{volume: runs}}, /code: {{volume: code}}}}
     resource: {{cpu: {{cores: 16}}, memory: {{size: 80GiB}}, devices: {{nvidia.com/gpu: 1}}}}
