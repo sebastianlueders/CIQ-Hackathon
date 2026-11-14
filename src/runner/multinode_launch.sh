@@ -6,13 +6,27 @@ mkdir -p /tmp/home
 SELF=$(hostname); FQDN=$(hostname -f 2>/dev/null || echo "$SELF")
 HOSTS=$(echo "${MULTINODE_HOSTLIST_NOSLOTS:-$SELF}" | tr ',' '\n' | sort)
 echo "DIAG self=$SELF fqdn=$FQDN hostlist=$(echo $HOSTS) variant=$MN_VARIANT"
-echo "DIAG env: $(env | grep -iE 'MULTINODE|FB_|RANK|NODE' | tr '\n' ' ')"
+echo "DIAG env: $(env | grep -iE 'MULTINODE|RANK|NODE' | grep -viE 'TOKEN|SECRET|KEY' | tr '\n' ' ')"
 for h in $HOSTS; do echo "DIAG resolve $h -> $(getent hosts $h | awk '{print $1}' | tr '\n' ' ')"; done
 echo "DIAG ifaces: $(ls /sys/class/net | tr '\n' ' ') ib=$(ls /dev/infiniband 2>/dev/null | tr '\n' ' ')"
 RANK_IDX=$(echo "$HOSTS" | grep -nx -e "$SELF" -e "$FQDN" | head -1 | cut -d: -f1)
 [ -z "$RANK_IDX" ] && RANK_IDX=$(echo "$HOSTS" | grep -n "^${SELF%%.*}" | head -1 | cut -d: -f1)
-NODE_RANK=$((RANK_IDX - 1)); MASTER=$(echo "$HOSTS" | head -1)
-MASTER_IP=$(getent hosts "$MASTER" | awk '{print $1}' | head -1); MASTER_IP=${MASTER_IP:-$MASTER}
+NODE_RANK=${MN_NODE_RANK:-$((RANK_IDX - 1))}; MASTER=${MN_MASTER:-$(echo "$HOSTS" | head -1)}
+# Fuzzball's generic multinode runs this script on the head node only (see /multinode/generic-helper).
+# The head starts every other rank with: "$MULTINODE_SSH_WRAPPER" "$host" "<one shell string>".
+if [ -z "${MN_NODE_RANK:-}" ] && [ -n "${MULTINODE_SSH_WRAPPER:-}" ]; then
+  HEAD_IP=${MULTINODE_NODE_IP:-$(getent hosts "$SELF" | awk '{print $1}' | head -1)}
+  i=0
+  for h in $HOSTS; do
+    [ "$h" = "$SELF" ] || [ "$h" = "$FQDN" ] && continue
+    i=$((i + 1))
+    echo "DIAG head ($SELF, $HEAD_IP) starting rank $i on $h"
+    "$MULTINODE_SSH_WRAPPER" "$h" "MN_NODE_RANK=$i MN_MASTER=$SELF MN_MASTER_IP=$HEAD_IP MN_NODES=$MN_NODES MN_VARIANT=$MN_VARIANT PY=$PY TRAIN_ARGS='$TRAIN_ARGS' MULTINODE_HOSTLIST_NOSLOTS=$MULTINODE_HOSTLIST_NOSLOTS HOME=/tmp/home bash /opt/multinode_launch.sh" > /tmp/rank$i.log 2>&1 &
+  done
+  NODE_RANK=0; MASTER=$SELF; MN_MASTER_IP=$HEAD_IP
+  trap 'for f in /tmp/rank*.log; do echo "== worker log $f"; tail -60 "$f"; done' EXIT
+fi
+MASTER_IP=${MN_MASTER_IP:-$(getent hosts "$MASTER" | awk '{print $1}' | head -1)}; MASTER_IP=${MASTER_IP:-$MASTER}
 echo "DIAG node_rank=$NODE_RANK master=$MASTER master_ip=$MASTER_IP"
 # Plain TCP check between nodes before torch: rank 0 listens on 29511, others connect.
 $PY - <<PYEOF
