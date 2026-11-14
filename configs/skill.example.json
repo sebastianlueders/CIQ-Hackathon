@@ -1,0 +1,9 @@
+{
+  "id": "support-extractor",
+  "version": 0,
+  "mode": "prompt-only",
+  "instructions": "Extract stated facts; do not invent missing values.",
+  "adapter": null,
+  "allowed_tools": [],
+  "feedback_requires_consent": true
+}

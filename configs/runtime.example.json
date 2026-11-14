@@ -1,0 +1,10 @@
+{
+  "status": "unconfigured",
+  "model_id": null,
+  "model_revision": null,
+  "tokenizer_revision": null,
+  "serving_node": null,
+  "training_node": null,
+  "teacher_enabled": false,
+  "automatic_publication": false
+}
