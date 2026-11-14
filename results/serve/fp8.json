@@ -1,0 +1,34 @@
+{
+ "kind": "serve",
+ "config": "fp8",
+ "ok": true,
+ "args": [
+  "--quantization",
+  "fp8"
+ ],
+ "startup_s": 420.1,
+ "eval_loss": 1.2934,
+ "ppl": 3.6452,
+ "quality_tokens": 24552,
+ "speed": [
+  {
+   "concurrency": 1,
+   "requests": 3,
+   "out_tok_s": 47.4,
+   "latency_p50_s": 5.38,
+   "latency_p95_s": 5.38,
+   "per_request_tok_s": 47.6
+  },
+  {
+   "concurrency": 16,
+   "requests": 48,
+   "out_tok_s": 203.3,
+   "latency_p50_s": 20.24,
+   "latency_p95_s": 21.03,
+   "per_request_tok_s": 12.6
+  }
+ ],
+ "workflow": "0431043b-39df-4987-b292-980fab9f5c0f",
+ "model": "Qwen3-Coder-30B-A3B-Instruct (base)",
+ "engine": "vLLM 0.33.0"
+}

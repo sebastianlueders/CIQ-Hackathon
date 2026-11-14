@@ -39,10 +39,10 @@
    },
    "resource": {
     "cpu": {
-     "cores": 16
+     "cores": 8
     },
     "memory": {
-     "size": "112GiB"
+     "size": "80GiB"
     },
     "devices": {
      "nvidia.com/gpu": 1

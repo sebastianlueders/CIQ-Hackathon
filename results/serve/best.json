@@ -1,0 +1,11 @@
+{
+ "config": "fp8",
+ "args": [
+  "--quantization",
+  "fp8"
+ ],
+ "rule": "fastest at C=16 with held-out loss within 1% of BF16",
+ "eval_loss": 1.2934,
+ "bf16_eval_loss": 1.29053,
+ "speedup_c16": 1.79
+}
