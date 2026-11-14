@@ -33,6 +33,158 @@ def extract_team_from_text(blob: Any) -> str | None:
     return m.group(1).lower() if m else None
 
 
+def resolve_fuzzball_executable(fuzzball_bin: str = "fuzzball") -> str | None:
+    found = shutil.which(fuzzball_bin)
+    if found:
+        return found
+    local_bin = Path("./fuzzball")
+    if local_bin.is_file():
+        return str(local_bin.resolve())
+    return None
+
+
+def _extract_volume_provisioner(raw_vol: dict[str, Any]) -> str | None:
+    for key in (
+        "provisioner",
+        "use",
+        "provisioner_id",
+        "provisionerId",
+        "provisioner_name",
+        "provisionerName",
+        "storage_class",
+        "storageClass",
+    ):
+        val = _clean_ident(raw_vol.get(key))
+        if val:
+            return val
+    for ref_key in ("reference", "ref", "uri"):
+        ref_val = raw_vol.get(ref_key)
+        if isinstance(ref_val, str) and ref_val.startswith("volume://"):
+            parts = ref_val.removeprefix("volume://").split("/")
+            if len(parts) >= 3:
+                cand = _clean_ident(parts[1])
+                if cand:
+                    return cand
+    return None
+
+
+def list_provisioner_volumes_cli(provisioner: str, fuzzball_bin: str = "fuzzball") -> list[str]:
+    """List volumes strictly belonging to `provisioner` via `fuzzball volume list <provisioner>`."""
+    fb_exe = resolve_fuzzball_executable(fuzzball_bin)
+    if not fb_exe or not provisioner:
+        return []
+
+    scoped_out = _run_fuzzball_read_cmd(fb_exe, ["volume", "list", provisioner])
+    names: list[str] = []
+    if scoped_out:
+        table_rows = _parse_pipe_table(scoped_out)
+        if table_rows:
+            for row in table_rows:
+                row_prov = _extract_volume_provisioner(row)
+                if row_prov and row_prov.lower() != provisioner.lower():
+                    continue
+                vname = _clean_ident(row.get("name") or row.get("volume") or row.get("id"))
+                if vname and vname not in names:
+                    names.append(vname)
+            return names
+        # Handle non-pipe whitespace table or JSON
+        stripped = scoped_out.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                items = parsed.get("volumes", []) if isinstance(parsed, dict) else parsed
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            iprov = _extract_volume_provisioner(item)
+                            if iprov and iprov.lower() != provisioner.lower():
+                                continue
+                            vn = _clean_ident(item.get("name") or item.get("id"))
+                            if vn and vn not in names:
+                                names.append(vn)
+                    return names
+            except Exception:
+                pass
+        lines = [ln.strip() for ln in stripped.splitlines() if ln.strip()]
+        for ln in lines[1:] if len(lines) > 1 and "name" in lines[0].lower() else lines:
+            if set(ln) <= {"-", "=", " "}:
+                continue
+            first_col = _clean_ident(ln.split()[0])
+            if first_col and first_col.lower() not in {"name", "id", "volume"} and first_col not in names:
+                names.append(first_col)
+        if names:
+            return names
+
+    # Fallback: unscoped `fuzzball volume list`, strictly filtering rows whose provisioner == `provisioner`
+    unscoped_out = _run_fuzzball_read_cmd(fb_exe, ["volume", "list"])
+    if unscoped_out:
+        for row in _parse_pipe_table(unscoped_out):
+            row_prov = _extract_volume_provisioner(row)
+            if row_prov and row_prov.lower() == provisioner.lower():
+                vname = _clean_ident(row.get("name") or row.get("volume") or row.get("id"))
+                if vname and vname not in names:
+                    names.append(vname)
+    return names
+
+
+def ensure_provisioner_volume(
+    provisioner: str,
+    preferred_name: str = "runs",
+    fuzzball_bin: str = "fuzzball",
+    mcp: FuzzballMCPStdioClient | None = None,
+) -> str:
+    """Ensure a valid persistent volume exists on `provisioner` (`team3`), creating it if absent."""
+    if not provisioner:
+        return preferred_name
+
+    existing = list_provisioner_volumes_cli(provisioner, fuzzball_bin=fuzzball_bin)
+    if preferred_name in existing:
+        return preferred_name
+    for candidate in ("runs", "crucible-vast", "vast", "data", "models"):
+        if candidate in existing:
+            return candidate
+    if existing:
+        return existing[0]
+
+    # Try creating `preferred_name` on `provisioner` via MCP `volume_create` or CLI `fuzzball volume create`
+    if mcp is not None and "volume_create" in mcp.advertised_tools:
+        try:
+            mcp.volume_create(provisioner, preferred_name)
+            return preferred_name
+        except Exception:
+            pass
+
+    fb_exe = resolve_fuzzball_executable(fuzzball_bin)
+    if fb_exe:
+        try:
+            proc = subprocess.run(
+                [fb_exe, "volume", "create", provisioner, preferred_name],
+                capture_output=True,
+                text=True,
+                timeout=12.0,
+                check=False,
+            )
+            if proc.returncode == 0 or "already exists" in (proc.stderr + proc.stdout).lower():
+                return preferred_name
+            # Try scanning existing volumes on the VAST provisioner per Fuzzball CLI hint
+            subprocess.run(
+                [fb_exe, "volume", "provisioner", "scan", provisioner],
+                capture_output=True,
+                text=True,
+                timeout=12.0,
+                check=False,
+            )
+            scanned = list_provisioner_volumes_cli(provisioner, fuzzball_bin=fuzzball_bin)
+            if preferred_name in scanned:
+                return preferred_name
+            if scanned:
+                return scanned[0]
+        except Exception:
+            pass
+
+    return preferred_name
+
+
 def _clean_ident(val: Any) -> str | None:
     if not isinstance(val, str):
         return None
@@ -174,14 +326,15 @@ def probe_fuzzball_cli(
     report: ClusterDiscoveryReport,
     fuzzball_bin: str = "fuzzball",
 ) -> None:
-    if shutil.which(fuzzball_bin) is None:
+    fb_exe = resolve_fuzzball_executable(fuzzball_bin)
+    if fb_exe is None:
         report.fuzzball_cli_available = False
         report.notes.append("fuzzball CLI binary not found on PATH; using config/MCP/00-fetch values.")
         return
 
     report.fuzzball_cli_available = True
 
-    ctx_out = _run_fuzzball_read_cmd(fuzzball_bin, ["context", "list"])
+    ctx_out = _run_fuzzball_read_cmd(fb_exe, ["context", "list"])
     if ctx_out:
         ctx_team = extract_team_from_text(ctx_out)
         if ctx_team:
@@ -197,40 +350,28 @@ def probe_fuzzball_cli(
                 cfg_data["cluster_name"] = name
                 report.applied_overrides["cluster_name"] = name
 
-    prov_out = _run_fuzzball_read_cmd(fuzzball_bin, ["volume", "provisioner", "list"])
+    prov_out = _run_fuzzball_read_cmd(fb_exe, ["volume", "provisioner", "list"])
     if prov_out:
         for row in _parse_pipe_table(prov_out):
             pname = _clean_ident(row.get("name") or row.get("id"))
             if pname:
                 report.discovered_provisioners.append(pname)
-        vast_provs = [p for p in report.discovered_provisioners if "vast" in p.lower()]
-        if vast_provs:
-            cfg_data["vast"]["provisioner"] = vast_provs[0]
-            report.applied_overrides["vast.provisioner"] = vast_provs[0]
 
-    vol_out = _run_fuzzball_read_cmd(fuzzball_bin, ["volume", "list"])
-    if vol_out:
-        for row in _parse_pipe_table(vol_out):
-            vname = _clean_ident(row.get("name") or row.get("volume"))
-            vprov = _clean_ident(row.get("provisioner") or row.get("storage_class") or "")
-            if vname:
-                report.discovered_volumes.append(
-                    {"name": vname, "provisioner": vprov or "unknown", "source": "fuzzball_cli"}
-                )
-        preferred = [
-            v
-            for v in report.discovered_volumes
-            if any(tok in v["name"].lower() for tok in ("vast", "crucible", "lammps", "hackathon", "shared"))
+    active_prov = str(cfg_data["vast"].get("provisioner") or cfg_data.get("definition_id") or "")
+    scoped_vols = list_provisioner_volumes_cli(active_prov, fuzzball_bin=fb_exe) if active_prov else []
+    for sv in scoped_vols:
+        report.discovered_volumes.append(
+            {"name": sv, "provisioner": active_prov, "source": "fuzzball_cli_scoped"}
+        )
+    if scoped_vols:
+        preferred_names = [
+            sv for sv in scoped_vols if sv.lower() in ("runs", "crucible-vast", "vast", "data")
         ]
-        chosen = preferred[0] if preferred else (report.discovered_volumes[0] if report.discovered_volumes else None)
-        if chosen:
-            cfg_data["vast"]["persistent_volume_name"] = chosen["name"]
-            report.applied_overrides["vast.persistent_volume_name"] = chosen["name"]
-            if chosen["provisioner"] != "unknown":
-                cfg_data["vast"]["provisioner"] = chosen["provisioner"]
-                report.applied_overrides["vast.provisioner"] = chosen["provisioner"]
+        chosen_name = preferred_names[0] if preferred_names else scoped_vols[0]
+        cfg_data["vast"]["persistent_volume_name"] = chosen_name
+        report.applied_overrides["vast.persistent_volume_name"] = chosen_name
 
-    wf_out = _run_fuzzball_read_cmd(fuzzball_bin, ["workflow", "list", "--order-by", "-created"])
+    wf_out = _run_fuzzball_read_cmd(fb_exe, ["workflow", "list", "--order-by", "-created"])
     if wf_out:
         for row in _parse_pipe_table(wf_out)[:10]:
             wf_id = _clean_ident(row.get("id"))
@@ -241,8 +382,8 @@ def probe_fuzzball_cli(
                     {"id": wf_id, "name": wf_name or "unnamed", "status": wf_status or "unknown"}
                 )
 
-    node_out = _run_fuzzball_read_cmd(fuzzball_bin, ["node", "list"]) or _run_fuzzball_read_cmd(
-        fuzzball_bin, ["queue", "list"]
+    node_out = _run_fuzzball_read_cmd(fb_exe, ["node", "list"]) or _run_fuzzball_read_cmd(
+        fb_exe, ["queue", "list"]
     )
     if node_out:
         parsed_nodes = _parse_pipe_table(node_out)
@@ -291,53 +432,60 @@ def apply_mcp_discovery_payload(
             if not isinstance(raw_vol, dict):
                 continue
             vname = _clean_ident(raw_vol.get("name") or raw_vol.get("id"))
-            vprov = _clean_ident(
-                raw_vol.get("provisioner")
-                or raw_vol.get("use")
-                or raw_vol.get("provisionerId")
-                or raw_vol.get("storageClass")
-            )
+            vprov = _extract_volume_provisioner(raw_vol)
             mount = _clean_ident(raw_vol.get("mount_path") or raw_vol.get("mountPath"))
             if vname:
                 parsed_vols.append(
                     {"name": vname, "provisioner": vprov, "mount": mount, "raw": raw_vol}
                 )
                 report.discovered_volumes.append(
-                    {"name": vname, "provisioner": vprov or "auto", "source": source_label}
+                    {"name": vname, "provisioner": vprov or "unknown", "source": source_label}
                 )
 
         if parsed_vols:
             cfg_data["vast"]["ephemeral"] = False
             active_prov = str(cfg_data.get("definition_id") or cfg_data["vast"].get("provisioner") or "")
-            prov_matched = [
-                v
-                for v in parsed_vols
-                if active_prov and (v["provisioner"] or "").lower() == active_prov.lower()
-            ]
-            pool = prov_matched if prov_matched else parsed_vols
-            preferred = [
-                v
-                for v in pool
-                if v["raw"].get("selected")
-                or v["name"].lower() in ("runs", "crucible-vast", "vast")
-                or any(
-                    tok in v["name"].lower() or tok in (v["provisioner"] or "").lower()
-                    for tok in ("runs", "vast", "crucible", "lammps", "shared", "data")
+            # CRITICAL: NEVER pair a volume from another/unknown provisioner (e.g. org-wide "datasets")
+            # with `use: team3`! Only adopt a volume whose provisioner explicitly matches `active_prov`
+            # (or has `selected: true` in an explicit user snapshot).
+            if active_prov:
+                prov_matched = [
+                    v
+                    for v in parsed_vols
+                    if (v["provisioner"] or "").lower() == active_prov.lower()
+                    or (v["raw"].get("selected") is True and source_label.startswith("mcp_snapshot"))
+                ]
+            else:
+                prov_matched = [v for v in parsed_vols if v["provisioner"]]
+
+            if prov_matched:
+                preferred = [
+                    v
+                    for v in prov_matched
+                    if v["raw"].get("selected")
+                    or v["name"].lower() in ("runs", "crucible-vast", "vast")
+                    or any(
+                        tok == v["name"].lower()
+                        for tok in ("runs", "vast", "crucible", "data", "models")
+                    )
+                ]
+                chosen = preferred[0] if preferred else prov_matched[0]
+                cfg_data["vast"]["persistent_volume_name"] = chosen["name"]
+                report.applied_overrides["vast.persistent_volume_name"] = chosen["name"]
+                if chosen["provisioner"]:
+                    cfg_data["vast"]["provisioner"] = chosen["provisioner"]
+                    report.applied_overrides["vast.provisioner"] = chosen["provisioner"]
+                if chosen["mount"] and str(chosen["mount"]).startswith("/"):
+                    m = str(chosen["mount"])
+                    cfg_data["vast"]["mount_path"] = m
+                    cfg_data["vast"]["models_dir"] = f"{m.rstrip('/')}/models"
+                    cfg_data["vast"]["datasets_dir"] = f"{m.rstrip('/')}/data"
+                    cfg_data["vast"]["runs_dir"] = f"{m.rstrip('/')}/runs"
+                    report.applied_overrides["vast.mount_path"] = m
+            else:
+                report.notes.append(
+                    f"Ignored {len(parsed_vols)} volume(s) not scoped to provisioner '{active_prov}'."
                 )
-            ]
-            chosen = preferred[0] if preferred else pool[0]
-            cfg_data["vast"]["persistent_volume_name"] = chosen["name"]
-            report.applied_overrides["vast.persistent_volume_name"] = chosen["name"]
-            if chosen["provisioner"]:
-                cfg_data["vast"]["provisioner"] = chosen["provisioner"]
-                report.applied_overrides["vast.provisioner"] = chosen["provisioner"]
-            if chosen["mount"] and str(chosen["mount"]).startswith("/"):
-                m = str(chosen["mount"])
-                cfg_data["vast"]["mount_path"] = m
-                cfg_data["vast"]["models_dir"] = f"{m.rstrip('/')}/models"
-                cfg_data["vast"]["datasets_dir"] = f"{m.rstrip('/')}/data"
-                cfg_data["vast"]["runs_dir"] = f"{m.rstrip('/')}/runs"
-                report.applied_overrides["vast.mount_path"] = m
         elif cfg_data.get("definition_id"):
             # On CIQ hackathon clusters, `definition_id` (`team20`) is the VAST volume storage provisioner;
             # Fuzzball auto-provisions named volumes under `use: team20` — never switch to `ephemeral`!
@@ -527,7 +675,8 @@ def probe_fuzzball_mcp_stdio(
                         payload["cluster_name"] = cname
 
             if "volume_list" in mcp.advertised_tools:
-                vols_raw = mcp.volume_list()
+                active_team = str(cfg_data.get("definition_id") or cfg_data["vast"].get("provisioner") or "")
+                vols_raw = mcp.volume_list(provisioner=active_team or None)
                 vols = (
                     vols_raw.get("volumes", [])
                     if isinstance(vols_raw, dict)
@@ -622,7 +771,19 @@ def discover_cluster_config(
     if not mcp_succeeded:
         probe_fuzzball_cli(cfg_data, report, fuzzball_bin=fuzzball_bin)
     else:
-        report.fuzzball_cli_available = shutil.which(fuzzball_bin) is not None
+        fb_exe = resolve_fuzzball_executable(fuzzball_bin)
+        report.fuzzball_cli_available = fb_exe is not None
+        # When MCP `volume_list` omits per-volume provisioner tags, confirm/ensure the volume on `active_prov` via CLI
+        if fb_exe is not None and mcp_command is None and resolved_snap is None:
+            active_prov = str(cfg_data["vast"].get("provisioner") or cfg_data.get("definition_id") or "")
+            if active_prov and not cfg_data["vast"].get("ephemeral"):
+                ensured_vol = ensure_provisioner_volume(
+                    active_prov,
+                    preferred_name=str(cfg_data["vast"].get("persistent_volume_name") or "runs"),
+                    fuzzball_bin=fb_exe,
+                )
+                cfg_data["vast"]["persistent_volume_name"] = ensured_vol
+                report.applied_overrides["vast.persistent_volume_name"] = ensured_vol
 
     # 4. Re-apply explicit CRUCIBLE_* environment variable overrides on top
     final_cfg = ClusterConfig.model_validate(cfg_data).with_env_overrides()

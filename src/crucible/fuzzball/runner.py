@@ -21,7 +21,12 @@ from crucible.config import (
     TrainingPerfCandidate,
 )
 from crucible.eval.evaluator import evaluate_quality_floor
-from crucible.fuzzball.discovery import extract_team_from_text
+from crucible.fuzzball.discovery import (
+    _extract_volume_provisioner,
+    ensure_provisioner_volume,
+    extract_team_from_text,
+    resolve_fuzzball_executable,
+)
 from crucible.fuzzball.mcp_client import FuzzballMCPError, FuzzballMCPStdioClient
 from crucible.fuzzball.renderer import (
     render_serving_trial_fuzzfile,
@@ -103,9 +108,10 @@ class FuzzballCLIBackend:
         fuzzball_bin: str = "fuzzball",
         event_hook: EventCallback | None = None,
     ) -> None:
-        if shutil.which(fuzzball_bin) is None:
+        resolved_bin = resolve_fuzzball_executable(fuzzball_bin)
+        if resolved_bin is None:
             raise RuntimeError(
-                f"'{fuzzball_bin}' CLI not found on PATH. Authenticate on the Team 20 workstation "
+                f"'{fuzzball_bin}' CLI not found on PATH or ./fuzzball. Authenticate on the workstation "
                 "or select 'simulator' / 'local_torch' backend."
             )
         self.cluster = cluster
@@ -113,9 +119,15 @@ class FuzzballCLIBackend:
         self.run_id = run_id
         self.local_run_dir = local_run_dir
         self.poll_interval_s = poll_interval_s
-        self.fuzzball_bin = fuzzball_bin
+        self.fuzzball_bin = resolved_bin
         self.event_hook = event_hook
         self._trial_counter = 0
+        if not self.cluster.vast.ephemeral and self.cluster.vast.provisioner:
+            self.cluster.vast.persistent_volume_name = ensure_provisioner_volume(
+                self.cluster.vast.provisioner,
+                preferred_name=self.cluster.vast.persistent_volume_name,
+                fuzzball_bin=self.fuzzball_bin,
+            )
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self.event_hook is not None:
@@ -352,6 +364,23 @@ class FuzzballMCPBackend:
             allow_write=True,
             allow_exec=True,
         ) as mcp:
+            # Ensure target persistent volume actually exists on `self.cluster.vast.provisioner`
+            if (
+                self._trial_counter == 1
+                and self.mcp_command is None
+                and not self.cluster.vast.ephemeral
+                and self.cluster.vast.provisioner
+            ):
+                ensured = ensure_provisioner_volume(
+                    self.cluster.vast.provisioner,
+                    preferred_name=self.cluster.vast.persistent_volume_name,
+                    mcp=mcp,
+                )
+                if ensured != self.cluster.vast.persistent_volume_name:
+                    self.cluster.vast.persistent_volume_name = ensured
+                    yaml_text = render_fn(self.cluster)
+                    fz_path.write_text(yaml_text, encoding="utf-8")
+
             val_res = mcp.workflow_validate(yaml_text, fuzzfile_path=fz_path)
             if not val_res.get("valid", True):
                 err_blob = json.dumps(val_res.get("errors") or []).lower()
@@ -388,29 +417,57 @@ class FuzzballMCPBackend:
             except FuzzballMCPError as start_exc:
                 msg_low = str(start_exc).lower()
                 retried = False
-                # Auto-heal team provisioner mismatch (e.g. logged in as team3@fb-hack.local vs team20)
                 inferred_team = extract_team_from_text(str(start_exc))
                 if "cannot access provisioner" in msg_low and inferred_team:
                     self.cluster.definition_id = inferred_team
                     self.cluster.vast.provisioner = inferred_team
+                    self.cluster.vast.persistent_volume_name = ensure_provisioner_volume(
+                        inferred_team,
+                        preferred_name="runs",
+                        mcp=mcp,
+                    )
                     retried = True
-                # Auto-heal missing persistent volume name by adopting first existing volume or ephemeral
-                elif ("volume" in msg_low and ("not exist" in msg_low or "not found" in msg_low)):
+                elif "volume" in msg_low and ("not exist" in msg_low or "not found" in msg_low):
+                    prov = self.cluster.vast.provisioner or self.cluster.definition_id or "team3"
+                    failed_vol = self.cluster.vast.persistent_volume_name
+                    matched_on_prov: list[str] = []
                     if "volume_list" in mcp.advertised_tools:
-                        vraw = mcp.volume_list()
-                        vlist = vraw.get("volumes", []) if isinstance(vraw, dict) else []
-                        if isinstance(vlist, list) and vlist and isinstance(vlist[0], dict) and vlist[0].get("name"):
-                            self.cluster.vast.persistent_volume_name = str(vlist[0]["name"])
-                            retried = True
-                    if not retried:
-                        self.cluster.vast.ephemeral = True
+                        try:
+                            vraw = mcp.volume_list(provisioner=prov)
+                            vlist = vraw.get("volumes", []) if isinstance(vraw, dict) else []
+                            if isinstance(vlist, list):
+                                for item in vlist:
+                                    if isinstance(item, dict) and item.get("name"):
+                                        iprov = _extract_volume_provisioner(item)
+                                        if iprov and iprov.lower() == prov.lower():
+                                            matched_on_prov.append(str(item["name"]))
+                        except Exception:
+                            pass
+                    if matched_on_prov:
+                        pick = next((m for m in matched_on_prov if m != failed_vol), matched_on_prov[0])
+                        self.cluster.vast.persistent_volume_name = pick
+                        retried = True
+                    else:
+                        target_new_vol = "crucible-vast" if failed_vol == "runs" else "runs"
+                        created = ensure_provisioner_volume(prov, preferred_name=target_new_vol, mcp=mcp)
+                        self.cluster.vast.persistent_volume_name = created
                         retried = True
                 if not retried:
                     raise
                 yaml_text = render_fn(self.cluster)
                 fz_path.write_text(yaml_text, encoding="utf-8")
                 validate_fuzzfile(yaml_text, cluster=self.cluster)
-                wf_id = mcp.workflow_start(yaml_text, name=workflow_name, fuzzfile_path=fz_path)
+                try:
+                    wf_id = mcp.workflow_start(yaml_text, name=workflow_name, fuzzfile_path=fz_path)
+                except FuzzballMCPError as second_exc:
+                    if "volume" in str(second_exc).lower() and not self.cluster.vast.ephemeral:
+                        self.cluster.vast.ephemeral = True
+                        yaml_text = render_fn(self.cluster)
+                        fz_path.write_text(yaml_text, encoding="utf-8")
+                        validate_fuzzfile(yaml_text, cluster=self.cluster)
+                        wf_id = mcp.workflow_start(yaml_text, name=workflow_name, fuzzfile_path=fz_path)
+                    else:
+                        raise
             desc_initial = (
                 mcp.workflow_describe(wf_id) if "workflow_describe" in mcp.advertised_tools else {}
             )

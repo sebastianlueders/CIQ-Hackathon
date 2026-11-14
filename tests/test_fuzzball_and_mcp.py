@@ -166,7 +166,14 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                 elif tname == "cluster_list":
                     payload = {"clusters": [{"name": "ciq-gb10-team3"}]}
                 elif tname == "volume_list":
-                    payload = {"volumes": [{"name": "runs", "provisioner": "team3", "mount_path": "/vast"}]}
+                    # Include org-wide/foreign "datasets" volumes to verify Crucible NEVER pairs them with `use: team3`!
+                    payload = {
+                        "volumes": [
+                            {"name": "datasets"},
+                            {"name": "datasets", "provisioner": "shared"},
+                            {"name": "runs", "provisioner": "team3", "mount_path": "/vast"},
+                        ]
+                    }
                 elif tname == "node_list":
                     payload = {
                         "nodes": [
@@ -505,6 +512,30 @@ def test_native_fuzzball_mcp_stdio_team20_discovery_and_live_events(tmp_path: Pa
     )
     assert srv_summary.accepted is True
     assert srv_summary.precision == "NVFP4"
+
+
+def test_discovery_never_pairs_unscoped_datasets_volume_with_team3() -> None:
+    from crucible.fuzzball.discovery import ClusterDiscoveryReport, apply_mcp_discovery_payload
+
+    cfg = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+    cfg_data = cfg.model_dump()
+    rep = ClusterDiscoveryReport()
+    # Even if MCP `volume_list` returns ONLY org-wide `datasets` without `provisioner: team3`,
+    # `persistent_volume_name` must stay `runs` (never `datasets`!).
+    apply_mcp_discovery_payload(
+        {
+            "definition_id": "team3",
+            "volumes": [
+                {"name": "datasets"},
+                {"name": "datasets", "provisioner": "public"},
+            ],
+        },
+        cfg_data,
+        rep,
+        "fuzzball_mcp_stdio",
+    )
+    assert cfg_data["vast"]["provisioner"] == "team3"
+    assert cfg_data["vast"]["persistent_volume_name"] == "runs"
 
 
 def test_turnkey_v4_and_v1_rendering() -> None:

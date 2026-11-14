@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from crucible.config import ClusterConfig, ExperimentConfig, repo_root
 from crucible.firewall import DataIsolationViolation, PrivacySchemaFirewall
 from crucible.fuzzball.discovery import discover_cluster_config
+from crucible.fuzzball.spark_monitor import SparkUsageMonitor
 from crucible.fuzzball.validator import FuzzfileValidationError, validate_fuzzfile
 from crucible.optimizer.pipeline import run_autoresearch_pipeline
 
@@ -231,14 +232,17 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     resolved_run_dir = (run_dir or (repo_root() / "runs" / "ui-default")).resolve()
     default_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
     live_state = LiveRunState(default_cluster)
+    spark_monitor = SparkUsageMonitor()
 
     app = FastAPI(
-        title="Crucible Autoresearch Studio (Team 20)",
+        title="Crucible Autoresearch Studio (Team 3)",
         version="0.2.0",
-        description="Local fine-tuning & sm_121 performance-engineering control plane on CIQ Fuzzball Team 20 + VAST.",
+        description="Local fine-tuning & sm_121 performance-engineering control plane on CIQ Fuzzball Team 3 + VAST.",
     )
     app.state.run_dir = resolved_run_dir
     app.state.live = live_state
+    app.state.active_cluster = default_cluster
+    app.state.spark_monitor = spark_monitor
 
     def _collect_summary_payload(target_run_dir: Path) -> dict[str, Any]:
         summary_file = target_run_dir / "run_summary.json"
@@ -308,7 +312,17 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     @app.get("/api/discover")
     def api_discover() -> dict[str, object]:
         cfg, rep = discover_cluster_config()
+        app.state.active_cluster = cfg
         return {"cluster_config": cfg.model_dump(), "discovery_report": rep.to_dict()}
+
+    @app.get("/api/spark-usage")
+    def api_spark_usage(force: bool = False) -> dict[str, Any]:
+        _ensure_seeded()
+        return app.state.spark_monitor.get_usage(
+            cluster=app.state.active_cluster,
+            live_snap=live_state.snapshot(),
+            force_refresh=force,
+        )
 
     @app.get("/api/summary")
     def get_summary() -> dict[str, object]:
@@ -354,6 +368,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             cluster.definition_id = clean_team
             if not cluster.vast.ephemeral:
                 cluster.vast.provisioner = clean_team
+        app.state.active_cluster = cluster
 
         target_dir = app.state.run_dir.parent / f"ui-{req.profile}-{req.backend}-{req.fuzzfile_version}"
         live_state.begin_run(cluster, req.profile, req.backend)

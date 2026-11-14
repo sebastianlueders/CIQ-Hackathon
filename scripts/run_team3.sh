@@ -88,14 +88,28 @@ if [[ "$BACKEND" == "auto" ]]; then
   fi
 fi
 
-# 3. Discover active Fuzzball team (`team3` from `team3@fb-hack.local`), volumes, and GB10 nodes
+# 3. Discover active Fuzzball team (`team3` from `team3@fb-hack.local`), ensure volume on `$TEAM_ID`, and validate Fuzzfiles
 if [[ "$TEAM_ID" == "auto" ]]; then
   DISCOVER_JSON="$("$CRUCIBLE" discover --json)"
   TEAM_ID="$("${VENV_BIN}/python" -c 'import json,sys; print(json.loads(sys.stdin.read())["cluster_config"]["definition_id"])' <<<"$DISCOVER_JSON")"
 fi
 export CRUCIBLE_DEFINITION_ID="$TEAM_ID"
 
-echo "[crucible] Active provisioner/team: ${TEAM_ID}"
+if command -v fuzzball >/dev/null 2>&1; then
+  echo "[crucible] Checking VAST volumes on provisioner '${TEAM_ID}' ..."
+  VOL_OUT="$(fuzzball volume list "$TEAM_ID" 2>/dev/null || true)"
+  if echo "$VOL_OUT" | grep -qw "runs"; then
+    export CRUCIBLE_VAST_VOLUME="runs"
+  elif echo "$VOL_OUT" | grep -qw "crucible-vast"; then
+    export CRUCIBLE_VAST_VOLUME="crucible-vast"
+  else
+    echo "[crucible] Ensuring persistent volume 'runs' exists on provisioner '${TEAM_ID}' ..."
+    fuzzball volume create "$TEAM_ID" runs >/dev/null 2>&1 || fuzzball volume provisioner scan "$TEAM_ID" >/dev/null 2>&1 || true
+    export CRUCIBLE_VAST_VOLUME="runs"
+  fi
+fi
+
+echo "[crucible] Active provisioner/team: ${TEAM_ID} (volume: ${CRUCIBLE_VAST_VOLUME:-runs})"
 "$CRUCIBLE" discover
 "$CRUCIBLE" validate-yaml workflows/00-fetch.yaml
 "$CRUCIBLE" validate-yaml workflows/crucible-studio.yaml

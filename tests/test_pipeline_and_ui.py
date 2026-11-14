@@ -143,6 +143,13 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     assert live_json["definition_id"] == "team3"
     assert len(live_json["nodes"]) == 2
 
+    spark_res = client.get("/api/spark-usage")
+    assert spark_res.status_code == 200
+    spark_json = spark_res.json()
+    assert spark_json["gpus_total"] == 8
+    assert len(spark_json["spark_nodes"]) == 8
+    assert spark_json["team_provisioner"] == "team3"
+
     sync_run = client.post(
         "/api/run",
         json={

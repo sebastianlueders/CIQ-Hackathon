@@ -3,136 +3,89 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CRUCIBLE — Local Autoresearch</title>
+  <title>Crucible — Team 3 Autoresearch &amp; sm_121 Live Control Plane</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <!-- ZONE 1: TOP COMMAND BAR -->
   <header class="topbar">
-    <div class="brand-group">
-      <span class="brand-mark">CRUCIBLE</span>
-      <span class="status-tag" id="live-run-state">IDLE</span>
-      <span class="status-tag tag-seal" id="pill-privacy">ZERO-EGRESS · 0 B LEAKED</span>
+    <div class="brand">
+      <div class="brand-mark">C</div>
+      <div>
+        <div class="brand-title-row">
+          <h1>Crucible</h1>
+          <span class="badge badge-accent">Team 3 Live Control Plane</span>
+        </div>
+        <p class="subtitle">Local autoresearch &amp; Grace Blackwell <code>sm_121</code> optimization on CIQ Fuzzball + VAST — raw code never leaves <code>/vast</code>.</p>
+      </div>
     </div>
-
-    <div class="controls-group">
-      <label class="field">
-        <span>TEAM</span>
-        <input id="team-input" type="text" value="team3" spellcheck="false" aria-label="Fuzzball Storage Provisioner / Team" />
+    <div class="stack-pills">
+      <span class="pill"><span class="dot dot-green"></span><code>use: <span id="pill-def-id">team3</span></code></span>
+      <span class="pill"><span class="dot dot-cyan"></span>NVIDIA-GB10 · <code>sm_121</code> (20c / 127.9 GiB per Spark)</span>
+      <span class="pill"><span class="dot dot-violet"></span>Fuzzfile <code id="pill-fz-ver">v4</code> · VAST <code>/vast</code></span>
+      <span class="pill pill-shield" id="pill-privacy"><span class="dot dot-green"></span>Schema Firewall: 0 Bytes Leaked</span>
+    </div>
+    <div class="actions">
+      <label class="team-input-wrap" title="Fuzzball VAST storage provisioner / team ID">
+        <span>Team:</span>
+        <input id="team-input" type="text" value="team3" spellcheck="false" aria-label="Team Provisioner" />
       </label>
-
-      <label class="field">
-        <span>MODEL</span>
-        <select id="profile-select" aria-label="Model Profile">
-          <option value="demo_30b">Qwen3-30B-A3B · LAMMPS</option>
-          <option value="stretch_80b">Qwen3-80B · 2-Node</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span>BACKEND</span>
-        <select id="backend-select" aria-label="Execution Backend">
-          <option value="fuzzball_mcp">Fuzzball MCP (Live)</option>
-          <option value="fuzzball">Fuzzball CLI (Live)</option>
-          <option value="simulator" selected>GB10 Simulator</option>
-          <option value="local_torch">Local PyTorch</option>
-        </select>
-      </label>
-
-      <button id="btn-run" class="btn-launch">[ LAUNCH ]</button>
+      <select id="profile-select" aria-label="Experiment Profile">
+        <option value="demo_30b">Qwen3-Coder-30B-A3B · LAMMPS C++</option>
+        <option value="stretch_80b">Qwen3-Coder-Next-80B · 2-Node Stretch</option>
+      </select>
+      <select id="backend-select" aria-label="Execution Backend">
+        <option value="fuzzball_mcp">Fuzzball 4.2 MCP · Live</option>
+        <option value="fuzzball">Fuzzball CLI · Live</option>
+        <option value="simulator" selected>GB10 Calibrated Sim</option>
+        <option value="local_torch">Local PyTorch Kernels</option>
+      </select>
+      <button id="btn-run" class="btn btn-primary">Launch on team3</button>
+      <button id="btn-probe" class="btn btn-outline" title="Inject a simulated raw C++ snippet and verify the schema firewall blocks it">Test Firewall Guard</button>
     </div>
   </header>
 
-  <main class="workspace">
-    <!-- ZONE 2: MAIN TELEMETRY ROW (2 CLEAN COLUMNS) -->
-    <section class="main-grid">
-      <!-- LEFT COLUMN: 4-STAGE PIPELINE TRACKER + LOSS CURVE -->
-      <div class="col-stack">
-        <div class="box">
-          <div class="box-head">
-            <h2>PIPELINE PROGRESS</h2>
-            <span class="meta-inline" id="live-wf-meta">VAST /vast · GB10 sm_121</span>
-          </div>
-
-          <div class="stepper" id="stage-stepper">
-            <div class="step" data-step="stage_a_recipe">
-              <span class="step-num">1</span>
-              <div>
-                <div class="step-name">Recipe</div>
-                <div class="step-sub" id="step-sub-a">ASHA LoRA</div>
-              </div>
-            </div>
-            <div class="step" data-step="stage_b_training_perf">
-              <span class="step-num">2</span>
-              <div>
-                <div class="step-name">Train Perf</div>
-                <div class="step-sub" id="step-sub-b">sm_121 Kernels</div>
-              </div>
-            </div>
-            <div class="step" data-step="stage_c_inference_perf">
-              <span class="step-num">3</span>
-              <div>
-                <div class="step-name">Serve Perf</div>
-                <div class="step-sub" id="step-sub-c">BF16 / FP8 / NVFP4</div>
-              </div>
-            </div>
-            <div class="step" data-step="stage_d_emit">
-              <span class="step-num">4</span>
-              <div>
-                <div class="step-name">Emit</div>
-                <div class="step-sub" id="step-sub-d">Turnkey Fuzzfile</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="status-line" id="live-stage-label">Ready on team3</div>
-          <div id="live-error-banner" class="error-box hidden"></div>
+  <main class="container">
+    <!-- NEW: Live DGX Spark & Team 3 GPU Pool Usage Monitor -->
+    <section class="panel spark-monitor-panel" id="spark-monitor-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Live Spark &amp; Team 3 GPU Usage</h2>
+          <p class="panel-sub">Real-time DGX Spark (<code>NVIDIA-GB10</code>) pool occupancy &amp; CIQ Fuzzball workflow queue — refreshes every 3s</p>
         </div>
-
-        <div class="box">
-          <div class="box-head">
-            <h2>LOSS EQUIVALENCE TRACE</h2>
-            <span class="meta-inline" id="curve-badge">&Delta; &le; 0.025</span>
-          </div>
-          <div id="loss-chart-wrap" class="chart-area"></div>
-          <div class="chart-legend" id="loss-legend"></div>
+        <div class="spark-summary-badges">
+          <span class="badge" id="spark-source-badge">POLLING…</span>
+          <span class="badge badge-green" id="spark-gpu-badge">GPUs In Use: 0 / 8</span>
+          <span class="badge" id="spark-active-badge">Active Workflows: 0</span>
+          <span class="badge" id="spark-queue-badge">Queued / Pending: 0</span>
         </div>
       </div>
 
-      <!-- RIGHT COLUMN: HEADLINE SPEEDUPS + UNIFIED TRIALS TABLE -->
-      <div class="col-stack">
-        <div class="kpi-row">
-          <div class="kpi-box">
-            <div class="kpi-label">HELD-OUT PPL</div>
-            <div class="kpi-val" id="kpi-ppl">—</div>
-            <div class="kpi-sub" id="meta-stage-a">—</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label">TRAIN SPEED</div>
-            <div class="kpi-val" id="kpi-train-speed">—</div>
-            <div class="kpi-sub" id="meta-stage-b">—</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label">SERVE SPEED</div>
-            <div class="kpi-val" id="kpi-serve-speed">—</div>
-            <div class="kpi-sub" id="meta-stage-c">—</div>
-          </div>
+      <div class="spark-pool-bar-wrap">
+        <div class="spark-pool-bar-top">
+          <span id="spark-pool-caption">0 / 8 DGX Spark GPUs Allocated (8 Free)</span>
+          <span id="spark-updated-at" class="muted-small">—</span>
         </div>
+        <div class="bar-track spark-pool-track">
+          <div class="bar-fill spark-pool-fill" id="spark-pool-fill" style="width: 4%"></div>
+        </div>
+      </div>
 
-        <div class="box box-grow">
-          <div class="box-head">
-            <h2>TRIALS &amp; WINNERS</h2>
-            <span class="meta-inline" id="util-badge">—</span>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table" id="trials-table">
+      <div class="spark-monitor-grid">
+        <div>
+          <div class="sub-label">PER-NODE LIVE DGX SPARK (<code>GB10</code>) GRID</div>
+          <div class="spark-nodes-grid" id="spark-nodes-grid"></div>
+        </div>
+        <div>
+          <div class="sub-label">ACTIVE &amp; QUEUED FUZZBALL WORKFLOWS</div>
+          <div class="spark-wf-wrap">
+            <table class="data-table compact-table" id="spark-wf-table">
               <thead>
                 <tr>
-                  <th>STAGE</th>
-                  <th>CONFIGURATION</th>
-                  <th>QUALITY / GATE</th>
-                  <th>TOK/S</th>
-                  <th>STATUS</th>
+                  <th>Workflow ID</th>
+                  <th>Name</th>
+                  <th>Stage</th>
+                  <th>Status</th>
+                  <th>Elapsed</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -142,55 +95,148 @@
       </div>
     </section>
 
-    <!-- ZONE 3: BOTTOM TABBED DRAWER -->
-    <section class="box drawer">
-      <div class="drawer-bar">
-        <div class="tab-strip">
-          <button class="tab-btn active" data-drawer="yaml">EMITTED FUZZFILE YAML</button>
-          <button class="tab-btn" data-drawer="cluster">CLUSTER NODES &amp; VOLUMES</button>
-          <button class="tab-btn" data-drawer="audit">ZERO-EGRESS AUDIT LOG</button>
+    <section class="cluster-strip">
+      <div class="node-cards-wrap" id="node-cards"></div>
+      <div class="live-stream-card">
+        <div class="live-stream-header">
+          <div>
+            <span class="stage-tag">LIVE FUZZBALL TELEMETRY · WORKFLOW LOG &amp; METRICS STREAM</span>
+            <div class="live-stage-title" id="live-stage-label">Ready on team3</div>
+          </div>
+          <span class="badge" id="live-run-state">COMPLETED</span>
         </div>
+        <div id="live-error-banner" class="error-banner hidden"></div>
+        <div class="event-feed" id="live-event-feed"></div>
+      </div>
+    </section>
 
-        <div class="drawer-actions" id="yaml-actions">
-          <button id="btn-yaml-mode" class="btn-small">VIEW: TURNKEY</button>
-          <button id="btn-copy-yaml" class="btn-small">[ COPY YAML ]</button>
+    <section class="funnel-grid" id="funnel-cards">
+      <article class="stage-card">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE A · RECIPE SEARCH</span>
+          <span class="stage-status">Successive Halving</span>
         </div>
+        <div class="metric-big" id="kpi-ppl">—</div>
+        <div class="metric-label">Held-out LAMMPS C++ Perplexity (Base &rarr; Tuned)</div>
+        <div class="stage-meta" id="meta-stage-a">Loading trials...</div>
+      </article>
+
+      <article class="stage-card">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE B · TRAINING PERF</span>
+          <span class="stage-status">Loss-Curve Gated</span>
+        </div>
+        <div class="metric-big" id="kpi-train-speed">—</div>
+        <div class="metric-label">Training Throughput &amp; <code>sm_121</code> Kernel Speedup</div>
+        <div class="stage-meta" id="meta-stage-b">Loading sweep...</div>
+      </article>
+
+      <article class="stage-card">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE C · INFERENCE PERF</span>
+          <span class="stage-status">Quality-Floor Gated</span>
+        </div>
+        <div class="metric-big" id="kpi-serve-speed">—</div>
+        <div class="metric-label">vLLM Serving Throughput (BF16 &rarr; NVFP4)</div>
+        <div class="stage-meta" id="meta-stage-c">Loading serving configs...</div>
+      </article>
+
+      <article class="stage-card stage-card-highlight">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE D · TURNKEY ARTIFACT</span>
+          <span class="stage-status status-ok">Validated Team 3 DAG</span>
+        </div>
+        <div class="metric-big" id="kpi-dag">4-Stage Fuzzfile</div>
+        <div class="metric-label"><code>ingest &rarr; train &rarr; eval &rarr; serve</code></div>
+        <div class="stage-meta" id="meta-stage-d">VAST storage provisioner: use: team3</div>
+      </article>
+    </section>
+
+    <section class="grid-two">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Training Loss-Curve Equivalence &amp; Live Trajectories</h2>
+            <p class="panel-sub">Stage B accepts custom <code>sm_121</code> kernels &amp; 2-node NCCL DDP across GB10 nodes only when trajectory &Delta; &le; 0.025</p>
+          </div>
+          <span class="badge" id="curve-badge">Max &Delta; = 0.0067</span>
+        </div>
+        <div id="loss-chart-wrap" class="chart-box"></div>
+        <div class="chart-legend" id="loss-legend"></div>
       </div>
 
-      <!-- TAB 1: YAML -->
-      <div class="drawer-pane" id="pane-yaml">
-        <pre class="yaml-pre" id="yaml-viewer"># Loading Fuzzfile...</pre>
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Stage B Training Throughput &amp; Kernel Waterfall</h2>
+            <p class="panel-sub">Measured tokens/sec across PyTorch baseline, 152k-vocab chunked CE, grouped MoE + fused LoRA, and 2-node GB10 DDP</p>
+          </div>
+          <span class="badge badge-green" id="util-badge">83.8% Cluster Peak</span>
+        </div>
+        <div id="train-bars" class="bars-list"></div>
+      </div>
+    </section>
+
+    <section class="grid-two">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Stage C vLLM Serving Sweep (Precision &times; Replicas vs. TP)</h2>
+            <p class="panel-sub"><code>vllm/vllm-openai:v0.33.0</code> (<code>TRITON_ATTN</code>) gated on PPL &Delta; &le; +2.5%, C++ completion &ge; 84%, P99 &le; 450 ms</p>
+          </div>
+        </div>
+        <table class="data-table" id="serving-table">
+          <thead>
+            <tr>
+              <th>Config</th>
+              <th>Precision</th>
+              <th>Topology</th>
+              <th>Tok/s</th>
+              <th>P99</th>
+              <th>PPL &Delta;</th>
+              <th>Gate</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
       </div>
 
-      <!-- TAB 2: CLUSTER NODES & EVENT LOG -->
-      <div class="drawer-pane hidden" id="pane-cluster">
-        <div class="cluster-pane-grid">
-          <div id="node-cards" class="nodes-list"></div>
-          <div class="event-log" id="live-event-feed"></div>
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Custom <code>sm_121</code> Kernel Verification &amp; Advisor Audit</h2>
+            <p class="panel-sub">Numerical parity vs. PyTorch reference + firewalled LLM advisor rationale &amp; SHA-256 zero-data-egress log</p>
+          </div>
         </div>
+        <table class="data-table compact-table" id="kernel-table">
+          <thead>
+            <tr>
+              <th>Kernel</th>
+              <th>Max Abs Error</th>
+              <th>Mem Saving</th>
+              <th>Parity</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="advisor-box" id="advisor-rationales"></div>
+        <div class="firewall-banner" id="firewall-audit-box"></div>
       </div>
+    </section>
 
-      <!-- TAB 3: ZERO-EGRESS AUDIT LOG -->
-      <div class="drawer-pane hidden" id="pane-audit">
-        <div class="audit-header-row">
-          <div id="firewall-audit-box" class="audit-status"></div>
-          <button id="btn-probe" class="btn-small">[ TEST FIREWALL ]</button>
+    <section class="panel yaml-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Emitted CIQ Fuzzball v4 Workflow (<code>use: <span id="yaml-team-label">team3</span></code>)</h2>
+          <p class="panel-sub">VAST volume <code>use: team3</code> · <code>8c / 104GiB / nvidia.com/gpu: 1</code> per GB10 node · cached <code>nvcr.io/nvidia/pytorch:26.10-py3</code></p>
         </div>
-        <div class="audit-grid">
-          <div id="advisor-rationales" class="rationales-list"></div>
-          <table class="data-table" id="kernel-table">
-            <thead>
-              <tr>
-                <th>SM_121 KERNEL</th>
-                <th>MAX ERR</th>
-                <th>MEM SAVING</th>
-                <th>PARITY</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="yaml-controls">
+          <button id="btn-tab-turnkey" class="btn btn-outline active-tab">Turnkey Production YAML</button>
+          <button id="btn-tab-trial" class="btn btn-outline">Latest Trial YAML</button>
+          <button id="btn-copy-yaml" class="btn btn-outline">Copy YAML</button>
         </div>
       </div>
+      <pre class="code-viewer" id="yaml-viewer">Loading workflow...</pre>
     </section>
   </main>
 

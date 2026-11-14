@@ -401,6 +401,12 @@ class FuzzballMCPStdioClient:
     def cluster_list(self) -> Any:
         return self.call_tool("cluster_list", {})
 
+    def cluster_resources(self) -> Any:
+        return self.call_tool("cluster_resources", {})
+
+    def queue_show(self) -> Any:
+        return self.call_tool("queue_show", {})
+
     def node_list(self, fields: list[str] | None = None) -> Any:
         args: dict[str, Any] = {}
         fkey = self.resolve_argument_key("node_list", ("fields",))
@@ -408,8 +414,32 @@ class FuzzballMCPStdioClient:
             args[fkey] = fields or ["id", "resource"]
         return self.call_tool("node_list", args)
 
-    def volume_list(self) -> Any:
-        return self.call_tool("volume_list", {})
+    def volume_list(self, provisioner: str | None = None) -> Any:
+        args: dict[str, Any] = {}
+        if provisioner:
+            pkey = self.resolve_argument_key(
+                "volume_list",
+                ("provisioner", "provisioner_id", "provisionerId", "use"),
+            )
+            if pkey is not None:
+                args[pkey] = provisioner
+        return self.call_tool("volume_list", args)
+
+    def volume_create(self, provisioner: str, name: str) -> Any:
+        args: dict[str, Any] = {}
+        pkey = self.resolve_argument_key(
+            "volume_create",
+            ("provisioner", "provisioner_id", "provisionerId", "use"),
+        )
+        nkey = self.resolve_argument_key(
+            "volume_create",
+            ("name", "volume", "volume_name", "id"),
+        )
+        if pkey is not None:
+            args[pkey] = provisioner
+        if nkey is not None:
+            args[nkey] = name
+        return self.call_tool("volume_create", args)
 
     def workflow_list(self, status: str | None = None) -> Any:
         args: dict[str, Any] = {}
