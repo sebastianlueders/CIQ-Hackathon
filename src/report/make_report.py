@@ -57,6 +57,18 @@ def main():
     else:
         rows.append(("Training throughput by experts implementation",
                      ", ".join(f"{k}: {fmt(v, 0)}" for k, v in perf.items())))
+    pd = os.path.join(R, "perf", "defaults.json")
+    if os.path.exists(pd):
+        for d in json.load(open(pd))["decisions"]:
+            if "speedup" in d:
+                rows.append((f"Training: {d['candidate']} vs grouped_mm baseline (adopted={d['adopted']})",
+                             f"{d['tok_s']:.0f} tokens/s ({d['speedup']:.2f}x), loss within {100 * d['max_rel_loss_diff']:.1f}%"))
+                if d["candidate"] == "compile" and d["adopted"] and perf.get("eager"):
+                    rows.append(("Training throughput, stock (eager experts) -> adopted optimizations",
+                                 f"{perf['eager']:.0f} -> {d['tok_s']:.0f} tokens/s ({d['tok_s'] / perf['eager']:.2f}x)"))
+                    if peak:
+                        rows.append(("Utilization vs measured BF16 peak, with adopted optimizations",
+                                     f"{100 * d['tok_s'] * 4 * ACTIVE_PARAMS / (peak * 1e12):.1f}%"))
     if best_impl and peak:
         mfu = perf[best_impl] * 4 * ACTIVE_PARAMS / (peak * 1e12)
         rows.append(("Utilization vs measured BF16 peak (4 x active params FLOPs/token)", f"{100 * mfu:.1f}% of {peak} TFLOP/s"))

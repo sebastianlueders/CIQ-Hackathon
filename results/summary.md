@@ -3,6 +3,9 @@
 | Held-out LAMMPS loss (perplexity), base -> fine-tuned | 1.175 (3.24) -> 1.037 (2.82) |
 | Recipe search: configs tried / stopped early / winner | 4 / 3 / c1-lr1e-3-r8 |
 | Training throughput, eager experts -> best (grouped) | 356 -> 675 tokens/s (1.90x) |
+| Training: compile vs grouped_mm baseline (adopted=True) | 1011 tokens/s (1.49x), loss within 0.6% |
+| Training throughput, stock (eager experts) -> adopted optimizations | 356 -> 1011 tokens/s (2.84x) |
+| Utilization vs measured BF16 peak, with adopted optimizations | 13.5% |
 | Utilization vs measured BF16 peak (4 x active params FLOPs/token) | 9.0% of 99.1 TFLOP/s |
 | Serving bf16: out tok/s at C=1 / C=16; held-out loss | 28.4 / 113.4; 1.29053 |
 | Serving fp8: out tok/s at C=1 / C=16; held-out loss | 47.4 / 203.3; 1.2934 |

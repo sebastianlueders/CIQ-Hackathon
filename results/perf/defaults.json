@@ -1,12 +1,17 @@
 {
  "baseline": "s4-perf-experts-grouped",
  "baseline_tok_s": 677.8,
- "adopted": {},
+ "adopted": {
+  "compile": true
+ },
  "decisions": [
   {
    "candidate": "compile",
-   "adopted": false,
-   "reason": "not measured"
+   "adopted": true,
+   "speedup": 1.492,
+   "tok_s": 1011.3,
+   "max_rel_loss_diff": 0.006,
+   "rule": "speedup >= 1.05 and loss within 1% of baseline"
   },
   {
    "candidate": "fused_ce",
