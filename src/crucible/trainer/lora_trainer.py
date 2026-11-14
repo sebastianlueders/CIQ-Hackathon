@@ -1,13 +1,8 @@
 """LoRA fine-tuning trainer supporting single-node & multi-node (torchrun/NCCL) execution.
 
-Supports two execution modes:
-1. `hf_peft`: Loads local base weights (e.g., `/vast/models/Qwen3-Coder-30B-A3B`) with HuggingFace
-   `transformers` + `peft`, optionally patching Crucible's `sm_121` custom kernels, and runs
-   single-node or multi-node DDP/FSDP (`WORLD_SIZE > 1` via `torchrun` + NCCL).
-2. `micro_torch`: Runs a self-contained PyTorch MoE + `FusedLoRALinear` + `chunked_cross_entropy`
-   network directly on ingested LAMMPS JSONL chunks on CPU or GPU for fast local/CI verification.
-
-Both modes emit identical structured `metrics.jsonl` step records and `summary.json`.
+`torch` is imported strictly lazily inside `run_micro_torch_training` and `run_hf_peft_training`
+so thin control-plane environments (e.g., macOS laptops orchestrating remote CIQ Fuzzball clusters)
+can import Crucible without installing PyTorch locally.
 """
 
 from __future__ import annotations
@@ -17,115 +12,32 @@ import json
 import math
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
-from typing import Literal
-
-import torch
-import torch.nn as nn
 
 from crucible.config import RecipeCandidate, TrainingPerfCandidate
-from crucible.kernels.chunked_cross_entropy import chunked_cross_entropy, reference_cross_entropy
-from crucible.kernels.fused_lora import FusedLoRALinear
-from crucible.kernels.grouped_moe_gemm import grouped_moe_forward, reference_moe_forward
+from crucible.trainer.types import StepMetricRecord, TrainingTrialSummary
+
+__all__ = [
+    "StepMetricRecord",
+    "TrainingTrialSummary",
+    "run_hf_peft_training",
+    "run_micro_torch_training",
+]
 
 
-@dataclass(frozen=True)
-class StepMetricRecord:
-    step: int
-    train_loss: float
-    val_loss: float | None
-    tokens_per_sec: float
-    peak_mem_gb: float
-    wall_time_s: float
-    world_size: int
+def _require_torch():
+    try:
+        import torch
+        import torch.nn as nn
 
-
-@dataclass(frozen=True)
-class TrainingTrialSummary:
-    trial_id: str
-    status: Literal["completed", "early_stopped", "oom"]
-    steps_completed: int
-    initial_val_loss: float
-    final_train_loss: float
-    final_val_loss: float
-    held_out_eval_loss: float
-    held_out_perplexity: float
-    mean_tokens_per_sec: float
-    hardware_utilization_pct: float
-    peak_mem_gb: float
-    wall_time_s: float
-    loss_curve: list[float]
-    world_size: int
-    kernels_enabled: dict[str, bool]
-
-    def to_dict(self) -> dict[str, object]:
-        return asdict(self)
-
-
-class MicroMoELoRAModel(nn.Module):
-    """Compact MoE + LoRA causal LM exercising all 3 training kernels on real packed token IDs."""
-
-    def __init__(
-        self,
-        vocab_size: int,
-        hidden_size: int,
-        lora_rank: int,
-        lora_alpha: int,
-        num_experts: int = 8,
-        top_k: int = 2,
-        use_fused_lora: bool = False,
-        use_grouped_moe: bool = False,
-    ) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.hidden_size = hidden_size
-        self.num_experts = num_experts
-        self.top_k = top_k
-        self.use_grouped_moe = use_grouped_moe
-
-        self.embed = nn.Embedding(vocab_size, hidden_size)
-        nn.init.normal_(self.embed.weight, std=0.02)
-        self.embed.weight.requires_grad_(False)
-
-        self.qkv_lora = FusedLoRALinear(
-            hidden_size,
-            hidden_size,
-            rank=lora_rank,
-            alpha=lora_alpha,
-            use_fused_kernel=use_fused_lora,
-        )
-        self.router = nn.Linear(hidden_size, num_experts, bias=False)
-        self.router.weight.requires_grad_(False)
-        self.expert_weights = nn.Parameter(
-            torch.randn((num_experts, hidden_size, hidden_size)) * (1.0 / math.sqrt(hidden_size)),
-            requires_grad=False,
-        )
-        self.out_lora = FusedLoRALinear(
-            hidden_size,
-            hidden_size,
-            rank=lora_rank,
-            alpha=lora_alpha,
-            use_fused_kernel=use_fused_lora,
-        )
-        self.lm_head = nn.Parameter(
-            torch.randn((vocab_size, hidden_size)) * (1.0 / math.sqrt(hidden_size)),
-            requires_grad=False,
-        )
-
-    def forward_hidden(self, input_ids: torch.Tensor) -> torch.Tensor:
-        x = self.embed(input_ids)
-        h = torch.tanh(self.qkv_lora(x))
-        flat_h = h.reshape(-1, self.hidden_size)
-        router_logits = self.router(flat_h)
-        topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, dim=-1)
-        topk_gates = torch.softmax(topk_vals, dim=-1)
-        if self.use_grouped_moe:
-            moe_out = grouped_moe_forward(flat_h, self.expert_weights, topk_idx, topk_gates)
-        else:
-            moe_out = reference_moe_forward(flat_h, self.expert_weights, topk_idx, topk_gates)
-        merged = h + 0.25 * moe_out.reshape_as(h)
-        return self.out_lora(merged)
+        return torch, nn
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyTorch is not installed in this Python environment. "
+            "Install 'pip install -e \".[gpu]\"' for local_torch execution, or use "
+            "'--backend fuzzball_mcp' / '--backend fuzzball' / '--backend simulator' to run on Team 20."
+        ) from exc
 
 
 def _load_packed_sequences(jsonl_path: Path, vocab_cap: int) -> list[list[int]]:
@@ -142,6 +54,77 @@ def _load_packed_sequences(jsonl_path: Path, vocab_cap: int) -> list[list[int]]:
     return seqs
 
 
+def _build_micro_moe_lora_model(
+    vocab_size: int,
+    hidden_size: int,
+    lora_rank: int,
+    lora_alpha: int,
+    num_experts: int = 8,
+    top_k: int = 2,
+    use_fused_lora: bool = False,
+    use_grouped_moe: bool = False,
+):
+    torch, nn = _require_torch()
+    from crucible.kernels.fused_lora import FusedLoRALinear
+    from crucible.kernels.grouped_moe_gemm import grouped_moe_forward, reference_moe_forward
+
+    class MicroMoELoRAModel(nn.Module):
+        """Compact MoE + LoRA causal LM exercising all 3 training kernels on real packed token IDs."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.vocab_size = vocab_size
+            self.hidden_size = hidden_size
+            self.num_experts = num_experts
+            self.top_k = top_k
+            self.use_grouped_moe = use_grouped_moe
+
+            self.embed = nn.Embedding(vocab_size, hidden_size)
+            nn.init.normal_(self.embed.weight, std=0.02)
+            self.embed.weight.requires_grad_(False)
+
+            self.qkv_lora = FusedLoRALinear(
+                hidden_size,
+                hidden_size,
+                rank=lora_rank,
+                alpha=lora_alpha,
+                use_fused_kernel=use_fused_lora,
+            )
+            self.router = nn.Linear(hidden_size, num_experts, bias=False)
+            self.router.weight.requires_grad_(False)
+            self.expert_weights = nn.Parameter(
+                torch.randn((num_experts, hidden_size, hidden_size)) * (1.0 / math.sqrt(hidden_size)),
+                requires_grad=False,
+            )
+            self.out_lora = FusedLoRALinear(
+                hidden_size,
+                hidden_size,
+                rank=lora_rank,
+                alpha=lora_alpha,
+                use_fused_kernel=use_fused_lora,
+            )
+            self.lm_head = nn.Parameter(
+                torch.randn((vocab_size, hidden_size)) * (1.0 / math.sqrt(hidden_size)),
+                requires_grad=False,
+            )
+
+        def forward_hidden(self, input_ids):
+            x = self.embed(input_ids)
+            h = torch.tanh(self.qkv_lora(x))
+            flat_h = h.reshape(-1, self.hidden_size)
+            router_logits = self.router(flat_h)
+            topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, dim=-1)
+            topk_gates = torch.softmax(topk_vals, dim=-1)
+            if self.use_grouped_moe:
+                moe_out = grouped_moe_forward(flat_h, self.expert_weights, topk_idx, topk_gates)
+            else:
+                moe_out = reference_moe_forward(flat_h, self.expert_weights, topk_idx, topk_gates)
+            merged = h + 0.25 * moe_out.reshape_as(h)
+            return self.out_lora(merged)
+
+    return MicroMoELoRAModel()
+
+
 def run_micro_torch_training(
     trial_id: str,
     processed_data_dir: Path,
@@ -154,6 +137,12 @@ def run_micro_torch_training(
     measured_peak_tok_s: float = 4150.0,
     seed: int = 1234,
 ) -> TrainingTrialSummary:
+    torch, _ = _require_torch()
+    from crucible.kernels.chunked_cross_entropy import (
+        chunked_cross_entropy,
+        reference_cross_entropy,
+    )
+
     torch.manual_seed(seed)
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / "metrics.jsonl"
@@ -162,7 +151,7 @@ def run_micro_torch_training(
     val_seqs = _load_packed_sequences(processed_data_dir / "val.jsonl", vocab_cap)
     held_out_seqs = _load_packed_sequences(processed_data_dir / "held_out.jsonl", vocab_cap)
 
-    model = MicroMoELoRAModel(
+    model = _build_micro_moe_lora_model(
         vocab_size=vocab_cap,
         hidden_size=hidden_size,
         lora_rank=min(recipe.lora_rank, 32),
@@ -264,10 +253,9 @@ def run_micro_torch_training(
             "fused_lora_linear": perf.use_fused_lora_kernel,
         },
     )
-    (output_dir / "summary.json").write_text(
-        json.dumps(summary.to_dict(), indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    summary_json = json.dumps(summary.to_dict(), indent=2, sort_keys=True)
+    (output_dir / "summary.json").write_text(summary_json, encoding="utf-8")
+    print(f"CRUCIBLE_SUMMARY_JSON={json.dumps(summary.to_dict(), sort_keys=True)}", flush=True)
     return summary
 
 
@@ -282,9 +270,12 @@ def run_hf_peft_training(
     measured_peak_tok_s: float = 4150.0,
 ) -> TrainingTrialSummary:
     """Production single-node & torchrun/NCCL multi-node HuggingFace + PEFT LoRA loop."""
+    torch, _ = _require_torch()
     import torch.distributed as dist
     from peft import LoraConfig, get_peft_model  # type: ignore[import-not-found]
     from transformers import AutoModelForCausalLM  # type: ignore[import-not-found]
+
+    from crucible.kernels.chunked_cross_entropy import chunked_cross_entropy
 
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -339,7 +330,7 @@ def run_hf_peft_training(
 
     unwrapped = model.module if hasattr(model, "module") else model
 
-    def _compute_loss(batch_ids: torch.Tensor) -> torch.Tensor:
+    def _compute_loss(batch_ids):
         inp = batch_ids[:, :-1]
         tgt = batch_ids[:, 1:]
         if perf.use_chunked_ce_kernel and hasattr(unwrapped, "get_output_embeddings"):
@@ -449,6 +440,7 @@ def run_hf_peft_training(
             json.dumps(summary.to_dict(), indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        print(f"CRUCIBLE_SUMMARY_JSON={json.dumps(summary.to_dict(), sort_keys=True)}", flush=True)
     if world_size > 1 and dist.is_initialized():
         dist.destroy_process_group()
     return summary

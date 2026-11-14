@@ -54,8 +54,10 @@ def detect_capabilities() -> HardwareCapabilities:
         backend = f"triton_{sm_arch}"
     elif cuda_ok:
         backend = "pytorch_cuda_fallback"
-    else:
+    elif torch_ok:
         backend = "pytorch_cpu_fallback"
+    else:
+        backend = "numpy_cpu_fallback"
 
     return HardwareCapabilities(
         torch_available=torch_ok,

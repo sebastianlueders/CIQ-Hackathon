@@ -29,14 +29,18 @@ from crucible.fuzzball.renderer import (
 )
 from crucible.fuzzball.validator import validate_fuzzfile
 from crucible.serving.vllm_bench import ServingTrialSummary
-from crucible.trainer.lora_trainer import (
-    StepMetricRecord,
-    TrainingTrialSummary,
-    run_micro_torch_training,
-)
+from crucible.trainer.types import StepMetricRecord, TrainingTrialSummary
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 EventCallback = Callable[[dict[str, Any]], None]
+
+
+def _parse_summary_from_logs(log_text: str) -> dict[str, Any] | None:
+    for line in reversed(log_text.splitlines()):
+        if "CRUCIBLE_SUMMARY_JSON=" in line:
+            _, rhs = line.split("CRUCIBLE_SUMMARY_JSON=", 1)
+            return json.loads(rhs.strip())
+    return None
 
 
 def _extract_placed_nodes(raw_describe: Any, cluster: ClusterConfig, requested_nodes: int, seq_idx: int) -> list[str]:
@@ -198,7 +202,21 @@ class FuzzballCLIBackend:
         vast_summary = (
             Path(self.cluster.vast.runs_dir) / self.run_id / "trials" / trial_id / "summary.json"
         )
-        raw = json.loads(vast_summary.read_text(encoding="utf-8"))
+        if vast_summary.exists():
+            raw = json.loads(vast_summary.read_text(encoding="utf-8"))
+        else:
+            log_proc = subprocess.run(
+                [self.fuzzball_bin, "workflow", "log", wf_uuid, f"train-{trial_id}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            parsed = _parse_summary_from_logs(log_proc.stdout)
+            if parsed is None:
+                raise RuntimeError(
+                    f"Trial {trial_id} finished ({wf_uuid}) but no summary found on VAST or job logs."
+                )
+            raw = parsed
         (trial_dir / "placement.json").write_text(
             json.dumps({"workflow_id": wf_uuid, "nodes": nodes, "object_uri": obj_uri}, indent=2),
             encoding="utf-8",
@@ -248,7 +266,21 @@ class FuzzballCLIBackend:
         vast_summary = (
             Path(self.cluster.vast.runs_dir) / self.run_id / "serving" / trial_id / "summary.json"
         )
-        raw = json.loads(vast_summary.read_text(encoding="utf-8"))
+        if vast_summary.exists():
+            raw = json.loads(vast_summary.read_text(encoding="utf-8"))
+        else:
+            log_proc = subprocess.run(
+                [self.fuzzball_bin, "workflow", "log", wf_uuid, f"bench-{trial_id}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            parsed = _parse_summary_from_logs(log_proc.stdout)
+            if parsed is None:
+                raise RuntimeError(
+                    f"Serving trial {trial_id} finished ({wf_uuid}) but no summary found in job logs."
+                )
+            raw = parsed
         self._emit(
             {
                 "type": "trial_finished",
@@ -349,17 +381,28 @@ class FuzzballMCPBackend:
                 nodes = _extract_placed_nodes(
                     mcp.workflow_describe(wf_id), self.cluster, requested_nodes, seq_idx
                 )
-            obj_payload = mcp.object_get(object_uri, max_inline_bytes=65536)
-            if isinstance(obj_payload, str):
-                parsed = json.loads(obj_payload)
-            elif isinstance(obj_payload, dict) and "content" in obj_payload and isinstance(
-                obj_payload["content"], str
-            ):
-                parsed = json.loads(obj_payload["content"])
-            elif isinstance(obj_payload, dict):
-                parsed = obj_payload
-            else:
-                raise FuzzballMCPError(f"Unexpected object_get payload from {object_uri}: {obj_payload!r}")
+            try:
+                obj_payload = mcp.object_get(object_uri, max_inline_bytes=65536)
+                if isinstance(obj_payload, str):
+                    parsed = json.loads(obj_payload)
+                elif isinstance(obj_payload, dict) and "content" in obj_payload and isinstance(
+                    obj_payload["content"], str
+                ):
+                    parsed = json.loads(obj_payload["content"])
+                elif isinstance(obj_payload, dict):
+                    parsed = obj_payload
+                else:
+                    raise FuzzballMCPError(f"Unexpected object_get payload: {obj_payload!r}")
+            except Exception as obj_exc:
+                job_name = f"train-{trial_id}" if kind == "train" else f"bench-{trial_id}"
+                if "workflow_log" in mcp.advertised_tools:
+                    log_txt = mcp.workflow_log(wf_id, job_name)
+                    from_log = _parse_summary_from_logs(log_txt)
+                    if from_log is not None:
+                        return from_log, wf_id, nodes
+                raise FuzzballMCPError(
+                    f"Could not fetch trial summary from object_get ({object_uri}): {obj_exc}"
+                ) from obj_exc
             return parsed, wf_id, nodes
 
     def run_training_trial(
@@ -860,6 +903,8 @@ class LocalMicroTorchBackend(CalibratedSimulatorBackend):
                 "fuzzfile": yaml_text,
             }
         )
+        from crucible.trainer.lora_trainer import run_micro_torch_training
+
         summary = run_micro_torch_training(
             trial_id=trial_id,
             processed_data_dir=self.processed_data_dir,

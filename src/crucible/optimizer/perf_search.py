@@ -12,7 +12,7 @@ from crucible.config import (
 )
 from crucible.fuzzball.runner import ExecutionBackend
 from crucible.serving.vllm_bench import ServingTrialSummary
-from crucible.trainer.lora_trainer import TrainingTrialSummary
+from crucible.trainer.types import TrainingTrialSummary
 
 
 @dataclass(frozen=True)

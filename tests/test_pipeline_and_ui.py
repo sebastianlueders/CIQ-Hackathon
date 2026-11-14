@@ -65,6 +65,9 @@ def test_end_to_end_pipeline_simulator_and_cli(tmp_path: Path) -> None:
 
 
 def test_micro_torch_trainer_runs_real_pytorch_loop(tmp_path: Path) -> None:
+    import pytest
+
+    pytest.importorskip("torch")
     packed_dir = tmp_path / "packed"
     ingest_lammps_corpus(
         repo_root() / "fixtures" / "sample_lammps",
@@ -155,3 +158,25 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
 
     probe = client.post("/api/firewall-probe", json={"inject_cpp_snippet": True}).json()
     assert probe["blocked"] is True
+
+
+def test_zero_torch_import_across_control_plane(tmp_path: Path) -> None:
+    """Guarantees thin control-plane laptops without PyTorch run CLI, discovery, and simulator cleanly."""
+    import subprocess
+    import sys
+
+    code = (
+        "import builtins, pathlib\n"
+        "real_import = builtins.__import__\n"
+        "def block_torch(name, *a, **kw):\n"
+        "    if name == 'torch' or name.startswith('torch.'):\n"
+        "        raise ModuleNotFoundError(\"No module named 'torch'\")\n"
+        "    return real_import(name, *a, **kw)\n"
+        "builtins.__import__ = block_torch\n"
+        "from crucible.cli import main\n"
+        "assert main(['discover']) == 0\n"
+        "assert main(['bench-kernels']) == 0\n"
+        f"assert main(['run', '--backend', 'simulator', '--output-dir', '{tmp_path / 'notorch'}']) == 0\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"Failed without torch:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"

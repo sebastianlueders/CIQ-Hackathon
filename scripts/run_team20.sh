@@ -68,8 +68,13 @@ CRUCIBLE="${VENV_BIN}/crucible"
 # 2. Auto-select execution backend if set to 'auto'
 if [[ "$BACKEND" == "auto" ]]; then
   if command -v fuzzball >/dev/null 2>&1; then
-    BACKEND="fuzzball_mcp"
-    echo "[team20] Detected 'fuzzball' CLI -> selecting live CIQ Fuzzball 4.2 MCP backend (definitionId: team20)"
+    if fuzzball mcp serve --help >/dev/null 2>&1; then
+      BACKEND="fuzzball_mcp"
+      echo "[team20] Detected 'fuzzball mcp serve' -> selecting live CIQ Fuzzball 4.2 MCP backend (definitionId: team20)"
+    else
+      BACKEND="fuzzball"
+      echo "[team20] Detected 'fuzzball' CLI (without 'mcp serve') -> selecting live Fuzzball CLI backend (definitionId: team20)"
+    fi
   else
     BACKEND="simulator"
     echo "[team20] 'fuzzball' CLI not found on PATH -> selecting calibrated Team 20 GB10 simulator"
@@ -128,7 +133,13 @@ while true; do
   STATE="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["state"])' <<<"$STATUS_JSON")"
   LABEL="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["stage_label"])' <<<"$STATUS_JSON")"
   echo "  [${STATE}] ${LABEL}"
-  if [[ "$STATE" == "completed" || "$STATE" == "failed" ]]; then
+  if [[ "$STATE" == "completed" ]]; then
+    break
+  fi
+  if [[ "$STATE" == "failed" ]]; then
+    ERR="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("error") or "")' <<<"$STATUS_JSON")"
+    echo "[team20] Live run stopped with error: ${ERR}" >&2
+    echo "[team20] Tip: verify 'fuzzball context list' / 'fuzzball workflow list' or re-run with '--backend simulator' from http://${HOST}:${PORT}" >&2
     break
   fi
   sleep 1

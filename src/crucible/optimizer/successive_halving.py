@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 
 from crucible.config import RecipeCandidate, StageARecipeConfig, TrainingPerfCandidate
 from crucible.fuzzball.runner import ExecutionBackend
-from crucible.trainer.lora_trainer import TrainingTrialSummary
+from crucible.trainer.types import TrainingTrialSummary
 
 
 @dataclass(frozen=True)

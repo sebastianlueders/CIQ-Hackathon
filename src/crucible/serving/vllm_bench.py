@@ -190,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(summary.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+    print(f"CRUCIBLE_SUMMARY_JSON={json.dumps(summary.to_dict(), sort_keys=True)}", flush=True)
     return 0
 
 
