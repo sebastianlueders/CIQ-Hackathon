@@ -94,5 +94,23 @@
   "workflow": "e501d609-f41a-4a0c-a7d7-180624fd35b6",
   "job": "run",
   "kind": "serve"
+ },
+ {
+  "id": "s4-perf-dp2-stack-nockpt",
+  "workflow": "e12d3158-ee5e-41fc-94dc-2fb3f94c9501",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack",
+  "workflow": "f8b5b687-341e-4b93-8b94-50a0f4232521",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-stack",
+  "workflow": "f2860506-834a-42b4-b439-a939434f48a7",
+  "job": "trial",
+  "kind": "trial"
  }
 ]

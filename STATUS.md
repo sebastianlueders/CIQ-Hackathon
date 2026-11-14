@@ -13,6 +13,7 @@ bash docs/build/build-pdfs.sh                                           # one-pa
 |---|---|
 | `s4-perf-dp2-ip-2`, `s4-perf-dp2-c10d-2` | **2-node DP throughput** (tok_s is cluster-wide; compare to 1011 single-node with compile). `DIAG` lines and `== worker log` show both ranks. `allreduce_s` = gradient sync time per step. (`s4-perf-dp2-ip` / `-c10d` without `-2` were the broken launcher: ignore.) |
 | `s4-train-dp2-winner` | **Winning recipe trained on 2 nodes** (4M tokens, cosine schedule, evals every 1M): the "second node unlocked" result. |
+| `s4-perf-dp2-stack-nockpt` / `s4-perf-dp2-stack` / `s4-perf-compile-stack` | **Stacked** best config: compile + fused CE + micro-batch 2 (+ checkpointing off, 110 GiB) on 2 nodes, plus the same stack on 1 node. Expect the nockpt one to OOM if activations exceed memory; the `-stack` one is the fallback. Judge batch changes by held-out eval, not per-step loss. |
 | `s4-perf-compile-{fused-ce,mb2,nockpt,seq8192}` | What stacks on top of compile (1011 tok/s). Run `policy.py` after adding them to `CANDIDATES`. |
 | `s5-serve-ft-adapter` | Fine-tuned model served: FP8 vs BF16 + LoRA at C=1/16/64, held-out loss. |
 | `s5-tune-moe-gb10` | vLLM fused-MoE tile tuning for GB10 (`/runs/serve/moe-configs/`), then FP8 serving re-measured with tuned tiles (compare to 203 tok/s at C=16). |
