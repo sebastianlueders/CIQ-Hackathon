@@ -1,4 +1,27 @@
-# Status (updated Sat Nov 14, ~3:55 PM CST)
+# Morning checklist (overnight queue submitted Sat ~4:20 PM)
+
+All overnight jobs are listed in `results/overnight/manifest.json` (Fuzzball workflow IDs). In the morning:
+
+```bash
+python3 src/runner/runner.py --collect results/overnight/manifest.json   # pull logs + RESULT records into results/trials/
+python3 src/perf/policy.py                                              # re-decide adopted optimizations (compile is already adopted)
+python3 src/report/make_report.py                                       # regenerate results/summary.md
+bash docs/build/build-pdfs.sh                                           # one-pager PDF (docs/ is local, git-ignored)
+```
+
+| Overnight job | What to look at |
+|---|---|
+| `s4-perf-dp2-ip-2`, `s4-perf-dp2-c10d-2` | **2-node DP throughput** (tok_s is cluster-wide; compare to 1011 single-node with compile). `DIAG` lines and `== worker log` show both ranks. `allreduce_s` = gradient sync time per step. (`s4-perf-dp2-ip` / `-c10d` without `-2` were the broken launcher: ignore.) |
+| `s4-train-dp2-winner` | **Winning recipe trained on 2 nodes** (4M tokens, cosine schedule, evals every 1M): the "second node unlocked" result. |
+| `s4-perf-compile-{fused-ce,mb2,nockpt,seq8192}` | What stacks on top of compile (1011 tok/s). Run `policy.py` after adding them to `CANDIDATES`. |
+| `s5-serve-ft-adapter` | Fine-tuned model served: FP8 vs BF16 + LoRA at C=1/16/64, held-out loss. |
+| `s5-tune-moe-gb10` | vLLM fused-MoE tile tuning for GB10 (`/runs/serve/moe-configs/`), then FP8 serving re-measured with tuned tiles (compare to 203 tok/s at C=16). |
+| `s6-pipeline-full` | **`workflows/pipeline.yaml` end to end**: 8M tokens (winning recipe + grouped_mm + compile), then FP8 + LoRA serving. |
+| `s6-pipeline-validate-2` | Short end-to-end check (500k tokens). Note: it shares `/runs/pipeline/train` with `s6-pipeline-full`; trust the full run's adapter. |
+
+**2-node root cause (fixed):** with `implementation: generic`, Fuzzball runs the job script on the head node only; workers must be started with `"$MULTINODE_SSH_WRAPPER" "$host" "<one shell string>"` (see `/multinode/generic-helper` inside any multinode job). Multinode containers do see RDMA devices (`/dev/infiniband/uverbs0-3`), so NCCL over RoCE is worth testing (`c10d` variant leaves IB enabled).
+
+# Status (updated Sat Nov 14, ~4:20 PM CST)
 
 An agent loop for local fine-tuning and serving on GB10 nodes via Fuzzball, with VAST-backed volumes.
 Every number comes from `results/`; regenerate the table with `python src/report/make_report.py` (→ `results/summary.md`).
@@ -10,8 +33,8 @@ Every number comes from `results/`; regenerate the table with `python src/report
 | VAST read, one stream | 1.64 GB/s | `results/vast_read.json` |
 | Training data (LAMMPS) | 18.4M train / 0.9M held-out tokens, held out by file group | `results/ingest.json` |
 | Model load per trial | ~10 min → **62 s** (fused-experts checkpoint + direct loader) | `results/fuse_experts.json`, smoke trials |
-| Held-out loss, base → best after 250k tokens | **1.175 → 1.066** (ppl 3.24 → 2.90), lr 1e-3, rank 8 | `results/search/recipe_decisions.jsonl` |
-| Training throughput, per-expert loop → grouped_mm | **356 → 675 tokens/s (1.90×)**, 9% of BF16 peak | `results/trials/s4-perf-experts-*` |
+| Held-out loss, base → recipe-search winner (750k tokens) | **1.175 → 1.037** (ppl 3.24 → 2.82, −11.7%), lr 1e-3, rank 8 (runner-up 1.039) | `results/search/recipe.json` |
+| Training throughput: per-expert loop → grouped_mm → + torch.compile | **356 → 675 → 1011 tokens/s (2.84×)**, 13.5% of BF16 peak; compile adopted (loss within 0.6%) | `results/trials/s4-perf-*`, `results/perf/defaults.json` |
 | Custom Triton fused linear + CE (V=151,936) | exact loss, grad rel. err 5e-6; **2.1–2.35× faster, 7.0 → 0.34 GiB** at 4k tokens | `results/kernel_fused_ce_*.json` |
 | Serving (vLLM 0.33), BF16 → FP8 at 16 concurrent | **113 → 203 tokens/s (1.79×)**, held-out loss +0.2% | `results/serve/` |
 

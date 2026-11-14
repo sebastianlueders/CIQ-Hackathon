@@ -1,0 +1,98 @@
+[
+ {
+  "id": "s4-perf-dp2-ip",
+  "workflow": "23663b9e-e8ef-4e1a-9cbf-afbfda98fea9",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-c10d",
+  "workflow": "5f93a52b-eb1a-4b0e-a2cd-fab325e3ca6e",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-fused-ce",
+  "workflow": "1408663d-12b3-40af-88af-27fe07361ea0",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-mb2",
+  "workflow": "73ef06a3-ba62-468f-851b-5791ff55bcfd",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-nockpt",
+  "workflow": "f8a62b36-5935-4587-8534-9951c5bc4303",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-seq8192",
+  "workflow": "cc0a8c3e-c8ce-4f84-84d3-8bd5dd2f4602",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s5-serve-ft-adapter",
+  "workflow": "6e0bf8a1-cfad-4844-92f1-aff413c2f9a8",
+  "job": "run",
+  "kind": "serve"
+ },
+ {
+  "id": "s5-tune-moe-gb10",
+  "workflow": "69b82550-258e-4522-bea9-2f325afb342f",
+  "job": "run",
+  "kind": "serve"
+ },
+ {
+  "id": "s6-pipeline-full-train",
+  "workflow": "73f9c275-5122-4938-8b0d-c54df38f5db2",
+  "job": "train",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s6-pipeline-full-serve",
+  "workflow": "73f9c275-5122-4938-8b0d-c54df38f5db2",
+  "job": "serve-and-verify",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s6-pipeline-validate-2-train",
+  "workflow": "7f86c8ff-ba3b-4ded-8e1c-f7466bac38cc",
+  "job": "train",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s6-pipeline-validate-2-serve",
+  "workflow": "7f86c8ff-ba3b-4ded-8e1c-f7466bac38cc",
+  "job": "serve-and-verify",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s4-dp2-network-diag",
+  "workflow": "7335a6d4-257d-4e81-9337-e061e65fd282",
+  "job": "diag",
+  "kind": "diag"
+ },
+ {
+  "id": "s4-perf-dp2-ip-2",
+  "workflow": "8216d998-0222-4d36-b4ef-317d3df856af",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-c10d-2",
+  "workflow": "652b8c11-3857-4b9a-ba19-b795b32c8fd6",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-train-dp2-winner",
+  "workflow": "8e3c8935-25f2-4121-9537-9ecc34c94e8b",
+  "job": "trial",
+  "kind": "trial"
+ }
+]
