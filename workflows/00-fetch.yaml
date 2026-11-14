@@ -1,82 +1,71 @@
 # workflows/00-fetch.yaml
-# One-time CIQ Fuzzball v4 bootstrap workflow targeting Team 20 (definitionId: team20,
-# CIQ-CHI-SPARK39 & CIQ-CHI-SPARK40, arm64 cpu/arm64/sve) that populates the shared VAST volume:
+# One-time CIQ Fuzzball v4 bootstrap workflow targeting Team 20 VAST storage (`use: team20`):
 #   1. Base model weights: Qwen/Qwen3-Coder-30B-A3B (~57 GB BF16 safetensors)
 #   2. Public HPC stand-in corpus: LAMMPS C++ repository (~15,605 source/doc files)
 #
 # Launch with:
 #   fuzzball workflow validate workflows/00-fetch.yaml
-#   fuzzball workflow start workflows/00-fetch.yaml -n crucible-00-fetch
+#   fuzzball workflow start workflows/00-fetch.yaml --name crucible-00-fetch
 
 version: v4
 
-annotations:
-  fuzzball.io/provisioner_definition_id: team20
-
 volumes:
-  vast-shared:
-    use: vast
+  vast:
     name: crucible-vast
+    use: team20
 
 jobs:
   fetch-base-model:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
+      uri: docker://python:3.12-slim
     mounts:
-      /vast: vast-shared
+      /vast:
+        volume: vast
     env:
-      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - HF_XET_HIGH_PERFORMANCE=1
+      - HOME=/tmp/home
       - PYTHONUNBUFFERED=1
     resource:
       cpu:
         cores: 8
-        affinity: NUMA
       memory:
-        size: 32GiB
-      devices:
-        cpu/arm64/sve: 1
+        size: 16GiB
     policy:
       timeout:
-        execute: 2h
+        execute: 6h
     script: |
       #!/bin/bash
       set -euo pipefail
-      mkdir -p /vast/models/Qwen3-Coder-30B-A3B
-      python3 -m pip install --quiet huggingface_hub hf_transfer
-      python3 - <<'PY'
-      from huggingface_hub import snapshot_download
-      snapshot_download(
-          repo_id="Qwen/Qwen3-Coder-30B-A3B",
-          local_dir="/vast/models/Qwen3-Coder-30B-A3B",
-          ignore_patterns=["*.msgpack", "*.h5"],
-      )
-      print("Fetched Qwen/Qwen3-Coder-30B-A3B into /vast/models/Qwen3-Coder-30B-A3B")
-      PY
+      DEST="/vast/models/Qwen3-Coder-30B-A3B"
+      mkdir -p "$DEST" "$HOME"
+      pip install --quiet --no-cache-dir "huggingface_hub[hf_xet]>=0.34"
+      hf download Qwen/Qwen3-Coder-30B-A3B --local-dir "$DEST"
+      rm -rf "$DEST/.cache"
+      du -sh "$DEST"
 
   fetch-lammps-source:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
+      uri: docker://python:3.12-slim
     mounts:
-      /vast: vast-shared
+      /vast:
+        volume: vast
+    env:
+      - REPO=lammps/lammps
+      - COMMIT=68b557e3a2148ea9b31dda5b55800215fb8be677
     resource:
       cpu:
         cores: 4
-        affinity: CORE
       memory:
-        size: 16GiB
-      devices:
-        cpu/arm64/sve: 1
+        size: 8GiB
     policy:
       timeout:
-        execute: 45m
+        execute: 1h
     script: |
       #!/bin/bash
       set -euo pipefail
-      mkdir -p /vast/data
-      if [ ! -d /vast/data/lammps/.git ]; then
-        git clone --depth 1 https://github.com/lammps/lammps.git /vast/data/lammps
-      else
-        git -C /vast/data/lammps fetch --depth 1 origin && git -C /vast/data/lammps reset --hard FETCH_HEAD
-      fi
-      COUNT=$(find /vast/data/lammps -type f | wc -l)
-      echo "LAMMPS checkout ready at /vast/data/lammps (${COUNT} files)"
+      DEST="/vast/data/lammps"
+      rm -rf "$DEST" && mkdir -p "$DEST"
+      python3 -c "import urllib.request,sys; urllib.request.urlretrieve(sys.argv[1], '/tmp/src.tar.gz')" \
+        "https://codeload.github.com/${REPO}/tar.gz/${COMMIT}"
+      tar -xzf /tmp/src.tar.gz -C "$DEST" --strip-components=1
+      find "$DEST" -type f | wc -l

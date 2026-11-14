@@ -55,7 +55,7 @@ class NodeTopologyConfig(BaseModel):
     gpu_product: str = "NVIDIA-GB10"
     gpu_arch: str = "Blackwell"
     sm_arch: str = "sm_121"
-    arch_device: str = "cpu/arm64/sve"
+    arch_device: str = ""
     gpus_per_node: int = Field(default=1, ge=1)
     physical_cores_per_node: int = Field(default=20, ge=1)
     cpu_cores_per_node: int = Field(default=16, ge=1)
@@ -86,9 +86,9 @@ class NodeTopologyConfig(BaseModel):
 class VastStorageConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    volume_key: str = "vast-shared"
+    volume_key: str = "vast"
     persistent_volume_name: str = "crucible-vast"
-    provisioner: str = "vast"
+    provisioner: str = "team20"
     ephemeral: bool = False
     ephemeral_size: str = "64GiB"
     mount_path: str = "/vast"
@@ -96,15 +96,15 @@ class VastStorageConfig(BaseModel):
     datasets_dir: str = "/vast/data"
     runs_dir: str = "/vast/runs"
     object_cache_scope: Literal["user", "group"] = "user"
-    egress_metrics_to_object_cache: bool = True
+    egress_metrics_to_object_cache: bool = False
 
 
 class ContainerImagesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    fetch: str = "docker://nvcr.io/nvidia/pytorch:26.03-py3"
-    train: str = "docker://nvcr.io/nvidia/pytorch:26.03-py3"
-    serve: str = "docker://nvcr.io/nvidia/vllm:26.04-py3"
+    fetch: str = "docker://python:3.12-slim"
+    train: str = "docker://nvcr.io/nvidia/pytorch:26.10-py3"
+    serve: str = "docker://vllm/vllm-openai:v0.33.0"
 
 
 class ClusterConfig(BaseModel):
@@ -112,7 +112,7 @@ class ClusterConfig(BaseModel):
 
     cluster_name: str = "ciq-gb10-team20"
     definition_id: str = "team20"
-    pin_definition_annotation: bool = True
+    pin_definition_annotation: bool = False
     fuzzfile_version: Literal["v4", "v1"] = "v4"
     nodes: NodeTopologyConfig = Field(default_factory=NodeTopologyConfig)
     vast: VastStorageConfig = Field(default_factory=VastStorageConfig)
@@ -133,7 +133,11 @@ class ClusterConfig(BaseModel):
             data["fuzzfile_version"] = os.environ["CRUCIBLE_FUZZFILE_VERSION"]
         if os.getenv("CRUCIBLE_DEFINITION_ID"):
             data["definition_id"] = os.environ["CRUCIBLE_DEFINITION_ID"]
-        if os.getenv("CRUCIBLE_PIN_DEFINITION") in {"0", "false", "False"}:
+            if not os.getenv("CRUCIBLE_VAST_PROVISIONER"):
+                data["vast"]["provisioner"] = os.environ["CRUCIBLE_DEFINITION_ID"]
+        if os.getenv("CRUCIBLE_PIN_DEFINITION") in {"1", "true", "True"}:
+            data["pin_definition_annotation"] = True
+        elif os.getenv("CRUCIBLE_PIN_DEFINITION") in {"0", "false", "False"}:
             data["pin_definition_annotation"] = False
         if os.getenv("CRUCIBLE_VAST_VOLUME"):
             data["vast"]["persistent_volume_name"] = os.environ["CRUCIBLE_VAST_VOLUME"]

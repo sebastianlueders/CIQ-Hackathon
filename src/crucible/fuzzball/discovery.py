@@ -291,11 +291,7 @@ def apply_mcp_discovery_payload(
                     {"name": vname, "provisioner": vprov or "auto", "source": source_label}
                 )
 
-        if len(parsed_vols) == 0 and source_label == "fuzzball_mcp_stdio":
-            # Live cluster has 0 pre-created persistent volumes -> auto-switch to ephemeral scratch
-            cfg_data["vast"]["ephemeral"] = True
-            report.applied_overrides["vast.ephemeral"] = True
-        elif parsed_vols:
+        if parsed_vols:
             cfg_data["vast"]["ephemeral"] = False
             preferred = [
                 v
@@ -303,7 +299,7 @@ def apply_mcp_discovery_payload(
                 if v["raw"].get("selected")
                 or any(
                     tok in v["name"].lower() or tok in (v["provisioner"] or "").lower()
-                    for tok in ("vast", "crucible", "team20", "lammps", "shared", "data")
+                    for tok in ("vast", "crucible", "team20", "lammps", "shared", "data", "runs")
                 )
             ]
             chosen = preferred[0] if preferred else parsed_vols[0]
@@ -312,9 +308,6 @@ def apply_mcp_discovery_payload(
             if chosen["provisioner"]:
                 cfg_data["vast"]["provisioner"] = chosen["provisioner"]
                 report.applied_overrides["vast.provisioner"] = chosen["provisioner"]
-            elif source_label == "fuzzball_mcp_stdio":
-                # Omit `use:` when binding an existing persistent volume whose provisioner ID wasn't listed
-                cfg_data["vast"]["provisioner"] = ""
             if chosen["mount"] and str(chosen["mount"]).startswith("/"):
                 m = str(chosen["mount"])
                 cfg_data["vast"]["mount_path"] = m
@@ -322,6 +315,12 @@ def apply_mcp_discovery_payload(
                 cfg_data["vast"]["datasets_dir"] = f"{m.rstrip('/')}/data"
                 cfg_data["vast"]["runs_dir"] = f"{m.rstrip('/')}/runs"
                 report.applied_overrides["vast.mount_path"] = m
+        elif cfg_data.get("definition_id"):
+            # On CIQ hackathon clusters, `definition_id` (`team20`) is the VAST volume storage provisioner;
+            # Fuzzball auto-provisions named volumes under `use: team20` — never switch to `ephemeral`!
+            cfg_data["vast"]["ephemeral"] = False
+            if not cfg_data["vast"].get("provisioner"):
+                cfg_data["vast"]["provisioner"] = cfg_data["definition_id"]
 
     images = payload.get("images")
     if isinstance(images, dict):
@@ -414,9 +413,7 @@ def apply_mcp_discovery_payload(
                 cfg_data["nodes"]["cpu_cores_per_node"] = safe_c
             if float(cfg_data["nodes"]["memory_gb_per_node"]) > phys_m - 4.0:
                 cfg_data["nodes"]["memory_gb_per_node"] = safe_m
-            if detected_arch_dev:
-                cfg_data["nodes"]["arch_device"] = detected_arch_dev
-                report.applied_overrides["nodes.arch_device"] = detected_arch_dev
+            # Do NOT inject `cpu/arm64/sve` into `resource.devices` — GB10 compute provisioners match `nvidia.com/gpu: 1` only.
 
     for wf in payload.get("workflows") or []:
         if isinstance(wf, dict):

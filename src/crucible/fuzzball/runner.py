@@ -355,16 +355,11 @@ class FuzzballMCPBackend:
             if not val_res.get("valid", True):
                 err_blob = json.dumps(val_res.get("errors") or []).lower()
                 adapted = False
-                if not self.cluster.vast.ephemeral and any(
-                    tok in err_blob for tok in ("volume", "provisioner", "not exist", "not found")
-                ):
-                    self.cluster.vast.ephemeral = True
-                    adapted = True
                 if self.cluster.nodes.arch_device and "cpu/arm64" in err_blob:
                     self.cluster.nodes.arch_device = ""
                     adapted = True
                 if self.cluster.pin_definition_annotation and (
-                    "annotation" in err_blob or "provisioner_definition_id" in err_blob
+                    "annotation" in err_blob or "provisioner" in err_blob
                 ):
                     self.cluster.pin_definition_annotation = False
                     adapted = True
@@ -407,6 +402,13 @@ class FuzzballMCPBackend:
                 nodes = _extract_placed_nodes(
                     mcp.workflow_describe(wf_id), self.cluster, requested_nodes, seq_idx
                 )
+            job_name = f"train-{trial_id}" if kind == "train" else f"bench-{trial_id}"
+            if not self.cluster.vast.egress_metrics_to_object_cache and "workflow_log" in mcp.advertised_tools:
+                log_txt = mcp.workflow_log(wf_id, job_name)
+                from_log = _parse_summary_from_logs(log_txt)
+                if from_log is not None:
+                    return from_log, wf_id, nodes
+
             try:
                 obj_payload = mcp.object_get(object_uri, max_inline_bytes=65536)
                 if isinstance(obj_payload, str):
@@ -420,14 +422,13 @@ class FuzzballMCPBackend:
                 else:
                     raise FuzzballMCPError(f"Unexpected object_get payload: {obj_payload!r}")
             except Exception as obj_exc:
-                job_name = f"train-{trial_id}" if kind == "train" else f"bench-{trial_id}"
                 if "workflow_log" in mcp.advertised_tools:
                     log_txt = mcp.workflow_log(wf_id, job_name)
                     from_log = _parse_summary_from_logs(log_txt)
                     if from_log is not None:
                         return from_log, wf_id, nodes
                 raise FuzzballMCPError(
-                    f"Could not fetch trial summary from object_get ({object_uri}): {obj_exc}"
+                    f"Could not fetch trial summary from workflow_log or object_get ({object_uri}): {obj_exc}"
                 ) from obj_exc
             return parsed, wf_id, nodes
 

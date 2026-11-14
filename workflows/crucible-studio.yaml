@@ -1,40 +1,34 @@
 # workflows/crucible-studio.yaml
-# Optional CIQ Fuzzball v4 persistent service workflow hosting the Crucible Live Studio UI
-# directly on Team 20 (definitionId: team20, cpu/arm64/sve) with an HTTP endpoint.
-# Consumes 0 GPUs (2 cores / 8GiB RAM), leaving both NVIDIA-GB10 GPUs on
-# CIQ-CHI-SPARK39 and CIQ-CHI-SPARK40 free for training and vLLM serving trials.
+# Optional CIQ Fuzzball v4 persistent service workflow hosting the Crucible Cypherpunk Studio UI
+# on Team 20 (`use: team20`) with an HTTP endpoint (0 GPUs consumed).
 #
 # Launch with:
 #   fuzzball workflow validate workflows/crucible-studio.yaml
-#   fuzzball workflow start workflows/crucible-studio.yaml -n crucible-team20-studio
+#   fuzzball workflow start workflows/crucible-studio.yaml --name crucible-team20-studio
 
 version: v4
 
-annotations:
-  fuzzball.io/provisioner_definition_id: team20
-
 volumes:
-  vast-shared:
-    use: vast
+  vast:
     name: crucible-vast
+    use: team20
 
 services:
   crucible-studio:
     image:
-      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
+      uri: docker://python:3.12-slim
     mounts:
-      /vast: vast-shared
+      /vast:
+        volume: vast
     env:
+      - HOME=/tmp/home
       - PYTHONUNBUFFERED=1
       - CRUCIBLE_DEFINITION_ID=team20
     resource:
       cpu:
         cores: 2
-        affinity: CORE
       memory:
         size: 8GiB
-      devices:
-        cpu/arm64/sve: 1
     persist: true
     network:
       ports:
@@ -55,7 +49,12 @@ services:
     script: |
       #!/bin/bash
       set -euo pipefail
-      if [ -d /vast/crucible ]; then
-        python3 -m pip install --quiet --no-deps -e "/vast/crucible"
+      mkdir -p /tmp/home
+      pip install --quiet --no-cache-dir pyyaml pydantic numpy httpx fastapi uvicorn
+      if [ ! -d /vast/crucible-src/src/crucible ]; then
+        mkdir -p /vast/crucible-src
+        python3 -c "import urllib.request; urllib.request.urlretrieve('https://codeload.github.com/sebastianlueders/CIQ-Hackathon/tar.gz/cursor/crucible-autoresearch-app-3e38','/tmp/c.tgz')"
+        tar -xzf /tmp/c.tgz -C /vast/crucible-src --strip-components=1
       fi
-      exec crucible serve --run-dir /vast/runs/team20-live --host 0.0.0.0 --port 8000
+      export PYTHONPATH="/vast/crucible-src/src"
+      exec python3 -m crucible.cli serve --run-dir /vast/runs/team20-live --host 0.0.0.0 --port 8000

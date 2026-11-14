@@ -1,10 +1,14 @@
 """Renders trials and the final turnkey workflow into CIQ Fuzzball YAML (`v4` and `v1`).
 
-Targets Team 20 (`definitionId: team20`) by default across Grace Blackwell GB10 nodes
-`CIQ-CHI-SPARK39` (`192.168.99.48/7331`) and `CIQ-CHI-SPARK40` (`192.168.99.49/7331`),
-sizing container allocations safely inside each node's `1 GPU / 20 cpu/arm64/sve cores / 127.9 GiB`
-envelope (`16 cores / 112GiB`) so Fuzzball never rejects for Substrate/OS overhead and CPU helper
-stages (`bench-*`, `crucible-studio`) can co-schedule without deadlocking.
+Aligned with the live CIQ Hackathon Grace Blackwell GB10 cluster (`CIQ-CHI-SPARK39` &
+`CIQ-CHI-SPARK40`, VAST storage provisioner `use: team20`):
+- `volumes: { vast: { name: crucible-vast, use: team20 } }`
+- `mounts: { /vast: { volume: vast } }` (Fuzzball v4 object mount syntax)
+- `resource: { cpu: { cores: 16 }, memory: { size: 112GiB }, devices: { nvidia.com/gpu: 1 } }`
+  (no `cpu/arm64/sve` device plugin constraint, no `affinity`, no `fuzzball.io/*` compute annotation)
+- Pre-cached images: `docker://nvcr.io/nvidia/pytorch:26.10-py3`, `docker://vllm/vllm-openai:v0.33.0`,
+  `docker://python:3.12-slim`
+- Multi-node coordination via `$MULTINODE_HOSTLIST_NOSLOTS` + `multinode: { nodes: 2, implementation: generic }`
 """
 
 from __future__ import annotations
@@ -59,12 +63,11 @@ def _volume_section(
                 "size": cluster.vast.ephemeral_size,
             }
         else:
-            vol_spec = {"name": cluster.vast.persistent_volume_name}
-            if cluster.vast.provisioner:
-                vol_spec = {
-                    "use": cluster.vast.provisioner,
-                    "name": cluster.vast.persistent_volume_name,
-                }
+            use_prov = cluster.vast.provisioner or cluster.definition_id or "team20"
+            vol_spec = {
+                "name": cluster.vast.persistent_volume_name,
+                "use": use_prov,
+            }
         if egress_entries and cluster.vast.egress_metrics_to_object_cache:
             vol_spec["egress"] = [
                 {
@@ -76,14 +79,14 @@ def _volume_section(
         return {cluster.vast.volume_key: vol_spec}
     return {
         cluster.vast.volume_key: {
-            "reference": f"volume://user/{cluster.vast.provisioner or 'vast'}/{cluster.vast.persistent_volume_name}"
+            "reference": f"volume://user/{cluster.vast.provisioner or 'team20'}/{cluster.vast.persistent_volume_name}"
         }
     }
 
 
 def _mounts_section(cluster: ClusterConfig) -> dict[str, Any]:
     if cluster.fuzzfile_version == "v4":
-        return {cluster.vast.mount_path: cluster.vast.volume_key}
+        return {cluster.vast.mount_path: {"volume": cluster.vast.volume_key}}
     return {cluster.vast.volume_key: {"location": cluster.vast.mount_path}}
 
 
@@ -98,25 +101,21 @@ def _dependency_field(
     return {"requires": [name for name, _ in deps]}
 
 
-def _cpu_devices_map(cluster: ClusterConfig) -> dict[str, int]:
-    if cluster.nodes.arch_device:
-        return {cluster.nodes.arch_device: 1}
-    return {}
-
-
-def _gpu_resource_block(cluster: ClusterConfig, gpus_per_node: int | None = None) -> dict[str, Any]:
+def _gpu_resource_block(
+    cluster: ClusterConfig,
+    gpus_per_node: int | None = None,
+    *,
+    multinode: bool = False,
+) -> dict[str, Any]:
     gpus = gpus_per_node if gpus_per_node is not None else cluster.nodes.gpus_per_node
+    cores = min(8, cluster.nodes.cpu_cores_per_node) if multinode else cluster.nodes.cpu_cores_per_node
+    mem_gib = min(80, cluster.nodes.memory_gb_per_node) if multinode else cluster.nodes.memory_gb_per_node
     devices: dict[str, int] = {"nvidia.com/gpu": gpus}
     if cluster.nodes.arch_device:
         devices[cluster.nodes.arch_device] = 1
     return {
-        "cpu": {
-            "cores": cluster.nodes.cpu_cores_per_node,
-            "affinity": "NUMA",
-        },
-        "memory": {
-            "size": f"{cluster.nodes.memory_gb_per_node}GiB",
-        },
+        "cpu": {"cores": cores},
+        "memory": {"size": f"{mem_gib}GiB"},
         "devices": devices,
     }
 
@@ -125,24 +124,18 @@ def _cpu_helper_resource_block(
     cluster: ClusterConfig,
     cores: int,
     mem_gib: int,
-    affinity: str = "CORE",
 ) -> dict[str, Any]:
     safe_cores = min(cores, cluster.nodes.physical_cores_per_node)
-    block: dict[str, Any] = {
-        "cpu": {"cores": safe_cores, "affinity": affinity},
+    return {
+        "cpu": {"cores": safe_cores},
         "memory": {"size": f"{mem_gib}GiB"},
     }
-    devs = _cpu_devices_map(cluster)
-    if devs:
-        block["devices"] = devs
-    return block
 
 
 def _team_nodes_comment(cluster: ClusterConfig) -> str:
     if not cluster.nodes.inventory:
         return f"{cluster.nodes.count}x {cluster.nodes.gpu_model}"
-    parts = [f"{n.hostname} ({n.node_id})" for n in cluster.nodes.inventory]
-    return ", ".join(parts)
+    return ", ".join(f"{n.hostname} ({n.node_id})" for n in cluster.nodes.inventory)
 
 
 def render_training_trial_fuzzfile(
@@ -167,23 +160,22 @@ def render_training_trial_fuzzfile(
         else "-m crucible.trainer.lora_trainer"
     )
     if perf.nodes > 1:
-        rdzv_dir = f"{trial_out_path}/rdzv"
         script = "\n".join(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
-                f"mkdir -p {rdzv_dir}",
-                'NODE_RANK="${OMPI_COMM_WORLD_RANK:-${PMI_RANK:-0}}"',
-                'if [ "$NODE_RANK" = "0" ]; then hostname -i | awk \'{print $1}\' > ' + f"{rdzv_dir}/master_ip; fi",
-                f"while [ ! -s {rdzv_dir}/master_ip ]; do sleep 1; done",
-                f"MASTER_ADDR=$(cat {rdzv_dir}/master_ip)",
-                "torchrun \\",
-                f"  --nnodes={perf.nodes} \\",
-                f"  --nproc_per_node={cluster.nodes.gpus_per_node} \\",
-                '  --node_rank="$NODE_RANK" \\',
-                '  --rdzv_id="' + trial_id + '" \\',
-                "  --rdzv_backend=c10d \\",
-                '  --rdzv_endpoint="${MASTER_ADDR}:29500" \\',
+                "mkdir -p /tmp/home",
+                'HOSTS=$(echo "${MULTINODE_HOSTLIST_NOSLOTS:-$(hostname)}" | tr \',\' \'\\n\' | sort)',
+                'MASTER=$(echo "$HOSTS" | head -1)',
+                'RANK=$(echo "$HOSTS" | grep -nx "$(hostname)" | cut -d: -f1 || echo 1)',
+                'NODE_RANK=$(( ${RANK:-1} - 1 ))',
+                'echo "host=$(hostname) master=$MASTER node_rank=$NODE_RANK"',
+                "python3 -m torch.distributed.run \\",
+                f"  --nnodes {perf.nodes} \\",
+                f"  --nproc-per-node {cluster.nodes.gpus_per_node} \\",
+                '  --node-rank "$NODE_RANK" \\',
+                '  --master-addr "$MASTER" \\',
+                "  --master-port 29500 \\",
                 f"  {runner_entry} \\",
                 f"  --trial-id {trial_id} \\",
                 f"  --base-model-dir {base_model_path} \\",
@@ -199,6 +191,7 @@ def render_training_trial_fuzzfile(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
+                "mkdir -p /tmp/home",
                 f"python3 {runner_entry} \\",
                 f"  --trial-id {trial_id} \\",
                 f"  --base-model-dir {base_model_path} \\",
@@ -213,14 +206,17 @@ def render_training_trial_fuzzfile(
     job_spec: dict[str, Any] = {
         "image": {"uri": cluster.images.train},
         "mounts": _mounts_section(cluster),
-        **({"files": {"/opt/crucible_remote_train.py": "file://crucible-train-runner"}} if cluster.fuzzfile_version == "v4" else {}),
+        **(
+            {"files": {"/opt/crucible_remote_train.py": "file://crucible-train-runner"}}
+            if cluster.fuzzfile_version == "v4"
+            else {}
+        ),
         "env": [
+            "HOME=/tmp/home",
             "PYTHONUNBUFFERED=1",
-            "NCCL_IB_DISABLE=0",
-            "CUDA_DEVICE_MAX_CONNECTIONS=1",
-            "TORCH_CUDA_ARCH_LIST=12.0;12.1",
+            "NCCL_DEBUG=WARN",
         ],
-        "resource": _gpu_resource_block(cluster),
+        "resource": _gpu_resource_block(cluster, multinode=(perf.nodes > 1)),
         "policy": {"timeout": {"execute": "2h"}},
         "script": script + "\n",
     }
@@ -228,7 +224,6 @@ def render_training_trial_fuzzfile(
         job_spec["multinode"] = {
             "nodes": perf.nodes,
             "implementation": "generic",
-            "procs-per-node": 1,
         }
 
     rel_runs_prefix = cluster.vast.runs_dir.removeprefix(cluster.vast.mount_path).lstrip("/")
@@ -238,19 +233,22 @@ def render_training_trial_fuzzfile(
     doc: dict[str, Any] = {
         "version": cluster.fuzzfile_version,
         **_workflow_annotations_section(cluster),
-        **({"files": {"crucible-train-runner": REMOTE_TRAIN_RUNNER_PY}} if cluster.fuzzfile_version == "v4" else {}),
+        **(
+            {"files": {"crucible-train-runner": REMOTE_TRAIN_RUNNER_PY}}
+            if cluster.fuzzfile_version == "v4"
+            else {}
+        ),
         "volumes": _volume_section(cluster, egress_entries=[(egress_rel_summary, obj_uri)]),
         "jobs": {f"train-{trial_id}": job_spec},
     }
     header = (
         f"# Crucible Autoresearch Trial Fuzzfile: {trial_id}\n"
-        f"# DefinitionId: {cluster.definition_id} | Nodes: {_team_nodes_comment(cluster)}\n"
-        f"# Model: {exp.model.name} | Target Hardware: {cluster.nodes.gpu_product} ({cluster.nodes.sm_arch}, {cluster.nodes.arch_device})\n"
+        f"# VAST Storage Provisioner: use={cluster.vast.provisioner or cluster.definition_id} | Nodes: {_team_nodes_comment(cluster)}\n"
+        f"# Model: {exp.model.name} | Target Hardware: {cluster.nodes.gpu_product} ({cluster.nodes.sm_arch})\n"
         f"# Recipe: rank={recipe.lora_rank}, alpha={recipe.lora_alpha}, lr={recipe.lr}\n"
         f"# Perf: nodes={perf.nodes}, micro_batch={perf.micro_batch_size}, "
         f"chunked_ce={perf.use_chunked_ce_kernel}, grouped_moe={perf.use_grouped_moe_kernel}, "
-        f"fused_lora={perf.use_fused_lora_kernel}\n"
-        f"# Metrics Object Cache Egress (numeric only, zero raw data): {obj_uri}\n\n"
+        f"fused_lora={perf.use_fused_lora_kernel}\n\n"
     )
     return header + yaml.safe_dump(doc, sort_keys=False)
 
@@ -264,61 +262,42 @@ def render_serving_trial_fuzzfile(
     baseline_loss: float,
     run_id: str,
 ) -> str:
-    base_model_path = f"{cluster.vast.models_dir}/{exp.model.weights_subpath}"
     processed_path = f"{cluster.vast.datasets_dir}/{exp.dataset.processed_subpath}"
     out_json = f"{cluster.vast.runs_dir}/{run_id}/serving/{trial_id}/summary.json"
-    vllm_cmd = build_vllm_launch_args(base_model_path, adapter_vast_path, cand, port=8000)
-
-    service_name = f"vllm-{trial_id}"
     bench_job_name = f"bench-{trial_id}"
     cand_json = json.dumps(cand.model_dump(), sort_keys=True)
-
-    vllm_shell = " ".join(vllm_cmd)
-    svc_spec: dict[str, Any] = {
-        "image": {"uri": cluster.images.serve},
-        "mounts": _mounts_section(cluster),
-        "env": [
-            "PYTHONUNBUFFERED=1",
-            "FLASHINFER_DISABLE_VERSION_CHECK=1",
-            f"CRUCIBLE_USE_LOW_PREC_DECODE={int(cand.use_low_prec_decode_kernel)}",
-        ],
-        "script": (
-            "#!/bin/bash\n"
-            "set -euo pipefail\n"
-            f'if [ -f "{base_model_path}/config.json" ]; then\n'
-            f"  exec {vllm_shell}\n"
-            "else\n"
-            "  exec python3 -m http.server 8000\n"
-            "fi\n"
-        ),
-        "resource": _gpu_resource_block(
-            cluster, gpus_per_node=min(cand.tensor_parallel, cluster.nodes.gpus_per_node)
-        ),
-    }
-    if cand.tensor_parallel > cluster.nodes.gpus_per_node:
-        svc_spec["multinode"] = {
-            "nodes": cand.tensor_parallel // cluster.nodes.gpus_per_node,
-            "implementation": "generic",
-        }
 
     bench_entry = (
         "/opt/crucible_remote_serve_bench.py"
         if cluster.fuzzfile_version == "v4"
         else "-m crucible.serving.vllm_bench"
     )
-    # 2 cores / 8GiB fits inside the 4-core / 15.9-GiB headroom left on SPARK39/SPARK40
     bench_job: dict[str, Any] = {
         "image": {"uri": cluster.images.train},
         "mounts": _mounts_section(cluster),
-        **({"files": {"/opt/crucible_remote_serve_bench.py": "file://crucible-serve-runner"}} if cluster.fuzzfile_version == "v4" else {}),
-        **_dependency_field(cluster, [(service_name, "RUNNING")]),
-        "resource": _cpu_helper_resource_block(cluster, cores=2, mem_gib=8, affinity="CORE"),
+        **(
+            {"files": {"/opt/crucible_remote_serve_bench.py": "file://crucible-serve-runner"}}
+            if cluster.fuzzfile_version == "v4"
+            else {}
+        ),
+        "env": [
+            "HOME=/tmp/home",
+            "PYTHONUNBUFFERED=1",
+            f"CRUCIBLE_USE_LOW_PREC_DECODE={int(cand.use_low_prec_decode_kernel)}",
+        ],
+        "resource": _gpu_resource_block(
+            cluster,
+            gpus_per_node=min(cand.tensor_parallel, cluster.nodes.gpus_per_node),
+            multinode=(cand.tensor_parallel > cluster.nodes.gpus_per_node),
+        ),
+        "policy": {"timeout": {"execute": "1h"}},
         "script": "\n".join(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
+                "mkdir -p /tmp/home",
                 f"python3 {bench_entry} \\",
-                f"  --endpoint http://{service_name}:8000 \\",
+                "  --endpoint http://127.0.0.1:8000 \\",
                 f"  --processed-data-dir {processed_path} \\",
                 f"  --trial-id {trial_id} \\",
                 f"  --baseline-loss {baseline_loss:.6f} \\",
@@ -328,6 +307,11 @@ def render_serving_trial_fuzzfile(
         )
         + "\n",
     }
+    if cand.tensor_parallel > cluster.nodes.gpus_per_node:
+        bench_job["multinode"] = {
+            "nodes": cand.tensor_parallel // cluster.nodes.gpus_per_node,
+            "implementation": "generic",
+        }
 
     rel_runs_prefix = cluster.vast.runs_dir.removeprefix(cluster.vast.mount_path).lstrip("/")
     egress_rel_srv = f"{rel_runs_prefix}/{run_id}/serving/{trial_id}/summary.json"
@@ -336,17 +320,19 @@ def render_serving_trial_fuzzfile(
     doc: dict[str, Any] = {
         "version": cluster.fuzzfile_version,
         **_workflow_annotations_section(cluster),
-        **({"files": {"crucible-serve-runner": REMOTE_SERVE_BENCH_PY}} if cluster.fuzzfile_version == "v4" else {}),
+        **(
+            {"files": {"crucible-serve-runner": REMOTE_SERVE_BENCH_PY}}
+            if cluster.fuzzfile_version == "v4"
+            else {}
+        ),
         "volumes": _volume_section(cluster, egress_entries=[(egress_rel_srv, srv_obj_uri)]),
-        "services": {service_name: svc_spec},
         "jobs": {bench_job_name: bench_job},
     }
     header = (
         f"# Crucible Inference Search Fuzzfile: {trial_id}\n"
-        f"# DefinitionId: {cluster.definition_id} | Nodes: {_team_nodes_comment(cluster)}\n"
+        f"# VAST Storage Provisioner: use={cluster.vast.provisioner or cluster.definition_id} | Nodes: {_team_nodes_comment(cluster)}\n"
         f"# Precision: {cand.precision} | TP={cand.tensor_parallel} | Replicas={cand.replicas} | "
-        f"MaxSeqs={cand.max_num_seqs}\n"
-        f"# Metrics Object Cache Egress (numeric only, zero raw data): {srv_obj_uri}\n\n"
+        f"MaxSeqs={cand.max_num_seqs}\n\n"
     )
     return header + yaml.safe_dump(doc, sort_keys=False)
 
@@ -370,23 +356,27 @@ def render_final_turnkey_fuzzfile(
 
     recipe_json = json.dumps(winning_recipe.model_dump(), sort_keys=True)
     perf_json = json.dumps(winning_train_perf.model_dump(), sort_keys=True)
-
     crucible_src_dir = f"{cluster.vast.mount_path.rstrip('/')}/crucible-src"
+
     ingest_job: dict[str, Any] = {
-        "image": {"uri": cluster.images.train},
+        "image": {"uri": cluster.images.fetch},
         "mounts": _mounts_section(cluster),
         "env": [
+            "HOME=/tmp/home",
             "PYTHONUNBUFFERED=1",
             f"PYTHONPATH={crucible_src_dir}/src",
         ],
-        "resource": _cpu_helper_resource_block(cluster, cores=8, mem_gib=32, affinity="NUMA"),
+        "resource": _cpu_helper_resource_block(cluster, cores=8, mem_gib=16),
         "policy": {"timeout": {"execute": "30m"}},
         "script": "\n".join(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
+                "mkdir -p /tmp/home",
+                "pip install --quiet --no-cache-dir pyyaml pydantic numpy httpx",
                 f'if ! python3 -c "import crucible" 2>/dev/null && [ ! -d "{crucible_src_dir}/src/crucible" ]; then',
-                f'  git clone --depth 1 https://github.com/sebastianlueders/CIQ-Hackathon.git "{crucible_src_dir}"',
+                f'  python3 -c "import urllib.request,tarfile,os; os.makedirs(\'{crucible_src_dir}\',exist_ok=True); urllib.request.urlretrieve(\'https://codeload.github.com/sebastianlueders/CIQ-Hackathon/tar.gz/cursor/crucible-autoresearch-app-3e38\',\'/tmp/c.tgz\')"',
+                f'  tar -xzf /tmp/c.tgz -C "{crucible_src_dir}" --strip-components=1',
                 "fi",
                 "python3 -m crucible.cli ingest \\",
                 f"  --source-dir {raw_data_path} \\",
@@ -398,23 +388,21 @@ def render_final_turnkey_fuzzfile(
     }
 
     if winning_train_perf.nodes > 1:
-        rdzv_dir = f"{prod_out_dir}/rdzv"
         train_script = "\n".join(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
-                f"mkdir -p {rdzv_dir}",
-                'NODE_RANK="${OMPI_COMM_WORLD_RANK:-${PMI_RANK:-0}}"',
-                'if [ "$NODE_RANK" = "0" ]; then hostname -i | awk \'{print $1}\' > ' + f"{rdzv_dir}/master_ip; fi",
-                f"while [ ! -s {rdzv_dir}/master_ip ]; do sleep 1; done",
-                f"MASTER_ADDR=$(cat {rdzv_dir}/master_ip)",
-                "torchrun \\",
-                f"  --nnodes={winning_train_perf.nodes} \\",
-                f"  --nproc_per_node={cluster.nodes.gpus_per_node} \\",
-                '  --node_rank="$NODE_RANK" \\',
-                '  --rdzv_id="crucible-prod-train" \\',
-                "  --rdzv_backend=c10d \\",
-                '  --rdzv_endpoint="${MASTER_ADDR}:29500" \\',
+                "mkdir -p /tmp/home",
+                'HOSTS=$(echo "${MULTINODE_HOSTLIST_NOSLOTS:-$(hostname)}" | tr \',\' \'\\n\' | sort)',
+                'MASTER=$(echo "$HOSTS" | head -1)',
+                'RANK=$(echo "$HOSTS" | grep -nx "$(hostname)" | cut -d: -f1 || echo 1)',
+                'NODE_RANK=$(( ${RANK:-1} - 1 ))',
+                "python3 -m torch.distributed.run \\",
+                f"  --nnodes {winning_train_perf.nodes} \\",
+                f"  --nproc-per-node {cluster.nodes.gpus_per_node} \\",
+                '  --node-rank "$NODE_RANK" \\',
+                '  --master-addr "$MASTER" \\',
+                "  --master-port 29500 \\",
                 "  -m crucible.trainer.lora_trainer \\",
                 "  --trial-id production-lora \\",
                 f"  --base-model-dir {base_model_path} \\",
@@ -430,6 +418,7 @@ def render_final_turnkey_fuzzfile(
             [
                 "#!/bin/bash",
                 "set -euo pipefail",
+                "mkdir -p /tmp/home",
                 "python3 -m crucible.trainer.lora_trainer \\",
                 "  --trial-id production-lora \\",
                 f"  --base-model-dir {base_model_path} \\",
@@ -446,13 +435,12 @@ def render_final_turnkey_fuzzfile(
         "mounts": _mounts_section(cluster),
         **_dependency_field(cluster, [("ingest-lammps", "FINISHED")]),
         "env": [
+            "HOME=/tmp/home",
             "PYTHONUNBUFFERED=1",
             f"PYTHONPATH={crucible_src_dir}/src",
-            "NCCL_IB_DISABLE=0",
-            "CUDA_DEVICE_MAX_CONNECTIONS=1",
-            "TORCH_CUDA_ARCH_LIST=12.0;12.1",
+            "NCCL_DEBUG=WARN",
         ],
-        "resource": _gpu_resource_block(cluster),
+        "resource": _gpu_resource_block(cluster, multinode=(winning_train_perf.nodes > 1)),
         "policy": {"timeout": {"execute": "4h"}},
         "script": train_script + "\n",
     }
@@ -460,14 +448,13 @@ def render_final_turnkey_fuzzfile(
         train_job["multinode"] = {
             "nodes": winning_train_perf.nodes,
             "implementation": "generic",
-            "procs-per-node": 1,
         }
 
     eval_job: dict[str, Any] = {
         "image": {"uri": cluster.images.train},
         "mounts": _mounts_section(cluster),
         **_dependency_field(cluster, [("train-lora", "FINISHED")]),
-        "env": ["PYTHONUNBUFFERED=1"],
+        "env": ["HOME=/tmp/home", "PYTHONUNBUFFERED=1"],
         "resource": _gpu_resource_block(cluster),
         "policy": {"timeout": {"execute": "45m"}},
         "script": "\n".join(
@@ -499,8 +486,8 @@ def render_final_turnkey_fuzzfile(
         "mounts": _mounts_section(cluster),
         **_dependency_field(cluster, [("eval-held-out", "FINISHED")]),
         "env": [
+            "HOME=/tmp",
             "PYTHONUNBUFFERED=1",
-            "FLASHINFER_DISABLE_VERSION_CHECK=1",
             f"CRUCIBLE_USE_LOW_PREC_DECODE={int(winning_serve_perf.use_low_prec_decode_kernel)}",
             f"CRUCIBLE_TARGET_REPLICAS={winning_serve_perf.replicas}",
         ],
@@ -508,6 +495,7 @@ def render_final_turnkey_fuzzfile(
         "resource": _gpu_resource_block(
             cluster,
             gpus_per_node=min(winning_serve_perf.tensor_parallel, cluster.nodes.gpus_per_node),
+            multinode=(winning_serve_perf.tensor_parallel > cluster.nodes.gpus_per_node),
         ),
         "persist": True,
         "network": {
@@ -546,11 +534,11 @@ def render_final_turnkey_fuzzfile(
     comment_header = f"""# ==============================================================================
 # Crucible Turnkey Autoresearch Workflow (ingest -> train -> eval -> serve)
 # ==============================================================================
-# Cluster        : {cluster.cluster_name} | definitionId: {cluster.definition_id}
+# Cluster        : {cluster.cluster_name} | VAST Storage Provisioner: use={cluster.vast.provisioner or cluster.definition_id}
 # Nodes          : {_team_nodes_comment(cluster)}
-# Node Hardware  : 1x {cluster.nodes.gpu_product} ({cluster.nodes.gpu_arch}, {cluster.nodes.sm_arch}), {cluster.nodes.physical_cores_per_node}c ({cluster.nodes.arch_device}), {cluster.nodes.physical_memory_gib_per_node} GiB/node
+# Node Hardware  : 1x {cluster.nodes.gpu_product} ({cluster.nodes.gpu_arch}, {cluster.nodes.sm_arch}), {cluster.nodes.physical_cores_per_node}c arm64, {cluster.nodes.physical_memory_gib_per_node} GiB/node
 # Per-Node Alloc : {cluster.nodes.cpu_cores_per_node} cores, {cluster.nodes.memory_gb_per_node}GiB RAM, {cluster.nodes.gpus_per_node}x nvidia.com/gpu
-# Shared Storage : VAST persistent volume '{cluster.vast.persistent_volume_name}' mounted at {cluster.vast.mount_path}
+# Shared Storage : VAST persistent volume '{cluster.vast.persistent_volume_name}' (use: {cluster.vast.provisioner or cluster.definition_id}) mounted at {cluster.vast.mount_path}
 # Base Model     : {exp.model.name} (MoE, {exp.model.vocab_size:,} vocab, {exp.model.bf16_footprint_gb} GB BF16)
 # Dataset        : {exp.dataset.name} (whole-file sealed held-out split; raw data never left VAST)
 #
@@ -573,7 +561,7 @@ def render_final_turnkey_fuzzfile(
 #
 # Launch end-to-end on CIQ Fuzzball (Team 20):
 #   fuzzball workflow validate final-crucible-workflow.yaml
-#   fuzzball workflow start final-crucible-workflow.yaml -n {exp.experiment_id}-team20
+#   fuzzball workflow start final-crucible-workflow.yaml --name {exp.experiment_id}-team20
 # ==============================================================================
 
 """

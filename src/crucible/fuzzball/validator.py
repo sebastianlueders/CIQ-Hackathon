@@ -236,11 +236,16 @@ def validate_fuzzfile(
             if not isinstance(mounts, dict):
                 raise FuzzfileValidationError(f"'{stage_name}' mounts must be a mapping.")
             if version == "v4":
-                for m_path, vol_ref in mounts.items():
+                for m_path, vol_ref_or_obj in mounts.items():
                     if not str(m_path).startswith("/"):
                         raise FuzzfileValidationError(
                             f"v4 mount key '{m_path}' in '{stage_name}' must be an absolute container path."
                         )
+                    vol_ref = (
+                        vol_ref_or_obj.get("volume")
+                        if isinstance(vol_ref_or_obj, dict)
+                        else vol_ref_or_obj
+                    )
                     if vol_ref not in volumes:
                         raise FuzzfileValidationError(
                             f"Mount '{m_path}' in '{stage_name}' references undefined volume '{vol_ref}'."

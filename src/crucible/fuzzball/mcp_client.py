@@ -91,7 +91,10 @@ class FuzzballMCPStdioClient:
             if env_cmd:
                 self.command = shlex.split(env_cmd)
             else:
-                self.command = ["fuzzball", "mcp", "serve"]
+                fb_exe = "fuzzball"
+                if shutil.which(fb_exe) is None and Path("./fuzzball").is_file():
+                    fb_exe = str(Path("./fuzzball").resolve())
+                self.command = [fb_exe, "mcp", "serve"]
                 if allow_write:
                     self.command.append("--allow-write")
                 if allow_exec:
@@ -110,7 +113,7 @@ class FuzzballMCPStdioClient:
         if env_cmd:
             argv = shlex.split(env_cmd)
             return bool(argv) and (shutil.which(argv[0]) is not None or Path(argv[0]).exists())
-        return shutil.which(fuzzball_bin) is not None
+        return shutil.which(fuzzball_bin) is not None or Path("./fuzzball").is_file()
 
     def __enter__(self) -> "FuzzballMCPStdioClient":
         self.connect()

@@ -103,6 +103,18 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                 },
             },
             {
+                "name": "workflow_log",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "job": {"type": "string"},
+                    },
+                    "required": ["id"],
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "object_get",
                 "inputSchema": {
                     "type": "object",
@@ -189,6 +201,57 @@ def _write_fake_fuzzball_mcp_server(script_path: Path) -> Path:
                 elif tname == "workflow_wait":
                     assert isinstance(targs.get("timeout"), str) and targs["timeout"].endswith("s")
                     payload = {"workflowId": targs.get("id"), "status": "STAGE_STATUS_FINISHED"}
+                elif tname == "workflow_log":
+                    job_nm = targs.get("job", "")
+                    if job_nm.startswith("bench-"):
+                        s_obj = {
+                            "trial_id": "srv-mcp-01",
+                            "label": "nvfp4-2replicas-tp1",
+                            "precision": "NVFP4",
+                            "tensor_parallel": 1,
+                            "replicas": 2,
+                            "max_num_seqs": 96,
+                            "use_low_prec_decode_kernel": True,
+                            "throughput_tokens_per_sec": 3460.3,
+                            "ttft_ms": 44.0,
+                            "p50_latency_ms": 140.0,
+                            "p99_latency_ms": 410.0,
+                            "held_out_loss": 1.41,
+                            "held_out_perplexity": 4.096,
+                            "perplexity_regression_pct": 1.42,
+                            "completion_pass_rate": 0.88,
+                            "passed_quality_floor": True,
+                            "passed_latency_ceiling": True,
+                            "accepted": True,
+                            "rejection_reasons": [],
+                        }
+                    else:
+                        s_obj = {
+                            "trial_id": "train-mcp-01",
+                            "status": "completed",
+                            "steps_completed": 60,
+                            "initial_val_loss": 1.92,
+                            "final_train_loss": 1.42,
+                            "final_val_loss": 1.44,
+                            "held_out_eval_loss": 1.45,
+                            "held_out_perplexity": 4.263,
+                            "mean_tokens_per_sec": 3820.0,
+                            "hardware_utilization_pct": 92.0,
+                            "peak_mem_gb": 88.5,
+                            "wall_time_s": 42.0,
+                            "loss_curve": [1.92, 1.65, 1.42],
+                            "world_size": 1,
+                            "kernels_enabled": {
+                                "chunked_cross_entropy": True,
+                                "grouped_moe_gemm": True,
+                                "fused_lora_linear": True,
+                            },
+                        }
+                    payload = "CRUCIBLE_SUMMARY_JSON=" + json.dumps(s_obj)
+                    res = {"content": [{"type": "text", "text": payload}]}
+                    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": req_id, "result": res}) + "\\n")
+                    sys.stdout.flush()
+                    continue
                 elif tname == "object_get":
                     uri = targs.get("ref", "")
                     if "serving-" in uri:
@@ -268,24 +331,41 @@ def test_team20_fuzzfile_pinning_devices_and_egress_isolation() -> None:
     stages = validate_fuzzfile(yml, cluster=cluster)
     assert stages == ["train-t01"]
     parsed = yaml.safe_load(yml)
-    assert parsed["annotations"]["fuzzball.io/provisioner_definition_id"] == "team20"
+    assert "annotations" not in parsed
+    assert parsed["volumes"]["vast"] == {"name": "crucible-vast", "use": "team20"}
+    assert parsed["jobs"]["train-t01"]["mounts"] == {"/vast": {"volume": "vast"}}
     res = parsed["jobs"]["train-t01"]["resource"]
-    assert res["cpu"]["cores"] == 16
-    assert res["memory"]["size"] == "112GiB"
-    assert res["devices"] == {"nvidia.com/gpu": 1, "cpu/arm64/sve": 1}
+    assert res == {
+        "cpu": {"cores": 16},
+        "memory": {"size": "112GiB"},
+        "devices": {"nvidia.com/gpu": 1},
+    }
 
-    egress = parsed["volumes"]["vast-shared"]["egress"]
+    # Opt-in object-cache egress still works when enabled, while raw data egress is blocked
+    cluster_egress = cluster.model_copy(deep=True)
+    cluster_egress.vast.egress_metrics_to_object_cache = True
+    parsed_eg = yaml.safe_load(
+        render_training_trial_fuzzfile(
+            cluster=cluster_egress,
+            exp=exp,
+            trial_id="t01",
+            recipe=exp.stage_a_recipe.candidates[0],
+            perf=exp.stage_b_training_perf.candidates[0],
+            max_steps=60,
+            run_id="run-01",
+        )
+    )
+    egress = parsed_eg["volumes"]["vast"]["egress"]
     assert egress[0]["destination"]["uri"] == "fuzzball://user/crucible/run-01/t01/metrics.json"
 
-    # Attempt to egress raw LAMMPS data -> validator MUST reject
-    parsed["volumes"]["vast-shared"]["egress"].append(
+    parsed_eg["volumes"]["vast"]["egress"].append(
         {
             "source": {"uri": "file://data/lammps/src/pair_lj_cut.cpp"},
             "destination": {"uri": "fuzzball://user/leak.txt"},
         }
     )
     with pytest.raises(FuzzfileValidationError, match="Data isolation guard"):
-        validate_fuzzfile(parsed, cluster=cluster)
+        validate_fuzzfile(parsed_eg, cluster=cluster)
 
 
 def test_validator_enforces_team20_resource_bounds_and_reserved_annotations() -> None:
@@ -378,7 +458,7 @@ def test_native_fuzzball_mcp_stdio_team20_discovery_and_live_events(tmp_path: Pa
     discovered_cfg, report = discover_cluster_config(mcp_command=mcp_cmd)
     assert report.mcp_source_used == "fuzzball_mcp_stdio"
     assert discovered_cfg.definition_id == "team20"
-    assert discovered_cfg.nodes.arch_device == "cpu/arm64/sve"
+    assert discovered_cfg.nodes.arch_device == ""
     assert [n.hostname for n in discovered_cfg.nodes.inventory] == [
         "CIQ-CHI-SPARK39",
         "CIQ-CHI-SPARK40",

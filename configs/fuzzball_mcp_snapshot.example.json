@@ -2,19 +2,19 @@
   "cluster_name": "ciq-gb10-team20",
   "definition_id": "team20",
   "fuzzfile_version": "v4",
-  "provisioners": ["vast"],
+  "provisioners": ["team20"],
   "volumes": [
     {
       "name": "crucible-vast",
-      "provisioner": "vast",
+      "provisioner": "team20",
       "mount_path": "/vast",
       "selected": true
     }
   ],
   "images": {
-    "fetch": "docker://nvcr.io/nvidia/pytorch:26.03-py3",
-    "train": "docker://nvcr.io/nvidia/pytorch:26.03-py3",
-    "serve": "docker://nvcr.io/nvidia/vllm:26.04-py3"
+    "fetch": "docker://python:3.12-slim",
+    "train": "docker://nvcr.io/nvidia/pytorch:26.10-py3",
+    "serve": "docker://vllm/vllm-openai:v0.33.0"
   },
   "nodes": [
     {
@@ -28,14 +28,8 @@
           "cpu": { "cores": 20, "sockets": 1 },
           "mem": { "bytes": 137331589120 },
           "devices": {
-            "nvidia.com/gpu": 1,
-            "cpu/arm64": 1,
-            "cpu/arm64/sve": 1
+            "nvidia.com/gpu": 1
           }
-        },
-        "annotations": {
-          "fuzzball.io/provisioner_backend": "static",
-          "fuzzball.io/provisioner_definition_id": "team20"
         }
       }
     },
@@ -50,14 +44,8 @@
           "cpu": { "cores": 20, "sockets": 1 },
           "mem": { "bytes": 137331589120 },
           "devices": {
-            "nvidia.com/gpu": 1,
-            "cpu/arm64": 1,
-            "cpu/arm64/sve": 1
+            "nvidia.com/gpu": 1
           }
-        },
-        "annotations": {
-          "fuzzball.io/provisioner_backend": "static",
-          "fuzzball.io/provisioner_definition_id": "team20"
         }
       }
     }

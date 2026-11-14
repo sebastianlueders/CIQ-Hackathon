@@ -1,13 +1,13 @@
 # Team 20 live CIQ Fuzzball cluster configuration
-# Provisioner definitionId: team20
+# VAST storage provisioner (`use:`): team20
 # Nodes:
-#   - CIQ-CHI-SPARK39 (192.168.99.48/7331) — 1x NVIDIA-GB10 (sm_121), 20c cpu/arm64/sve, 127.9 GiB
-#   - CIQ-CHI-SPARK40 (192.168.99.49/7331) — 1x NVIDIA-GB10 (sm_121), 20c cpu/arm64/sve, 127.9 GiB
+#   - CIQ-CHI-SPARK39 (192.168.99.48/7331) — 1x NVIDIA-GB10 (sm_121), 20c arm64, 127.9 GiB
+#   - CIQ-CHI-SPARK40 (192.168.99.49/7331) — 1x NVIDIA-GB10 (sm_121), 20c arm64, 127.9 GiB
 # Team total: 2x nvidia.com/gpu, 40 cores, 255.8 GiB
 
 cluster_name: ciq-gb10-team20
 definition_id: team20
-pin_definition_annotation: true
+pin_definition_annotation: false
 fuzzfile_version: v4
 
 nodes:
@@ -16,7 +16,7 @@ nodes:
   gpu_product: "NVIDIA-GB10"
   gpu_arch: "Blackwell"
   sm_arch: "sm_121"
-  arch_device: "cpu/arm64/sve"
+  arch_device: ""
   gpus_per_node: 1
   physical_cores_per_node: 20
   cpu_cores_per_node: 16
@@ -44,18 +44,20 @@ nodes:
       memory_gib: 127.9
 
 vast:
-  volume_key: vast-shared
+  volume_key: vast
   persistent_volume_name: crucible-vast
-  provisioner: vast
+  provisioner: team20
+  ephemeral: false
+  ephemeral_size: 64GiB
   mount_path: /vast
   models_dir: /vast/models
   datasets_dir: /vast/data
   runs_dir: /vast/runs
   object_cache_scope: user
-  egress_metrics_to_object_cache: true
+  egress_metrics_to_object_cache: false
 
 images:
-  # Multi-arch linux/arm64 NGC images verified for Grace Blackwell GB10 (CUDA 13.2 + sm_121)
-  fetch: "docker://nvcr.io/nvidia/pytorch:26.03-py3"
-  train: "docker://nvcr.io/nvidia/pytorch:26.03-py3"
-  serve: "docker://nvcr.io/nvidia/vllm:26.04-py3"
+  # Pre-cached container images on CIQ hackathon GB10 nodes (instant start, 0s pull)
+  fetch: "docker://python:3.12-slim"
+  train: "docker://nvcr.io/nvidia/pytorch:26.10-py3"
+  serve: "docker://vllm/vllm-openai:v0.33.0"
