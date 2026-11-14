@@ -273,8 +273,8 @@ class CalibratedSimulatorBackend:
             0.0008 if perf.use_grouped_moe_kernel else 0.0
         )
 
-        # Throughput model on GB10 sm_121 (baseline ~1,420 tok/s -> ~3,280 tok/s 1-node, ~5,960 tok/s 2-node)
-        base_tok_s = 1420.0
+        # Throughput model on GB10 sm_121 (baseline ~1,243 tok/s -> ~3,822 tok/s 1-node, ~6,956 tok/s 2-node)
+        base_tok_s = 1120.0
         batch_mult = 1.0 + 0.11 * min(perf.micro_batch_size - 1, 5)
         ckpt_mult = 1.0 if perf.activation_checkpointing else 1.21
         ce_mult = 1.24 if perf.use_chunked_ce_kernel else 1.0

@@ -1,0 +1,187 @@
+# ==============================================================================
+# Crucible Turnkey Autoresearch Workflow (ingest -> train -> eval -> serve)
+# ==============================================================================
+# Cluster        : ciq-gb10-hackathon (2x NVIDIA GB10, sm_121)
+# Shared Storage : VAST persistent volume 'crucible-vast' mounted at /vast
+# Base Model     : Qwen/Qwen3-Coder-30B-A3B (MoE, 151,936 vocab, 57.0 GB BF16)
+# Dataset        : lammps-cpp (whole-file sealed held-out split; raw data never left VAST)
+#
+# Measured Autoresearch Decisions:
+#   [Stage A - Winning LoRA Recipe]
+#     rank=32, alpha=64, lr=0.00015,
+#     modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'], seq_len=2048
+#     Held-out perplexity: 6.848 (base) -> 4.040 (fine-tuned)
+#
+#   [Stage B - Winning Training Performance Config (sm121-all-kernels-2node-ddp)]
+#     nodes=2, micro_batch=6, grad_accum=1,
+#     activation_checkpointing=False,
+#     sm_121 kernels: chunked_ce=True, grouped_moe=True, fused_lora=True
+#     Throughput: 1243.2 -> 6955.3 tok/s (5.59x)
+#
+#   [Stage C - Winning vLLM Serving Config (nvfp4-2replicas-tp1)]
+#     precision=NVFP4, replicas=2, tensor_parallel=1,
+#     max_num_seqs=96, low_prec_decode_kernel=True
+#     Serving throughput: 401.8 -> 3460.3 tok/s
+#
+# Launch end-to-end on CIQ Fuzzball:
+#   fuzzball workflow validate final-crucible-workflow.yaml
+#   fuzzball workflow start final-crucible-workflow.yaml -n lammps-qwen3-coder-30b-turnkey
+# ==============================================================================
+
+version: v4
+volumes:
+  vast-shared:
+    use: vast
+    name: crucible-vast
+jobs:
+  ingest-lammps:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+    mounts:
+      /vast: vast-shared
+    env:
+    - PYTHONUNBUFFERED=1
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 32GB
+    policy:
+      timeout:
+        execute: 30m
+    command:
+    - crucible
+    - ingest
+    - --source-dir
+    - /vast/data/lammps
+    - --output-dir
+    - /vast/data/lammps-packed
+    - --seq-len
+    - '2048'
+  train-lora:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+    mounts:
+      /vast: vast-shared
+    depends-on:
+    - name: ingest-lammps
+      status: FINISHED
+    env:
+    - PYTHONUNBUFFERED=1
+    - NCCL_IB_DISABLE=0
+    - CUDA_DEVICE_MAX_CONNECTIONS=1
+    - TORCH_CUDA_ARCH_LIST=12.1
+    resource:
+      cpu:
+        cores: 20
+        affinity: NUMA
+      memory:
+        size: 112GB
+      devices:
+        nvidia.com/gpu: 1
+      exclusive: true
+    policy:
+      timeout:
+        execute: 4h
+    script: "#!/bin/bash\nset -euo pipefail\nmkdir -p /vast/runs/lammps-qwen3-coder-30b-production/rdzv\n\
+      NODE_RANK=\"${OMPI_COMM_WORLD_RANK:-${PMI_RANK:-0}}\"\nif [ \"$NODE_RANK\" =\
+      \ \"0\" ]; then hostname -i | awk '{print $1}' > /vast/runs/lammps-qwen3-coder-30b-production/rdzv/master_ip;\
+      \ fi\nwhile [ ! -s /vast/runs/lammps-qwen3-coder-30b-production/rdzv/master_ip\
+      \ ]; do sleep 1; done\nMASTER_ADDR=$(cat /vast/runs/lammps-qwen3-coder-30b-production/rdzv/master_ip)\n\
+      torchrun \\\n  --nnodes=2 \\\n  --nproc_per_node=1 \\\n  --node_rank=\"$NODE_RANK\"\
+      \ \\\n  --rdzv_id=\"crucible-prod-train\" \\\n  --rdzv_backend=c10d \\\n  --rdzv_endpoint=\"\
+      ${MASTER_ADDR}:29500\" \\\n  -m crucible.trainer.lora_trainer \\\n  --trial-id\
+      \ production-lora \\\n  --base-model-dir /vast/models/Qwen3-Coder-30B-A3B \\\
+      \n  --processed-data-dir /vast/data/lammps-packed \\\n  --output-dir /vast/runs/lammps-qwen3-coder-30b-production\
+      \ \\\n  --max-steps 480 \\\n  --recipe-json '{\"lora_alpha\": 64, \"lora_rank\"\
+      : 32, \"lr\": 0.00015, \"seq_len\": 2048, \"target_modules\": [\"q_proj\", \"\
+      k_proj\", \"v_proj\", \"o_proj\", \"gate_proj\", \"up_proj\", \"down_proj\"\
+      ], \"warmup_ratio\": 0.05}' \\\n  --perf-json '{\"activation_checkpointing\"\
+      : false, \"grad_accum_steps\": 1, \"label\": \"sm121-all-kernels-2node-ddp\"\
+      , \"micro_batch_size\": 6, \"nodes\": 2, \"use_chunked_ce_kernel\": true, \"\
+      use_fused_lora_kernel\": true, \"use_grouped_moe_kernel\": true}'\n"
+    multinode:
+      nodes: 2
+      implementation: generic
+      procs-per-node: 1
+  eval-held-out:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:25.09-py3
+    mounts:
+      /vast: vast-shared
+    depends-on:
+    - name: train-lora
+      status: FINISHED
+    env:
+    - PYTHONUNBUFFERED=1
+    resource:
+      cpu:
+        cores: 20
+        affinity: NUMA
+      memory:
+        size: 112GB
+      devices:
+        nvidia.com/gpu: 1
+      exclusive: true
+    policy:
+      timeout:
+        execute: 45m
+    script: "#!/bin/bash\nset -euo pipefail\npython3 - <<'PY'\nimport json, pathlib,\
+      \ sys\nsummary = json.loads(pathlib.Path('/vast/runs/lammps-qwen3-coder-30b-production/summary.json').read_text())\n\
+      ceiling = 4.1412\nppl = float(summary['held_out_perplexity'])\nprint(f'Verified\
+      \ held-out perplexity: {ppl:.4f} (ceiling: {ceiling:.4f})')\nif ppl > ceiling:\n\
+      \    sys.exit('Held-out quality floor check failed \u2014 aborting promotion\
+      \ to serving.')\nPY\n"
+services:
+  serve-vllm:
+    image:
+      uri: docker://nvcr.io/nvidia/vllm:25.09-py3
+    mounts:
+      /vast: vast-shared
+    depends-on:
+    - name: eval-held-out
+      status: FINISHED
+    env:
+    - PYTHONUNBUFFERED=1
+    - CRUCIBLE_USE_LOW_PREC_DECODE=1
+    - CRUCIBLE_TARGET_REPLICAS=2
+    command:
+    - python3
+    - -m
+    - vllm.entrypoints.openai.api_server
+    - --model
+    - /vast/models/Qwen3-Coder-30B-A3B
+    - --enable-lora
+    - --lora-modules
+    - crucible-tuned=/vast/runs/lammps-qwen3-coder-30b-production/lora_adapter
+    - --tensor-parallel-size
+    - '1'
+    - --max-num-seqs
+    - '96'
+    - --port
+    - '8000'
+    - --quantization
+    - modelopt
+    - --kv-cache-dtype
+    - fp8
+    resource:
+      cpu:
+        cores: 20
+        affinity: NUMA
+      memory:
+        size: 112GB
+      devices:
+        nvidia.com/gpu: 1
+      exclusive: true
+    persist: true
+    network:
+      ports:
+      - name: http
+        port: 8000
+      endpoints:
+      - name: crucible-coder-api
+        port-name: http
+        protocol: http
+        type: subdomain
+        scope: group

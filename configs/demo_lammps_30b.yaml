@@ -112,6 +112,14 @@ stage_b_training_perf:
       use_chunked_ce_kernel: true
       use_grouped_moe_kernel: true
       use_fused_lora_kernel: true
+    - label: "oversized-global-batch-2node"
+      nodes: 2
+      micro_batch_size: 6
+      grad_accum_steps: 8
+      activation_checkpointing: false
+      use_chunked_ce_kernel: true
+      use_grouped_moe_kernel: true
+      use_fused_lora_kernel: true
 
 stage_c_inference_perf:
   max_perplexity_regression_pct: 2.5
