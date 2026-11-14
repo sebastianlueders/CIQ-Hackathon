@@ -3,6 +3,8 @@ fuzzball
 .DS_Store
 __pycache__/
 *.pyc
-docs/
+docs/*
+!docs/one-pager.md
+!docs/one-pager.pdf
 # transient runner console output
 results/*.out
