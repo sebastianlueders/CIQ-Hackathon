@@ -110,7 +110,8 @@ def load_direct(path):
     if missing: raise RuntimeError(f"direct load missing {len(missing)} tensors, e.g. {missing[:3]}")
     # Non-persistent buffers (rotary inv_freq) were created on meta: rebuild them on GPU.
     rot = model.model.rotary_emb
-    model.model.rotary_emb = type(rot)(config=cfg, device="cuda:0")
+    with torch.device("cuda:0"):
+        model.model.rotary_emb = type(rot)(config=cfg)
     for n, b in model.named_buffers():
         if b.is_meta: raise RuntimeError(f"buffer still on meta: {n}")
     return model

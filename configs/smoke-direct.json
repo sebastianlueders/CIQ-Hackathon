@@ -1,5 +1,5 @@
 {
- "id": "s2-smoke-direct",
+ "id": "s2-smoke-direct-2",
  "config": {
   "train_tokens": 65536,
   "warmup_tokens": 32768,
