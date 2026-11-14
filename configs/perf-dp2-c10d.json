@@ -1,0 +1,16 @@
+{
+ "id": "s4-perf-dp2-c10d",
+ "nodes": 2,
+ "config": {
+  "dp_launch": "c10d",
+  "experts_impl": "grouped_mm",
+  "compile": true,
+  "train_tokens": 655360,
+  "warmup_tokens": 65536,
+  "skip_eval": true,
+  "save_adapter": false,
+  "seq_len": 4096,
+  "micro_batch": 1,
+  "grad_accum": 8
+ }
+}

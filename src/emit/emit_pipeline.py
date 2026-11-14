@@ -145,7 +145,7 @@ jobs:
     files: {{/opt/train.json: file://train.json}}
     mounts: {{/models: {{volume: models}}, /data: {{volume: data}}, /runs: {{volume: runs}}, /envs: {{volume: envs}}, /code: {{volume: code}}}}
     policy: {{timeout: {{execute: 12h}}}}
-    resource: {{cpu: {{cores: 16}}, memory: {{size: 112GiB}}, devices: {{nvidia.com/gpu: 1}}}}
+    resource: {{cpu: {{cores: 16}}, memory: {{size: 80GiB}}, devices: {{nvidia.com/gpu: 1}}}}
     script: |
 {train_script}
 
@@ -156,7 +156,7 @@ jobs:
     image: {{uri: docker://vllm/vllm-openai:v0.33.0}}
     files: {{/opt/serve.json: file://serve.json}}
     mounts: {{/models: {{volume: models}}, /data: {{volume: data}}, /runs: {{volume: runs}}, /code: {{volume: code}}}}
-    resource: {{cpu: {{cores: 16}}, memory: {{size: 112GiB}}, devices: {{nvidia.com/gpu: 1}}}}
+    resource: {{cpu: {{cores: 16}}, memory: {{size: 80GiB}}, devices: {{nvidia.com/gpu: 1}}}}
     env: [HOME=/tmp]
     script: |
       #!/bin/bash

@@ -1,0 +1,41 @@
+# Stage-4 debug: 2-node network diagnostics (hostnames, resolution, interfaces, TCP check).
+{
+ "version": "v4",
+ "files": {
+  "multinode_launch.sh": "#!/bin/bash\n# Launch one data-parallel rank per node inside a Fuzzball multinode job, with diagnostics.\n# Env in:  MN_NODES, MN_VARIANT (ip|c10d), PY, TRAIN_ARGS. Prints DIAG lines for post-mortem.\nset -u\nmkdir -p /tmp/home\nSELF=$(hostname); FQDN=$(hostname -f 2>/dev/null || echo \"$SELF\")\nHOSTS=$(echo \"${MULTINODE_HOSTLIST_NOSLOTS:-$SELF}\" | tr ',' '\\n' | sort)\necho \"DIAG self=$SELF fqdn=$FQDN hostlist=$(echo $HOSTS) variant=$MN_VARIANT\"\necho \"DIAG env: $(env | grep -iE 'MULTINODE|FB_|RANK|NODE' | tr '\\n' ' ')\"\nfor h in $HOSTS; do echo \"DIAG resolve $h -> $(getent hosts $h | awk '{print $1}' | tr '\\n' ' ')\"; done\necho \"DIAG ifaces: $(ls /sys/class/net | tr '\\n' ' ') ib=$(ls /dev/infiniband 2>/dev/null | tr '\\n' ' ')\"\nRANK_IDX=$(echo \"$HOSTS\" | grep -nx -e \"$SELF\" -e \"$FQDN\" | head -1 | cut -d: -f1)\n[ -z \"$RANK_IDX\" ] && RANK_IDX=$(echo \"$HOSTS\" | grep -n \"^${SELF%%.*}\" | head -1 | cut -d: -f1)\nNODE_RANK=$((RANK_IDX - 1)); MASTER=$(echo \"$HOSTS\" | head -1)\nMASTER_IP=$(getent hosts \"$MASTER\" | awk '{print $1}' | head -1); MASTER_IP=${MASTER_IP:-$MASTER}\necho \"DIAG node_rank=$NODE_RANK master=$MASTER master_ip=$MASTER_IP\"\n# Plain TCP check between nodes before torch: rank 0 listens on 29511, others connect.\n$PY - <<PYEOF\nimport socket, time, sys\nr, ip = $NODE_RANK, \"$MASTER_IP\"\ntry:\n    if r == 0:\n        s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind((\"0.0.0.0\", 29511)); s.listen(8)\n        s.settimeout(120); c, a = s.accept(); print(f\"DIAG tcp_check rank0 accepted from {a}\", flush=True)\n    else:\n        for i in range(60):\n            try:\n                c = socket.create_connection((ip, 29511), timeout=5); print(f\"DIAG tcp_check connected to {ip}:29511 local={c.getsockname()}\", flush=True); break\n            except Exception as e: time.sleep(2)\n        else: print(f\"DIAG tcp_check FAILED to reach {ip}:29511\", flush=True)\nexcept Exception as e:\n    print(f\"DIAG tcp_check error {e}\", flush=True)\nPYEOF\n[ \"$MN_VARIANT\" = \"diag\" ] && { echo \"DIAG done (diagnostics only)\"; exit 0; }\nexport NCCL_DEBUG=INFO TORCH_DISTRIBUTED_DEBUG=DETAIL TORCH_NCCL_ASYNC_ERROR_HANDLING=1\nif [ \"$MN_VARIANT\" = \"c10d\" ]; then\n  export NCCL_SOCKET_IFNAME=^lo,docker\n  RDZV=\"--rdzv-backend c10d --rdzv-endpoint $MASTER_IP:29500 --rdzv-id dp-$$-job\"\nelse\n  export NCCL_IB_DISABLE=1\n  RDZV=\"--node-rank $NODE_RANK --master-addr $MASTER_IP --master-port 29500\"\nfi\necho \"DIAG launching: torch.distributed.run --nnodes $MN_NODES $RDZV\"\ntimeout 1200 $PY -m torch.distributed.run --nnodes \"$MN_NODES\" --nproc-per-node 1 $RDZV $TRAIN_ARGS\nrc=$?; [ $rc -eq 124 ] && echo \"DIAG TIMEOUT after 1200 s (rendezvous or collective hung)\"; exit $rc\n"
+ },
+ "jobs": {
+  "diag": {
+   "image": {
+    "uri": "docker://python:3.12-slim"
+   },
+   "multinode": {
+    "nodes": 2,
+    "implementation": "generic"
+   },
+   "files": {
+    "/opt/multinode_launch.sh": "file://multinode_launch.sh"
+   },
+   "env": [
+    "MN_NODES=2",
+    "MN_VARIANT=diag",
+    "PY=python3",
+    "TRAIN_ARGS=none"
+   ],
+   "resource": {
+    "cpu": {
+     "cores": 1
+    },
+    "memory": {
+     "size": "1GiB"
+    }
+   },
+   "policy": {
+    "timeout": {
+     "execute": "15m"
+    }
+   },
+   "script": "#!/bin/bash\nexec bash /opt/multinode_launch.sh\n"
+  }
+ }
+}

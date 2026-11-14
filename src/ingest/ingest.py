@@ -46,7 +46,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True); ap.add_argument("--tokenizer", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--force", action="store_true", help="re-tokenize even if --out already has meta.json")
     a = ap.parse_args()
+    if not a.force and os.path.exists(os.path.join(a.out, "meta.json")):
+        print("RESULT " + json.dumps({"kind": "ingest", "skipped": True, "reason": "already tokenized", "out": a.out}))
+        return
     tok = Tokenizer.from_file(a.tokenizer)
     eos = tok.token_to_id("<|endoftext|>")
     os.makedirs(a.out, exist_ok=True)

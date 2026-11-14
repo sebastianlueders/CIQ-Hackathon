@@ -1,0 +1,26 @@
+[
+ {
+  "name": "fp8-lora",
+  "args": [
+   "--quantization",
+   "fp8",
+   "--enable-lora",
+   "--max-lora-rank",
+   "16",
+   "--lora-modules",
+   "ft=/runs/trials/s3-recipe-c1-lr1e-3-r8/adapter"
+  ],
+  "served_model": "ft"
+ },
+ {
+  "name": "bf16-lora",
+  "args": [
+   "--enable-lora",
+   "--max-lora-rank",
+   "16",
+   "--lora-modules",
+   "ft=/runs/trials/s3-recipe-c1-lr1e-3-r8/adapter"
+  ],
+  "served_model": "ft"
+ }
+]

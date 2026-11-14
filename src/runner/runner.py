@@ -22,7 +22,7 @@ TERMINAL = {"Finished", "Errored", "Canceled", "Failed"}
 ENV = {
     "image": os.environ.get("TRIAL_IMAGE", "docker://nvcr.io/nvidia/pytorch:26.10-py3"),
     "python": os.environ.get("TRIAL_PYTHON", "/envs/train-pt2610/bin/python"),
-    "cores": int(os.environ.get("TRIAL_CORES", 8)), "memory": os.environ.get("TRIAL_MEMORY", "80GiB"),  # measured peak 64.8 GiB incl. GPU
+    "cores": int(os.environ.get("TRIAL_CORES", 16)), "memory": os.environ.get("TRIAL_MEMORY", "80GiB"),  # measured peak 64.8 GiB incl. GPU
 }
 
 
@@ -78,6 +78,8 @@ def _multinode(t: Trial) -> dict:
     job = wf["jobs"]["trial"]
     job["multinode"] = {"nodes": t.nodes, "implementation": "generic"}
     job["script"] = launch_script(t)
+    wf["files"]["multinode_launch.sh"] = open(os.path.join(REPO, "src/runner/multinode_launch.sh")).read()
+    job["files"]["/opt/multinode_launch.sh"] = "file://multinode_launch.sh"
     job["env"] = job["env"] + ["NCCL_DEBUG=INFO"]
     return wf
 
@@ -86,14 +88,10 @@ def launch_script(t: Trial) -> str:
     py = ENV["python"]
     if t.nodes == 1:
         return f"#!/bin/bash\nmkdir -p /tmp/home\nexec {py} /opt/train.py --config /opt/trial.json\n"
-    # Same script runs on every node; rank = position of this host in the sorted host list.
-    return (
-        "#!/bin/bash\nmkdir -p /tmp/home\n"
-        "HOSTS=$(echo \"$MULTINODE_HOSTLIST_NOSLOTS\" | tr ',' '\\n' | sort)\n"
-        "MASTER=$(echo \"$HOSTS\" | head -1); RANK=$(echo \"$HOSTS\" | grep -nx \"$(hostname)\" | cut -d: -f1)\n"
-        "echo \"host=$(hostname) master=$MASTER node_rank=$((RANK-1)) hosts=$(echo $HOSTS)\"\n"
-        f"exec {py} -m torch.distributed.run --nnodes {t.nodes} --nproc-per-node 1 --node-rank $((RANK-1)) "
-        "--master-addr $MASTER --master-port 29500 /opt/train.py --config /opt/trial.json\n")
+    # Same script on every node (src/runner/multinode_launch.sh): diagnostics, TCP check, then torchrun.
+    variant = t.config.get("dp_launch", "ip")
+    return (f"#!/bin/bash\nexport MN_NODES={t.nodes} MN_VARIANT={variant} PY={py} "
+            f"TRAIN_ARGS='/opt/train.py --config /opt/trial.json'\nexec bash /opt/multinode_launch.sh\n")
 
 
 def launch(t: Trial):
@@ -145,10 +143,36 @@ def final_eval(t: Trial):
     return ev[-1]["eval_loss"] if ev else float("inf")
 
 
+def submit_only(trials, manifest):
+    """Submit every trial now (no local driver needed) and record them for a later collect."""
+    m = json.load(open(manifest)) if os.path.exists(manifest) else []
+    for t in trials:
+        launch(t); m.append({"id": t.id, "workflow": t.workflow_id, "job": "trial", "kind": "trial"})
+        json.dump(m, open(manifest, "w"), indent=1)
+
+
+def collect_manifest(manifest):
+    """Pull status + RESULT records of every workflow in a manifest into results/trials/."""
+    for e in json.load(open(manifest)):
+        t = Trial(e["id"], {}); t.workflow_id = e["workflow"]; t.status = status(e["workflow"])
+        log = fb("workflow", "log", e["workflow"], e.get("job", "trial"), check=False)
+        os.makedirs(RESULTS, exist_ok=True)
+        open(os.path.join(RESULTS, f"{e['id']}.log"), "w").write(log)
+        t.records = [json.loads(l.split("RESULT ", 1)[1]) for l in log.splitlines() if "RESULT {" in l]
+        with open(os.path.join(RESULTS, f"{e['id']}.jsonl"), "w") as f:
+            for r in t.records: f.write(json.dumps({**r, "trial": t.id, "workflow": t.workflow_id}) + "\n")
+        print(f"{e['id']:40s} {t.status:10s} records={len(t.records)}")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("trials", nargs="+"); ap.add_argument("--concurrency", type=int, default=2)
+    ap.add_argument("trials", nargs="*"); ap.add_argument("--concurrency", type=int, default=2)
+    ap.add_argument("--submit-only", metavar="MANIFEST"); ap.add_argument("--collect", metavar="MANIFEST")
     a = ap.parse_args()
+    if a.collect:
+        collect_manifest(a.collect); sys.exit(0)
     ts = [Trial(d["id"], d.get("config", {}), nodes=d.get("nodes", 1)) for d in (json.load(open(p)) for p in a.trials)]
+    if a.submit_only:
+        submit_only(ts, a.submit_only); sys.exit(0)
     for t in run_all(ts, a.concurrency):
         print(json.dumps({"id": t.id, "status": t.status, "final_eval_loss": final_eval(t)}))
