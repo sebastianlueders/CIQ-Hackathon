@@ -1,0 +1,31 @@
+{
+ "kind": "serve",
+ "config": "bf16",
+ "ok": true,
+ "args": [],
+ "startup_s": 760.2,
+ "eval_loss": 1.29053,
+ "ppl": 3.6347,
+ "quality_tokens": 24552,
+ "speed": [
+  {
+   "concurrency": 1,
+   "requests": 3,
+   "out_tok_s": 28.4,
+   "latency_p50_s": 8.89,
+   "latency_p95_s": 8.89,
+   "per_request_tok_s": 28.8
+  },
+  {
+   "concurrency": 16,
+   "requests": 48,
+   "out_tok_s": 113.4,
+   "latency_p50_s": 34.84,
+   "latency_p95_s": 39.13,
+   "per_request_tok_s": 7.3
+  }
+ ],
+ "workflow": "0431043b-39df-4987-b292-980fab9f5c0f",
+ "model": "Qwen3-Coder-30B-A3B-Instruct (base)",
+ "engine": "vLLM 0.33.0"
+}

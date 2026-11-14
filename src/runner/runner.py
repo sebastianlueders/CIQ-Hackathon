@@ -22,7 +22,7 @@ TERMINAL = {"Finished", "Errored", "Canceled", "Failed"}
 ENV = {
     "image": os.environ.get("TRIAL_IMAGE", "docker://nvcr.io/nvidia/pytorch:26.10-py3"),
     "python": os.environ.get("TRIAL_PYTHON", "/envs/train-pt2610/bin/python"),
-    "cores": 16, "memory": os.environ.get("TRIAL_MEMORY", "112GiB"),
+    "cores": int(os.environ.get("TRIAL_CORES", 8)), "memory": os.environ.get("TRIAL_MEMORY", "80GiB"),  # measured peak 64.8 GiB incl. GPU
 }
 
 
