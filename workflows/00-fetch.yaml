@@ -1,0 +1,82 @@
+# Stage 0: fetch inputs onto VAST-backed Fuzzball volumes.
+#
+# Runs once. Every later stage (search trials, training, serving) mounts the
+# same volumes on whichever node it lands on, so nothing is copied per node.
+#
+#   models  <- base model weights (BF16, pinned revision)
+#   data    <- raw source repository (pinned commit), later tokenized by ingest
+#
+# Inputs are pinned to exact revisions so every experiment is reproducible.
+version: v4
+
+jobs:
+  # Base model: Qwen3-Coder-30B-A3B (MoE, 128 experts, 8 active, ~61 GB BF16).
+  # Fits on a single GB10 node, so the search can run one trial per node.
+  fetch-model:
+    image:
+      uri: docker://python:3.12-slim
+    env:
+      - HF_REPO=Qwen/Qwen3-Coder-30B-A3B-Instruct
+      - HF_REVISION=b2cff646eb4bb1d68355c01b18ae02e7cf42d120
+      - HF_XET_HIGH_PERFORMANCE=1
+      - HOME=/tmp/home
+    mounts:
+      /models:
+        volume: models
+    policy:
+      timeout:
+        execute: 6h
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 16GiB
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      DEST="/models/${HF_REPO}"
+      mkdir -p "$DEST" "$HOME"
+      pip install --quiet --no-cache-dir "huggingface_hub[hf_xet]>=0.34"
+      time hf download "$HF_REPO" --revision "$HF_REVISION" --local-dir "$DEST"
+      rm -rf "$DEST/.cache"
+      echo "repo=$HF_REPO revision=$HF_REVISION" > "$DEST/SOURCE_INFO"
+      du -sh "$DEST"; ls "$DEST"
+
+  # Training data: LAMMPS (large public C++ HPC codebase standing in for a
+  # private one). Pinned to a recent develop commit so part of the code is
+  # newer than the base model's training data.
+  fetch-data:
+    image:
+      uri: docker://python:3.12-slim
+    env:
+      - REPO=lammps/lammps
+      - COMMIT=68b557e3a2148ea9b31dda5b55800215fb8be677
+    mounts:
+      /data:
+        volume: data
+    policy:
+      timeout:
+        execute: 1h
+    resource:
+      cpu:
+        cores: 4
+      memory:
+        size: 8GiB
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      DEST="/data/raw/lammps"
+      rm -rf "$DEST"; mkdir -p "$DEST"
+      python3 -c "import urllib.request,sys; urllib.request.urlretrieve(sys.argv[1], '/tmp/src.tar.gz')" \
+        "https://codeload.github.com/${REPO}/tar.gz/${COMMIT}"
+      tar -xzf /tmp/src.tar.gz -C "$DEST" --strip-components=1
+      echo "repo=$REPO commit=$COMMIT" > "$DEST/SOURCE_INFO"
+      du -sh "$DEST"; find "$DEST" -type f | wc -l
+
+volumes:
+  models:
+    name: models
+    use: team3
+  data:
+    name: data
+    use: team3

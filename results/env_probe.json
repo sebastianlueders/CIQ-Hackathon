@@ -1,0 +1,94 @@
+{
+ "workflow": "2e9afb19-376c-4c83-b678-ddba18d937b1",
+ "image": "docker://python:3.12-slim",
+ "venv": "/envs/train-cu130",
+ "records": [
+  {
+   "kind": "pip_install",
+   "seconds": 599
+  },
+  {
+   "torch": "2.14.1+cu130",
+   "cuda": "13.0",
+   "cudnn": 92400,
+   "python": "3.12.16",
+   "kind": "versions"
+  },
+  {
+   "name": "NVIDIA GB10",
+   "cc": "12.1",
+   "sms": 48,
+   "mem_total_gib": 119.6,
+   "mem_free_gib": 92.9,
+   "kind": "gpu"
+  },
+  {
+   "dtype": "bf16",
+   "n": 2048,
+   "tflops": 95.9,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "fp8",
+   "n": 2048,
+   "tflops": 162.9,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "bf16",
+   "n": 4096,
+   "tflops": 86.9,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "fp8",
+   "n": 4096,
+   "tflops": 180.1,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "bf16",
+   "n": 8192,
+   "tflops": 96.1,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "fp8",
+   "n": 8192,
+   "tflops": 204.9,
+   "kind": "gemm"
+  },
+  {
+   "read_gbs": 219.1,
+   "kind": "membw"
+  },
+  {
+   "ok": false,
+   "error": "Failed to find C compiler. Please specify via CC environment variable or set triton.knobs.build.impl.",
+   "kind": "triton"
+  },
+  {
+   "backend": "FLASH_ATTENTION",
+   "ok": true,
+   "ms": 1.67,
+   "kind": "sdpa"
+  },
+  {
+   "backend": "EFFICIENT_ATTENTION",
+   "ok": true,
+   "ms": 4.02,
+   "kind": "sdpa"
+  },
+  {
+   "backend": "CUDNN_ATTENTION",
+   "ok": true,
+   "ms": 1.57,
+   "kind": "sdpa"
+  },
+  {
+   "kind": "venv",
+   "transformers": "5.23.0",
+   "peft": "0.21.3"
+  }
+ ]
+}
