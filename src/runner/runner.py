@@ -157,6 +157,8 @@ def collect_manifest(manifest):
         t = Trial(e["id"], {}); t.workflow_id = e["workflow"]; t.status = status(e["workflow"])
         log = fb("workflow", "log", e["workflow"], e.get("job", "trial"), check=False)
         os.makedirs(RESULTS, exist_ok=True)
+        import re
+        log = re.sub(r"(FB_TOKEN|TOKEN|token)=\S+", r"\1=<redacted>", log)
         open(os.path.join(RESULTS, f"{e['id']}.log"), "w").write(log)
         t.records = [json.loads(l.split("RESULT ", 1)[1]) for l in log.splitlines() if "RESULT {" in l]
         with open(os.path.join(RESULTS, f"{e['id']}.jsonl"), "w") as f:

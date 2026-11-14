@@ -1,0 +1,29 @@
+# 2-node: how does the generic multinode wrapper start work on the other node?
+{
+ "version": "v4",
+ "jobs": {
+  "diag": {
+   "image": {
+    "uri": "docker://python:3.12-slim"
+   },
+   "multinode": {
+    "nodes": 2,
+    "implementation": "generic"
+   },
+   "resource": {
+    "cpu": {
+     "cores": 1
+    },
+    "memory": {
+     "size": "1GiB"
+    }
+   },
+   "policy": {
+    "timeout": {
+     "execute": "10m"
+    }
+   },
+   "script": "#!/bin/bash\necho \"DIAG head=$(hostname) wrapper=$MULTINODE_SSH_WRAPPER\"\nls -la /multinode/ 2>&1 | head; head -40 $MULTINODE_SSH_WRAPPER 2>&1\nfor h in $(echo \"$MULTINODE_HOSTLIST_NOSLOTS\" | tr ',' ' '); do\n  echo \"DIAG try $h:\"; timeout 60 $MULTINODE_SSH_WRAPPER $h hostname 2>&1 | head -3\n  timeout 60 $MULTINODE_SSH_WRAPPER $h ls /opt 2>&1 | head -3\ndone\n"
+  }
+ }
+}
