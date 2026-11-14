@@ -1,0 +1,98 @@
+{
+ "workflow": "eba24c59-ab6b-42b5-83f8-4c2900266070",
+ "image": "docker://nvcr.io/nvidia/pytorch:26.10-py3",
+ "venv": "/envs/train-pt2610",
+ "records": [
+  {
+   "kind": "vast_read",
+   "files": 16,
+   "gib": 56.9,
+   "seconds": 37.2,
+   "gbs": 1.64
+  },
+  {
+   "torch": "2.15.0a0+875d815502.nv26.10",
+   "cuda": "13.4",
+   "cudnn": 92700,
+   "python": "3.12.3",
+   "kind": "versions"
+  },
+  {
+   "name": "NVIDIA GB10",
+   "cc": "12.1",
+   "sms": 48,
+   "mem_total_gib": 121.6,
+   "mem_free_gib": 81.3,
+   "kind": "gpu"
+  },
+  {
+   "dtype": "bf16",
+   "n": 2048,
+   "tflops": 96.0,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "fp8",
+   "n": 2048,
+   "tflops": 169.8,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "bf16",
+   "n": 4096,
+   "tflops": 86.9,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "fp8",
+   "n": 4096,
+   "tflops": 179.8,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "bf16",
+   "n": 8192,
+   "tflops": 99.1,
+   "kind": "gemm"
+  },
+  {
+   "dtype": "fp8",
+   "n": 8192,
+   "tflops": 198.6,
+   "kind": "gemm"
+  },
+  {
+   "read_gbs": 209.4,
+   "kind": "membw"
+  },
+  {
+   "version": "3.8.0",
+   "ok": true,
+   "kind": "triton"
+  },
+  {
+   "backend": "FLASH_ATTENTION",
+   "ok": true,
+   "ms": 1.65,
+   "kind": "sdpa"
+  },
+  {
+   "backend": "EFFICIENT_ATTENTION",
+   "ok": true,
+   "ms": 4.14,
+   "kind": "sdpa"
+  },
+  {
+   "backend": "CUDNN_ATTENTION",
+   "ok": true,
+   "ms": 1.58,
+   "kind": "sdpa"
+  },
+  {
+   "kind": "venv",
+   "transformers": "5.23.0",
+   "peft": "0.21.3",
+   "torch": "2.15.0a0+875d815502.nv26.10"
+  }
+ ]
+}
