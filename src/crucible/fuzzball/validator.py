@@ -8,6 +8,22 @@ from typing import Any
 import yaml
 
 VALID_IMAGE_SCHEMES = ("docker://", "oras://")
+VALID_EGRESS_SCHEMES = ("fuzzball://", "fb://", "s3://", "http://", "https://")
+FORBIDDEN_RAW_DATA_EGRESS_MARKERS = (
+    "data/lammps",
+    "/lammps/",
+    ".cpp",
+    ".hpp",
+    ".cu",
+    ".h",
+    "held_out_documents",
+    "train.jsonl",
+    "val.jsonl",
+    "held_out.jsonl",
+    "safetensors",
+    "adapter_model",
+    "lora_adapter",
+)
 VALID_DEPENDS_STATUS = frozenset({"RUNNING", "FINISHED", "FAILED"})
 SUSPICIOUS_ENV_PREFIXES = ("OPENAI_API_KEY=", "ANTHROPIC_API_KEY=", "HF_TOKEN=", "PASSWORD=", "SECRET=")
 
@@ -64,6 +80,24 @@ def validate_fuzzfile(workflow_or_path: dict[str, Any] | str | Path) -> list[str
                 raise FuzzfileValidationError(
                     f"Persistent volume '{vol_key}' ('name' set) cannot combine 'size' or 'annotations'."
                 )
+            for eg in vol_spec.get("egress") or []:
+                if not isinstance(eg, dict):
+                    raise FuzzfileValidationError(f"Volume '{vol_key}' egress entries must be mappings.")
+                src_uri = str((eg.get("source") or {}).get("uri", ""))
+                dst_uri = str((eg.get("destination") or {}).get("uri", ""))
+                if not src_uri.startswith("file://"):
+                    raise FuzzfileValidationError(
+                        f"Volume '{vol_key}' egress source.uri '{src_uri}' must start with 'file://'."
+                    )
+                if not dst_uri.startswith(VALID_EGRESS_SCHEMES):
+                    raise FuzzfileValidationError(
+                        f"Volume '{vol_key}' egress destination.uri '{dst_uri}' must start with one of {VALID_EGRESS_SCHEMES}."
+                    )
+                for forbidden in FORBIDDEN_RAW_DATA_EGRESS_MARKERS:
+                    if forbidden in src_uri.lower():
+                        raise FuzzfileValidationError(
+                            f"Data isolation guard: volume '{vol_key}' forbidden from egressing raw dataset/weight file '{src_uri}'."
+                        )
 
     executable_names = set(jobs.keys()) | set(services.keys())
     adj: dict[str, list[str]] = {name: [] for name in executable_names}

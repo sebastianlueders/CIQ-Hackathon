@@ -1,0 +1,41 @@
+{
+  "cluster_name": "ciq-gb10-hackathon",
+  "fuzzfile_version": "v4",
+  "provisioners": ["vast", "local-scratch"],
+  "volumes": [
+    {
+      "name": "crucible-vast",
+      "provisioner": "vast",
+      "mount_path": "/vast",
+      "selected": true
+    }
+  ],
+  "images": {
+    "fetch": "docker://nvcr.io/nvidia/pytorch:25.09-py3",
+    "train": "docker://nvcr.io/nvidia/pytorch:25.09-py3",
+    "serve": "docker://nvcr.io/nvidia/vllm:25.09-py3"
+  },
+  "nodes": [
+    {
+      "name": "gb10-node-01",
+      "gpu_model": "NVIDIA GB10",
+      "gpus": 1,
+      "cores": 20,
+      "memory_gb": 112
+    },
+    {
+      "name": "gb10-node-02",
+      "gpu_model": "NVIDIA GB10",
+      "gpus": 1,
+      "cores": 20,
+      "memory_gb": 112
+    }
+  ],
+  "workflows": [
+    {
+      "id": "8c1f402a-91d4-4c3b-b82e-52f9a10e2d11",
+      "name": "crucible-00-fetch",
+      "status": "Finished"
+    }
+  ]
+}

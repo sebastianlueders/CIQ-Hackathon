@@ -17,14 +17,28 @@ from crucible.config import (
 from crucible.serving.vllm_bench import build_vllm_launch_args
 
 
-def _volume_section(cluster: ClusterConfig) -> dict[str, Any]:
+def trial_metrics_object_uri(cluster: ClusterConfig, run_id: str, trial_id: str) -> str:
+    return f"fuzzball://{cluster.vast.object_cache_scope}/crucible/{run_id}/{trial_id}/metrics.json"
+
+
+def _volume_section(
+    cluster: ClusterConfig,
+    egress_entries: list[tuple[str, str]] | None = None,
+) -> dict[str, Any]:
     if cluster.fuzzfile_version == "v4":
-        return {
-            cluster.vast.volume_key: {
-                "use": cluster.vast.provisioner,
-                "name": cluster.vast.persistent_volume_name,
-            }
+        vol_spec: dict[str, Any] = {
+            "use": cluster.vast.provisioner,
+            "name": cluster.vast.persistent_volume_name,
         }
+        if egress_entries and cluster.vast.egress_metrics_to_object_cache:
+            vol_spec["egress"] = [
+                {
+                    "source": {"uri": f"file://{rel_src.lstrip('/')}"},
+                    "destination": {"uri": dst_uri},
+                }
+                for rel_src, dst_uri in egress_entries
+            ]
+        return {cluster.vast.volume_key: vol_spec}
     return {
         cluster.vast.volume_key: {
             "reference": f"volume://user/{cluster.vast.provisioner}/{cluster.vast.persistent_volume_name}"
@@ -146,9 +160,13 @@ def render_training_trial_fuzzfile(
             "procs-per-node": 1,
         }
 
+    rel_runs_prefix = cluster.vast.runs_dir.removeprefix(cluster.vast.mount_path).lstrip("/")
+    egress_rel_summary = f"{rel_runs_prefix}/{run_id}/trials/{trial_id}/summary.json"
+    obj_uri = trial_metrics_object_uri(cluster, run_id, trial_id)
+
     doc: dict[str, Any] = {
         "version": cluster.fuzzfile_version,
-        "volumes": _volume_section(cluster),
+        "volumes": _volume_section(cluster, egress_entries=[(egress_rel_summary, obj_uri)]),
         "jobs": {f"train-{trial_id}": job_spec},
     }
     header = (
@@ -157,7 +175,8 @@ def render_training_trial_fuzzfile(
         f"# Recipe: rank={recipe.lora_rank}, alpha={recipe.lora_alpha}, lr={recipe.lr}\n"
         f"# Perf: nodes={perf.nodes}, micro_batch={perf.micro_batch_size}, "
         f"chunked_ce={perf.use_chunked_ce_kernel}, grouped_moe={perf.use_grouped_moe_kernel}, "
-        f"fused_lora={perf.use_fused_lora_kernel}\n\n"
+        f"fused_lora={perf.use_fused_lora_kernel}\n"
+        f"# Metrics Object Cache Egress (numeric only, zero raw data): {obj_uri}\n\n"
     )
     return header + yaml.safe_dump(doc, sort_keys=False)
 
@@ -220,16 +239,21 @@ def render_serving_trial_fuzzfile(
         + "\n",
     }
 
+    rel_runs_prefix = cluster.vast.runs_dir.removeprefix(cluster.vast.mount_path).lstrip("/")
+    egress_rel_srv = f"{rel_runs_prefix}/{run_id}/serving/{trial_id}/summary.json"
+    srv_obj_uri = trial_metrics_object_uri(cluster, run_id, f"serving-{trial_id}")
+
     doc: dict[str, Any] = {
         "version": cluster.fuzzfile_version,
-        "volumes": _volume_section(cluster),
+        "volumes": _volume_section(cluster, egress_entries=[(egress_rel_srv, srv_obj_uri)]),
         "services": {service_name: svc_spec},
         "jobs": {bench_job_name: bench_job},
     }
     header = (
         f"# Crucible Inference Search Fuzzfile: {trial_id}\n"
         f"# Precision: {cand.precision} | TP={cand.tensor_parallel} | Replicas={cand.replicas} | "
-        f"MaxSeqs={cand.max_num_seqs}\n\n"
+        f"MaxSeqs={cand.max_num_seqs}\n"
+        f"# Metrics Object Cache Egress (numeric only, zero raw data): {srv_obj_uri}\n\n"
     )
     return header + yaml.safe_dump(doc, sort_keys=False)
 

@@ -21,9 +21,11 @@ from crucible.config import (
     TrainingPerfCandidate,
 )
 from crucible.eval.evaluator import evaluate_quality_floor
+from crucible.fuzzball.mcp_client import FuzzballMCPError, FuzzballMCPStdioClient
 from crucible.fuzzball.renderer import (
     render_serving_trial_fuzzfile,
     render_training_trial_fuzzfile,
+    trial_metrics_object_uri,
 )
 from crucible.fuzzball.validator import validate_fuzzfile
 from crucible.serving.vllm_bench import ServingTrialSummary
@@ -163,6 +165,118 @@ class FuzzballCLIBackend:
             Path(self.cluster.vast.runs_dir) / self.run_id / "serving" / trial_id / "summary.json"
         )
         raw = json.loads(vast_summary.read_text(encoding="utf-8"))
+        return ServingTrialSummary(**raw)
+
+
+class FuzzballMCPBackend:
+    """Executes trial Fuzzfiles over CIQ Fuzzball 4.2 MCP (`fuzzball mcp serve --allow-write --allow-exec`).
+
+    Follows CIQ's Fuzzball 4.2 MCP agent contract:
+    1. `workflow_validate` -> checks rendered Fuzzfile server-side
+    2. `workflow_start`    -> launches trial workflow and obtains `workflowId`
+    3. `workflow_wait`     -> waits until terminal workflow state (`finished` / `STAGE_STATUS_FINISHED`)
+    4. `object_get`        -> fetches compact numeric `metrics.json` egressed to the Fuzzball object cache
+                              (never reading or egressing raw training data off VAST)
+    """
+
+    backend_name = "fuzzball_mcp"
+
+    def __init__(
+        self,
+        cluster: ClusterConfig,
+        exp: ExperimentConfig,
+        run_id: str,
+        local_run_dir: Path,
+        mcp_command: list[str] | None = None,
+        timeout_seconds: int = 7200,
+    ) -> None:
+        self.cluster = cluster
+        self.exp = exp
+        self.run_id = run_id
+        self.local_run_dir = local_run_dir
+        self.mcp_command = mcp_command
+        self.timeout_seconds = timeout_seconds
+
+    def _execute_and_fetch_metrics(
+        self,
+        yaml_text: str,
+        workflow_name: str,
+        object_uri: str,
+    ) -> dict[str, object]:
+        validate_fuzzfile(yaml_text)
+        with FuzzballMCPStdioClient(
+            command=self.mcp_command,
+            allow_write=True,
+            allow_exec=True,
+        ) as mcp:
+            val_res = mcp.workflow_validate(yaml_text)
+            if not val_res.get("valid", True):
+                raise FuzzballMCPError(
+                    f"Fuzzball MCP workflow_validate rejected '{workflow_name}': {val_res.get('errors')}"
+                )
+            wf_id = mcp.workflow_start(yaml_text, name=workflow_name)
+            wait_res = mcp.workflow_wait(wf_id, timeout_seconds=self.timeout_seconds)
+            status_str = str(wait_res.get("status", "")).upper()
+            if status_str and ("FAIL" in status_str or "ERROR" in status_str or "CANCEL" in status_str):
+                raise FuzzballMCPError(
+                    f"Fuzzball MCP workflow {wf_id} ({workflow_name}) ended with status={status_str}"
+                )
+            obj_payload = mcp.object_get(object_uri, max_inline_bytes=65536)
+            if isinstance(obj_payload, str):
+                return json.loads(obj_payload)
+            if isinstance(obj_payload, dict) and "content" in obj_payload and isinstance(
+                obj_payload["content"], str
+            ):
+                return json.loads(obj_payload["content"])
+            if isinstance(obj_payload, dict):
+                return obj_payload
+            raise FuzzballMCPError(f"Unexpected object_get payload from {object_uri}: {obj_payload!r}")
+
+    def run_training_trial(
+        self,
+        trial_id: str,
+        recipe: RecipeCandidate,
+        perf: TrainingPerfCandidate,
+        max_steps: int,
+        reference_recipe: RecipeCandidate | None = None,
+    ) -> TrainingTrialSummary:
+        trial_dir = self.local_run_dir / "trials" / trial_id
+        trial_dir.mkdir(parents=True, exist_ok=True)
+        yaml_text = render_training_trial_fuzzfile(
+            self.cluster, self.exp, trial_id, recipe, perf, max_steps, self.run_id
+        )
+        (trial_dir / "workflow.yaml").write_text(yaml_text, encoding="utf-8")
+        obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
+        raw = self._execute_and_fetch_metrics(yaml_text, f"crucible-{trial_id}", obj_uri)
+        (trial_dir / "summary.json").write_text(
+            json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        return TrainingTrialSummary(**raw)
+
+    def run_serving_trial(
+        self,
+        trial_id: str,
+        cand: InferencePerfCandidate,
+        baseline_finetuned_loss: float,
+    ) -> ServingTrialSummary:
+        srv_dir = self.local_run_dir / "serving" / trial_id
+        srv_dir.mkdir(parents=True, exist_ok=True)
+        adapter_vast = f"{self.cluster.vast.runs_dir}/{self.run_id}/best_adapter"
+        yaml_text = render_serving_trial_fuzzfile(
+            self.cluster,
+            self.exp,
+            trial_id,
+            adapter_vast,
+            cand,
+            baseline_finetuned_loss,
+            self.run_id,
+        )
+        (srv_dir / "workflow.yaml").write_text(yaml_text, encoding="utf-8")
+        srv_obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, f"serving-{trial_id}")
+        raw = self._execute_and_fetch_metrics(yaml_text, f"crucible-srv-{trial_id}", srv_obj_uri)
+        (srv_dir / "summary.json").write_text(
+            json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8"
+        )
         return ServingTrialSummary(**raw)
 
 

@@ -20,6 +20,7 @@ from crucible.fuzzball.runner import (
     CalibratedSimulatorBackend,
     ExecutionBackend,
     FuzzballCLIBackend,
+    FuzzballMCPBackend,
     LocalMicroTorchBackend,
 )
 from crucible.fuzzball.validator import validate_fuzzfile
@@ -51,13 +52,20 @@ class AutoresearchPipelineResult:
 
 
 def _build_backend(
-    backend_kind: Literal["simulator", "fuzzball", "local_torch"],
+    backend_kind: Literal["simulator", "fuzzball", "fuzzball_mcp", "local_torch"],
     cluster: ClusterConfig,
     exp: ExperimentConfig,
     run_id: str,
     output_dir: Path,
     processed_data_dir: Path,
 ) -> ExecutionBackend:
+    if backend_kind == "fuzzball_mcp":
+        return FuzzballMCPBackend(
+            cluster=cluster,
+            exp=exp,
+            run_id=run_id,
+            local_run_dir=output_dir,
+        )
     if backend_kind == "fuzzball":
         return FuzzballCLIBackend(
             cluster=cluster,
@@ -86,7 +94,7 @@ def run_autoresearch_pipeline(
     exp: ExperimentConfig,
     cluster: ClusterConfig,
     output_dir: Path,
-    backend_kind: Literal["simulator", "fuzzball", "local_torch"] = "simulator",
+    backend_kind: Literal["simulator", "fuzzball", "fuzzball_mcp", "local_torch"] = "simulator",
     source_data_dir: Path | None = None,
     run_id: str | None = None,
 ) -> AutoresearchPipelineResult:

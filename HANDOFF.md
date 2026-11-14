@@ -59,8 +59,11 @@ The LLM advisor (`src/crucible/optimizer/advisor.py`) communicates exclusively t
 # Run full 4-stage autoresearch loop in offline calibrated simulator mode (completes in seconds)
 crucible run --config configs/demo_lammps_30b.yaml --backend simulator --output-dir runs/demo
 
-# Run against live CIQ Fuzzball cluster
-crucible run --config configs/demo_lammps_30b.yaml --backend fuzzball --output-dir /vast/runs/live-01
+# Auto-discover cluster volumes/nodes via `fuzzball mcp serve` + `workflows/00-fetch.yaml`
+crucible discover
+
+# Run against live CIQ Fuzzball 4.2 MCP (`fuzzball mcp serve --allow-write --allow-exec`)
+crucible run --config configs/demo_lammps_30b.yaml --backend fuzzball_mcp --output-dir runs/live-01
 
 # Benchmark custom kernels (runs Triton on GPU or PyTorch verification on CPU)
 crucible bench-kernels

@@ -34,6 +34,8 @@ class VastStorageConfig(BaseModel):
     models_dir: str = "/vast/models"
     datasets_dir: str = "/vast/data"
     runs_dir: str = "/vast/runs"
+    object_cache_scope: Literal["user", "group"] = "user"
+    egress_metrics_to_object_cache: bool = True
 
 
 class ContainerImagesConfig(BaseModel):
