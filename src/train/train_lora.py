@@ -155,6 +155,10 @@ def main():
     torch.manual_seed(cfg["seed"]); rng = np.random.default_rng(cfg["seed"] + 1000 * rank)
 
     if rank == 0: start_mem_monitor(fh)
+    if cfg.get("fused_ce"):
+        import sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        global fused_linear_ce
+        from fused_ce import fused_linear_ce
     from transformers import AutoModelForCausalLM
     from peft import LoraConfig, get_peft_model, PeftModel
     t0 = time.time()
@@ -209,7 +213,12 @@ def main():
         for g in opt.param_groups: g["lr"] = lr_at(cfg, tokens_seen)
         for _ in range(cfg["grad_accum"]):
             x = next(gen)
-            loss = model(input_ids=x[:, :-1], labels=x[:, :-1], use_cache=False).loss  # HF shifts labels
+            if cfg.get("fused_ce"):  # src/kernels/fused_ce.py: chunked lm_head + Triton CE, no full FP32 logits
+                base = model.get_base_model()
+                hid = base.model(input_ids=x[:, :-1], use_cache=False).last_hidden_state
+                loss = fused_linear_ce(hid.reshape(-1, hid.shape[-1]), base.lm_head.weight, x[:, 1:].reshape(-1))
+            else:
+                loss = model(input_ids=x[:, :-1], labels=x[:, :-1], use_cache=False).loss  # HF shifts labels
             (loss / cfg["grad_accum"]).backward(); tot += loss.item() / cfg["grad_accum"]
         comm_s = 0.0
         if dist:  # one flattened all-reduce of the LoRA gradients (~13M params)

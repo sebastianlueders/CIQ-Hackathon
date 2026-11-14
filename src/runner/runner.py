@@ -52,12 +52,14 @@ def render(t: Trial) -> dict:
     code = open(os.path.join(REPO, t.script)).read()
     return {
         "version": "v4",
-        "files": {"train.py": code, "trial.json": json.dumps(cfg, indent=1)},
+        "files": {"train.py": code, "trial.json": json.dumps(cfg, indent=1),
+                  "fused_ce.py": open(os.path.join(REPO, "src/kernels/fused_ce.py")).read()},
         "jobs": {
             "trial": {
                 "image": {"uri": ENV["image"]},
                 "env": ["HOME=/tmp/home", "HF_HUB_OFFLINE=1", "PYTHONUNBUFFERED=1"],
-                "files": {"/opt/train.py": "file://train.py", "/opt/trial.json": "file://trial.json"},
+                "files": {"/opt/train.py": "file://train.py", "/opt/trial.json": "file://trial.json",
+                          "/opt/fused_ce.py": "file://fused_ce.py"},
                 "mounts": {"/models": {"volume": "models"}, "/data": {"volume": "data"},
                            "/runs": {"volume": "runs"}, "/envs": {"volume": "envs"}},
                 "policy": {"timeout": {"execute": t.timeout}},
