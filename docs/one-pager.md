@@ -1,0 +1,37 @@
+# PerfMaxxer: An Autoresearch Agent for Local Fine-Tuning and Serving
+
+**Bring your data, your base model, and your hardware. Our agent runs the experiments on your own cluster and hands back one Fuzzball workflow that fine-tunes and serves the best model your hardware allows, without your data ever leaving the room.**
+
+**Team:** Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania · **Track:** Multi-Node Training
+
+### The problem
+National labs, hospitals, banks, and defense contractors hold data that cannot go to a cloud API. Fine-tuning locally is the answer, but doing it well takes three scarce skills: **ML research** (which recipe actually improves the model on this data), **training performance engineering** (running that recipe near the hardware's peak), and **inference performance engineering** (serving the result fast without losing quality).
+
+### What we built
+An agent that does all three as experiments on the customer's own cluster. **Every experiment is a Fuzzball workflow the agent writes and launches itself.**
+
+1. **Recipe search.** Many short LoRA trials run in parallel, one per node. A successive-halving optimizer stops weak trials early and gives survivors more data. The winner is chosen by held-out eval loss.
+2. **Training performance search.** For the winning recipe, the agent searches batch sizes, activation checkpointing, single- vs. multi-node training, and **our custom kernels for Blackwell GB10 (sm_121)**. It accepts a change only if the loss curve is unchanged.
+3. **Inference performance search.** It searches precision (BF16, FP8) and serving settings, and rejects any configuration that falls below a quality floor.
+4. **Emit.** The result is **one clean, commented Fuzzball workflow** (ingest → train → eval → serve) tuned to this model, this data, and this cluster.
+
+A deterministic optimizer decides which experiments run and a measured adoption rule decides which optimizations stick, so the loop always completes; an LLM layer that explains each decision from configs and metrics only is next.
+
+**Custom kernels are part of the search, not a side project.** Each optimization is an option the agent benchmarks against the PyTorch default as a Fuzzball experiment: torch.compile first (1.49×, adopted), the MoE expert implementation (1.90×), our Triton fused linear + cross-entropy over the 152k vocabulary (verified against PyTorch), and next a grouped expert GEMM tuned for sm_121. Each kernel has a correctness test against PyTorch.
+
+### Demo: a coding assistant for a private HPC codebase
+**LAMMPS**, a large public C++ simulation code, stands in for a lab's private code. The base model is **Qwen3-Coder-30B-A3B** (MoE, BF16), with whole LAMMPS files held out for evaluation.
+
+| Result (all measured on GB10, logged in `results/`) | Value |
+|----------------------------|------------------------------------------|
+| Held-out LAMMPS loss (perplexity), base → fine-tuned | 1.175 (3.24) → **1.037 (2.82)**, −11.7%, after 750k tokens (4% of the data) |
+| Recipe search: configs run / stopped early | 4 configs → 2 → 1 by successive halving, trials in parallel as Fuzzball workflows |
+| Training throughput: stock → grouped experts → + torch.compile → 2 nodes | 356 → 675 → 1,011 → **~2,000 tokens/s (5.6×)**, loss unchanged; + no activation checkpointing: 1,366 on 1 node (+35%) |
+| `pipeline.yaml` end to end (train → FP8 + LoRA serving in vLLM) | ran in ~35 min; fine-tuned model served at 190 tokens/s (16 concurrent), held-out loss 1.293 → 1.193 vs base |
+| Custom Triton fused linear + cross-entropy (152k vocab) | 2.1–2.35× faster and 7.0 → 0.34 GiB alone; in training −6.2 GiB peak memory, exact loss |
+| Serving (vLLM), BF16 → FP8 at 16 concurrent requests | 113 → 203 tokens/s (1.79×), held-out loss +0.2%; LoRA adapter costs ~6% |
+
+**What did the second node unlock?** Data-parallel training across both GB10 nodes as one Fuzzball multinode job: 1,011 → ~2,000 tokens/s (1.98×, 99% scaling efficiency; gradient sync 0.05 s of a 33 s step), plus parallel search trials sharing one copy of weights and data on VAST.
+
+### Built on NVIDIA, CIQ, and VAST Data
+**CIQ Fuzzball:** the agent's entire experiment loop runs as Fuzzball workflows, and its deliverable *is* a Fuzzball workflow. **VAST Data:** Fuzzball volumes on VAST hold the weights, dataset, adapters, checkpoints, and results, shared by every trial on every node with no copying. That shared storage is what makes a parallel search cheap. **NVIDIA:** GB10 Grace Blackwell nodes, custom kernels written for sm_121, NCCL, and FP8 serving on Blackwell. **Next:** the agent generates and validates new kernels for hardware it hasn't seen.
