@@ -146,6 +146,7 @@ def render_training_trial_fuzzfile(
     perf: TrainingPerfCandidate,
     max_steps: int,
     run_id: str,
+    inline_splits_json: str | None = None,
 ) -> str:
     base_model_path = f"{cluster.vast.models_dir}/{exp.model.weights_subpath}"
     processed_path = f"{cluster.vast.datasets_dir}/{exp.dataset.processed_subpath}"
@@ -203,21 +204,26 @@ def render_training_trial_fuzzfile(
             ]
         )
 
+    job_files: dict[str, str] = {}
+    top_files: dict[str, str] = {}
+    if cluster.fuzzfile_version == "v4":
+        job_files["/opt/crucible_remote_train.py"] = "file://crucible-train-runner"
+        top_files["crucible-train-runner"] = REMOTE_TRAIN_RUNNER_PY
+        if inline_splits_json:
+            job_files["/opt/crucible_splits.json"] = "file://crucible-splits-json"
+            top_files["crucible-splits-json"] = inline_splits_json
+
     job_spec: dict[str, Any] = {
         "image": {"uri": cluster.images.train},
         "mounts": _mounts_section(cluster),
-        **(
-            {"files": {"/opt/crucible_remote_train.py": "file://crucible-train-runner"}}
-            if cluster.fuzzfile_version == "v4"
-            else {}
-        ),
+        **({"files": job_files} if job_files else {}),
         "env": [
             "HOME=/tmp/home",
             "PYTHONUNBUFFERED=1",
             "NCCL_DEBUG=WARN",
         ],
         "resource": _gpu_resource_block(cluster, multinode=(perf.nodes > 1)),
-        "policy": {"timeout": {"execute": "2h"}},
+        "policy": {"timeout": {"execute": "4h"}},
         "script": script + "\n",
     }
     if perf.nodes > 1:
@@ -233,11 +239,7 @@ def render_training_trial_fuzzfile(
     doc: dict[str, Any] = {
         "version": cluster.fuzzfile_version,
         **_workflow_annotations_section(cluster),
-        **(
-            {"files": {"crucible-train-runner": REMOTE_TRAIN_RUNNER_PY}}
-            if cluster.fuzzfile_version == "v4"
-            else {}
-        ),
+        **({"files": top_files} if top_files else {}),
         "volumes": _volume_section(cluster, egress_entries=[(egress_rel_summary, obj_uri)]),
         "jobs": {f"train-{trial_id}": job_spec},
     }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crucible — Team 3 Autoresearch &amp; sm_121 Live Control Plane</title>
+  <title>Crucible — Local Model Optimizer &amp; Turnkey Build Studio</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -13,111 +13,140 @@
       <div>
         <div class="brand-title-row">
           <h1>Crucible</h1>
-          <span class="badge badge-accent">Team 3 Live Control Plane</span>
+          <span class="badge badge-accent">Local Model Optimizer &amp; Build Forge</span>
         </div>
-        <p class="subtitle">Local autoresearch &amp; Grace Blackwell <code>sm_121</code> optimization on CIQ Fuzzball + VAST — raw code never leaves <code>/vast</code>.</p>
+        <p class="subtitle">Pick any open-weight model, drop your private tuning data (or use the built-in benchmark), optimize on GB10 <code>sm_121</code>, and download a ready-to-run build.</p>
       </div>
     </div>
     <div class="stack-pills">
-      <span class="pill"><span class="dot dot-green"></span><code>use: <span id="pill-def-id">team3</span></code></span>
-      <span class="pill"><span class="dot dot-cyan"></span>NVIDIA-GB10 · <code>sm_121</code> (20c / 127.9 GiB per Spark)</span>
-      <span class="pill"><span class="dot dot-violet"></span>Fuzzfile <code id="pill-fz-ver">v4</code> · VAST <code>/vast</code></span>
+      <span class="pill"><span class="dot dot-green"></span>VAST Provisioner: <code id="pill-def-id">team3</code></span>
+      <span class="pill"><span class="dot dot-cyan"></span>NVIDIA GB10 · <code>sm_121</code></span>
+      <span class="pill"><span class="dot dot-violet"></span>Fuzzfile <code id="pill-fz-ver">v4</code></span>
       <span class="pill pill-shield" id="pill-privacy"><span class="dot dot-green"></span>Schema Firewall: 0 Bytes Leaked</span>
     </div>
     <div class="actions">
-      <label class="team-input-wrap" title="Fuzzball VAST storage provisioner / team ID">
-        <span>Team:</span>
-        <input id="team-input" type="text" value="team3" spellcheck="false" aria-label="Team Provisioner" />
-      </label>
-      <select id="profile-select" aria-label="Experiment Profile">
-        <option value="demo_30b">Qwen3-Coder-30B-A3B · LAMMPS C++</option>
-        <option value="stretch_80b">Qwen3-Coder-Next-80B · 2-Node Stretch</option>
-      </select>
-      <select id="backend-select" aria-label="Execution Backend">
-        <option value="fuzzball_mcp">Fuzzball 4.2 MCP · Live</option>
-        <option value="fuzzball">Fuzzball CLI · Live</option>
-        <option value="simulator" selected>GB10 Calibrated Sim</option>
-        <option value="local_torch">Local PyTorch Kernels</option>
-      </select>
-      <button id="btn-run" class="btn btn-primary">Launch on team3</button>
+      <a href="/api/build/bundle.zip" id="btn-top-download" class="btn btn-download" download>Download Tuned Build (.zip)</a>
       <button id="btn-probe" class="btn btn-outline" title="Inject a simulated raw C++ snippet and verify the schema firewall blocks it">Test Firewall Guard</button>
     </div>
   </header>
 
   <main class="container">
-    <!-- NEW: Live DGX Spark & Team 3 GPU Pool Usage Monitor -->
-    <section class="panel spark-monitor-panel" id="spark-monitor-panel">
-      <div class="panel-header">
-        <div>
-          <h2>Live Spark &amp; Team 3 GPU Usage</h2>
-          <p class="panel-sub">Real-time DGX Spark (<code>NVIDIA-GB10</code>) pool occupancy &amp; CIQ Fuzzball workflow queue — refreshes every 3s</p>
-        </div>
-        <div class="spark-summary-badges">
-          <span class="badge" id="spark-source-badge">POLLING…</span>
-          <span class="badge badge-green" id="spark-gpu-badge">GPUs In Use: 0 / 8</span>
-          <span class="badge" id="spark-active-badge">Active Workflows: 0</span>
-          <span class="badge" id="spark-queue-badge">Queued / Pending: 0</span>
-        </div>
-      </div>
-
-      <div class="spark-pool-bar-wrap">
-        <div class="spark-pool-bar-top">
-          <span id="spark-pool-caption">0 / 8 DGX Spark GPUs Allocated (8 Free)</span>
-          <span id="spark-updated-at" class="muted-small">—</span>
-        </div>
-        <div class="bar-track spark-pool-track">
-          <div class="bar-fill spark-pool-fill" id="spark-pool-fill" style="width: 4%"></div>
-        </div>
-      </div>
-
-      <div class="spark-monitor-grid">
-        <div>
-          <div class="sub-label">PER-NODE LIVE DGX SPARK (<code>GB10</code>) GRID</div>
-          <div class="spark-nodes-grid" id="spark-nodes-grid"></div>
-        </div>
-        <div>
-          <div class="sub-label">ACTIVE &amp; QUEUED FUZZBALL WORKFLOWS</div>
-          <div class="spark-wf-wrap">
-            <table class="data-table compact-table" id="spark-wf-table">
-              <thead>
-                <tr>
-                  <th>Workflow ID</th>
-                  <th>Name</th>
-                  <th>Stage</th>
-                  <th>Status</th>
-                  <th>Elapsed</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+    <!-- STEP-BY-STEP MODEL + DATA + OPTIMIZE STUDIO BUILDER -->
+    <section class="panel builder-panel">
+      <div class="builder-grid">
+        <!-- 1. PICK ANY MODEL -->
+        <div class="builder-col">
+          <div class="step-kicker">1. PICK ANY BASE MODEL (CATALOG OR CUSTOM HF / VAST PATH)</div>
+          <input
+            id="model-id-input"
+            class="model-input"
+            type="text"
+            value="Qwen/Qwen3-Coder-30B-A3B-Instruct"
+            placeholder="e.g. Qwen/Qwen2.5-Coder-14B-Instruct, meta-llama/Llama-3.1-8B-Instruct, or /models/..."
+            spellcheck="false"
+            aria-label="Base Model ID"
+          />
+          <div class="model-chips" id="model-chips"></div>
+          <div class="model-spec-line" id="model-spec-line">
+            Inferred: MoE (30.5B total / 3.3B active) · 151,936 vocab · 1-node GB10 fit · chunked CE + grouped MoE + fused LoRA + NVFP4
           </div>
+        </div>
+
+        <!-- 2. DROP TUNING DATA (OR USE BUILT-IN TRAIN/VAL/TEST PRESET) -->
+        <div class="builder-col">
+          <div class="step-kicker">2. TUNING DATA (BUILT-IN TRAIN / VAL / TEST PRESET ACTIVE — OR DROP YOUR FILES)</div>
+          <div class="dropzone" id="dropzone">
+            <div class="dropzone-main">
+              <strong>Drag &amp; drop code, <code>.jsonl</code>/<code>.json</code>/<code>.csv</code>, <code>.md</code>/<code>.txt</code>, or <code>.zip</code> here</strong>
+              <span class="dropzone-sub">100% local ingestion into leak-free Train, Validation, and Sealed Held-Out Test splits</span>
+            </div>
+            <div class="dropzone-buttons">
+              <label class="btn btn-outline btn-sm">
+                Select Files
+                <input id="file-picker" type="file" multiple hidden />
+              </label>
+              <label class="btn btn-outline btn-sm">
+                Select Folder
+                <input id="folder-picker" type="file" webkitdirectory directory multiple hidden />
+              </label>
+              <button id="btn-use-preset" type="button" class="btn btn-outline btn-sm">Use Built-In LAMMPS Preset</button>
+            </div>
+          </div>
+          <div class="dataset-status-bar" id="dataset-status-bar">
+            Preset Active: <strong>LAMMPS C++ &amp; GPU Simulation Benchmark</strong> · Train / Validation / Held-Out Test splits ready
+          </div>
+        </div>
+
+        <!-- 3. OPTIMIZE & RECEIVE BUILD -->
+        <div class="builder-col builder-col-launch">
+          <div class="step-kicker">3. EXECUTION TARGET &amp; LAUNCH</div>
+          <div class="launch-fields">
+            <label class="field-row">
+              <span>Execution Backend</span>
+              <select id="backend-select" aria-label="Execution Backend">
+                <option value="simulator" selected>GB10 Real-Time Split Evaluator (Instant)</option>
+                <option value="fuzzball_mcp">CIQ Fuzzball 4.2 MCP · Live (Auto-Queues if GPUs Busy)</option>
+                <option value="fuzzball">CIQ Fuzzball CLI · Live (Auto-Queues if GPUs Busy)</option>
+                <option value="local_torch">Local PyTorch Kernels</option>
+              </select>
+            </label>
+            <label class="field-row">
+              <span>Fuzzball Team / VAST Provisioner</span>
+              <input id="team-input" class="team-text" type="text" value="team3" spellcheck="false" aria-label="Team Provisioner" />
+            </label>
+          </div>
+          <button id="btn-run" class="btn btn-primary btn-hero">Optimize Model &amp; Generate Build</button>
+          <div class="queue-note">On live Fuzzball, trials automatically queue if all Team 3 GPUs are busy and start as soon as a GPU frees up.</div>
         </div>
       </div>
     </section>
 
+    <!-- LIVE STREAM & REAL-TIME VALIDATION / TEST EVALUATION TELEMETRY -->
     <section class="cluster-strip">
-      <div class="node-cards-wrap" id="node-cards"></div>
       <div class="live-stream-card">
         <div class="live-stream-header">
           <div>
-            <span class="stage-tag">LIVE FUZZBALL TELEMETRY · WORKFLOW LOG &amp; METRICS STREAM</span>
-            <div class="live-stage-title" id="live-stage-label">Ready on team3</div>
+            <span class="stage-tag">LIVE OPTIMIZATION &amp; REAL-TIME VALIDATION / HELD-OUT TEST STREAM</span>
+            <div class="live-stage-title" id="live-stage-label">Ready —Built-in Train / Validation / Test benchmark loaded</div>
           </div>
-          <span class="badge" id="live-run-state">COMPLETED</span>
+          <span class="badge badge-green" id="live-run-state">READY</span>
         </div>
         <div id="live-error-banner" class="error-banner hidden"></div>
         <div class="event-feed" id="live-event-feed"></div>
       </div>
+
+      <!-- DELIVERABLE BUILD PACKAGE CARD -->
+      <div class="deliverable-card" id="deliverable-card">
+        <div class="deliverable-top">
+          <div>
+            <span class="stage-tag">YOUR TUNED BUILD PACKAGE</span>
+            <h2 id="build-title">Ready to Download</h2>
+            <p class="panel-sub" id="build-subtitle">Self-contained <code>.zip</code> with turnkey <code>fuzzfile.yaml</code>, LoRA &amp; vLLM configs, 1-command launcher, and your split <code>train/val/test</code> data.</p>
+          </div>
+          <a href="/api/build/bundle.zip" id="btn-card-download" class="btn btn-download" download>Download Complete Build (.zip)</a>
+        </div>
+        <div class="artifact-pills">
+          <code>fuzzfile.yaml</code>
+          <code>configs/train_recipe.yaml</code>
+          <code>configs/vllm_serve.yaml</code>
+          <code>scripts/launch_fuzzball.sh</code>
+          <code>data/train.jsonl</code>
+          <code>data/val.jsonl</code>
+          <code>data/test.jsonl</code>
+          <code>BUILD_REPORT.md</code>
+        </div>
+      </div>
     </section>
 
+    <!-- 4-STAGE FUNNEL SUMMARY -->
     <section class="funnel-grid" id="funnel-cards">
       <article class="stage-card">
         <div class="stage-header">
           <span class="stage-tag">STAGE A · RECIPE SEARCH</span>
-          <span class="stage-status">Successive Halving</span>
+          <span class="stage-status">Val Pruned · Test Ranked</span>
         </div>
         <div class="metric-big" id="kpi-ppl">—</div>
-        <div class="metric-label">Held-out LAMMPS C++ Perplexity (Base &rarr; Tuned)</div>
+        <div class="metric-label">Held-Out Test Perplexity (Base &rarr; Tuned)</div>
         <div class="stage-meta" id="meta-stage-a">Loading trials...</div>
       </article>
 
@@ -134,7 +163,7 @@
       <article class="stage-card">
         <div class="stage-header">
           <span class="stage-tag">STAGE C · INFERENCE PERF</span>
-          <span class="stage-status">Quality-Floor Gated</span>
+          <span class="stage-status">Test Quality-Floor Gated</span>
         </div>
         <div class="metric-big" id="kpi-serve-speed">—</div>
         <div class="metric-label">vLLM Serving Throughput (BF16 &rarr; NVFP4)</div>
@@ -143,12 +172,12 @@
 
       <article class="stage-card stage-card-highlight">
         <div class="stage-header">
-          <span class="stage-tag">STAGE D · TURNKEY ARTIFACT</span>
-          <span class="stage-status status-ok">Validated Team 3 DAG</span>
+          <span class="stage-tag">STAGE D · BUILD ARTIFACT</span>
+          <span class="stage-status status-ok">Turnkey Bundle</span>
         </div>
-        <div class="metric-big" id="kpi-dag">4-Stage Fuzzfile</div>
-        <div class="metric-label"><code>ingest &rarr; train &rarr; eval &rarr; serve</code></div>
-        <div class="stage-meta" id="meta-stage-d">VAST storage provisioner: use: team3</div>
+        <div class="metric-big" id="kpi-dag">ingest &rarr; serve</div>
+        <div class="metric-label">Tuned for <code id="kpi-model-short">Qwen3-Coder-30B-A3B</code></div>
+        <div class="stage-meta" id="meta-stage-d">VAST provisioner: use: team3</div>
       </article>
     </section>
 
@@ -156,8 +185,8 @@
       <div class="panel">
         <div class="panel-header">
           <div>
-            <h2>Training Loss-Curve Equivalence &amp; Live Trajectories</h2>
-            <p class="panel-sub">Stage B accepts custom <code>sm_121</code> kernels &amp; 2-node NCCL DDP across GB10 nodes only when trajectory &Delta; &le; 0.025</p>
+            <h2>Real-Time Train &amp; Validation Loss-Curve Equivalence</h2>
+            <p class="panel-sub">Streams candidate trajectories against the Validation split and enforces Stage B curve equivalence (&Delta; &le; 0.025)</p>
           </div>
           <span class="badge" id="curve-badge">Max &Delta; = 0.0067</span>
         </div>
@@ -168,8 +197,8 @@
       <div class="panel">
         <div class="panel-header">
           <div>
-            <h2>Stage B Training Throughput &amp; Kernel Waterfall</h2>
-            <p class="panel-sub">Measured tokens/sec across PyTorch baseline, 152k-vocab chunked CE, grouped MoE + fused LoRA, and 2-node GB10 DDP</p>
+            <h2>Stage B Training Throughput &amp; <code>sm_121</code> Kernel Waterfall</h2>
+            <p class="panel-sub">Measured tokens/sec across PyTorch baseline, chunked cross-entropy, grouped MoE + fused LoRA, and 2-node DDP</p>
           </div>
           <span class="badge badge-green" id="util-badge">83.8% Cluster Peak</span>
         </div>
@@ -181,8 +210,8 @@
       <div class="panel">
         <div class="panel-header">
           <div>
-            <h2>Stage C vLLM Serving Sweep (Precision &times; Replicas vs. TP)</h2>
-            <p class="panel-sub"><code>vllm/vllm-openai:v0.33.0</code> (<code>TRITON_ATTN</code>) gated on PPL &Delta; &le; +2.5%, C++ completion &ge; 84%, P99 &le; 450 ms</p>
+            <h2>Stage C vLLM Serving Sweep (Evaluated on Held-Out Test Split)</h2>
+            <p class="panel-sub">Sweeps BF16, FP8, and Blackwell NVFP4 across replicas vs. TP, rejecting configs that breach the Held-Out Test quality floor</p>
           </div>
         </div>
         <table class="data-table" id="serving-table">
@@ -193,7 +222,7 @@
               <th>Topology</th>
               <th>Tok/s</th>
               <th>P99</th>
-              <th>PPL &Delta;</th>
+              <th>Test PPL &Delta;</th>
               <th>Gate</th>
             </tr>
           </thead>
@@ -204,8 +233,8 @@
       <div class="panel">
         <div class="panel-header">
           <div>
-            <h2>Custom <code>sm_121</code> Kernel Verification &amp; Advisor Audit</h2>
-            <p class="panel-sub">Numerical parity vs. PyTorch reference + firewalled LLM advisor rationale &amp; SHA-256 zero-data-egress log</p>
+            <h2>Custom <code>sm_121</code> Kernel Parity &amp; Zero-Egress Firewall Audit</h2>
+            <p class="panel-sub">Numerical parity vs. PyTorch reference + firewalled advisor rationale proving your dropped data never leaves local/VAST storage</p>
           </div>
         </div>
         <table class="data-table compact-table" id="kernel-table">
@@ -224,19 +253,23 @@
       </div>
     </section>
 
+    <!-- BUILD PACKAGE ARTIFACT INSPECTOR -->
     <section class="panel yaml-panel">
       <div class="panel-header">
         <div>
-          <h2>Emitted CIQ Fuzzball v4 Workflow (<code>use: <span id="yaml-team-label">team3</span></code>)</h2>
-          <p class="panel-sub">VAST volume <code>use: team3</code> · <code>8c / 104GiB / nvidia.com/gpu: 1</code> per GB10 node · cached <code>nvcr.io/nvidia/pytorch:26.10-py3</code></p>
+          <h2>Generated Build Package Inspector (<code id="inspector-model-label">Qwen/Qwen3-Coder-30B-A3B-Instruct</code>)</h2>
+          <p class="panel-sub">Preview every file inside your downloadable <code>.zip</code> build bundle</p>
         </div>
         <div class="yaml-controls">
-          <button id="btn-tab-turnkey" class="btn btn-outline active-tab">Turnkey Production YAML</button>
-          <button id="btn-tab-trial" class="btn btn-outline">Latest Trial YAML</button>
-          <button id="btn-copy-yaml" class="btn btn-outline">Copy YAML</button>
+          <button data-artifact="fuzzfile.yaml" class="btn btn-outline artifact-tab active-tab">fuzzfile.yaml</button>
+          <button data-artifact="configs/train_recipe.yaml" class="btn btn-outline artifact-tab">train_recipe.yaml</button>
+          <button data-artifact="configs/vllm_serve.yaml" class="btn btn-outline artifact-tab">vllm_serve.yaml</button>
+          <button data-artifact="scripts/launch_fuzzball.sh" class="btn btn-outline artifact-tab">launch_fuzzball.sh</button>
+          <button data-artifact="BUILD_REPORT.md" class="btn btn-outline artifact-tab">BUILD_REPORT.md</button>
+          <button id="btn-copy-yaml" class="btn btn-outline">Copy File</button>
         </div>
       </div>
-      <pre class="code-viewer" id="yaml-viewer">Loading workflow...</pre>
+      <pre class="code-viewer" id="yaml-viewer">Loading build package...</pre>
     </section>
   </main>
 

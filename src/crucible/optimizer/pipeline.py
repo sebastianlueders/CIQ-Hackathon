@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from crucible.config import ClusterConfig, ExperimentConfig, repo_root
-from crucible.data.lammps_ingest import DatasetManifest, ingest_lammps_corpus
+from crucible.data.custom_ingest import ingest_universal_dataset
+from crucible.data.lammps_ingest import DatasetManifest
 from crucible.firewall import (
     AdvisorDecisionExplanation,
     AdvisorStageRequest,
@@ -68,6 +69,7 @@ def _build_backend(
             exp=exp,
             run_id=run_id,
             local_run_dir=output_dir,
+            processed_data_dir=processed_data_dir,
             event_hook=event_hook,
         )
     if backend_kind == "fuzzball":
@@ -127,8 +129,14 @@ def run_autoresearch_pipeline(
         }
     )
 
-    # 1. Data Ingestion & Whole-File Sealed Split (local/VAST only)
-    _emit({"type": "stage_started", "stage": "ingest", "label": "Ingesting LAMMPS C++ & sealing held-out split"})
+    # 1. Data Ingestion & Deterministic Train / Validation / Sealed Held-Out Test Split (local/VAST only)
+    _emit(
+        {
+            "type": "stage_started",
+            "stage": "ingest",
+            "label": f"Ingesting dataset '{exp.dataset.name}' into Train / Val / Held-Out Test splits",
+        }
+    )
     if source_data_dir is None:
         vast_candidate = Path(cluster.vast.datasets_dir) / exp.dataset.raw_subpath
         source_data_dir = (
@@ -138,12 +146,15 @@ def run_autoresearch_pipeline(
         )
 
     processed_dir = output_dir / "dataset_packed"
-    manifest = ingest_lammps_corpus(
+    manifest, format_summary = ingest_universal_dataset(
         source_root=source_data_dir,
         output_dir=processed_dir,
         split_cfg=exp.dataset,
         vocab_size=exp.model.vocab_size,
     )
+    held_out_file = processed_dir / "held_out.jsonl"
+    if held_out_file.exists():
+        (processed_dir / "test.jsonl").write_bytes(held_out_file.read_bytes())
 
     # 2. Custom sm_121 Kernel Correctness & Microbenchmark Suite
     caps, kernel_results = run_kernel_suite(vocab_size=8192, hidden_size=128, num_tokens=64)
@@ -391,6 +402,8 @@ def run_autoresearch_pipeline(
         "run_id": resolved_run_id,
         "experiment_id": exp.experiment_id,
         "backend": backend_kind,
+        "model_profile": exp.model.model_dump(),
+        "dataset_format_summary": format_summary,
         "cluster": cluster.model_dump(),
         "hardware_capabilities": caps.to_dict(),
         "dataset_manifest": asdict(manifest),

@@ -60,7 +60,7 @@ class NodeTopologyConfig(BaseModel):
     physical_cores_per_node: int = Field(default=20, ge=1)
     cpu_cores_per_node: int = Field(default=8, ge=1)
     physical_memory_gib_per_node: float = Field(default=127.9, gt=0)
-    memory_gb_per_node: int = Field(default=104, ge=8)
+    memory_gb_per_node: int = Field(default=96, ge=8)
     measured_peak_bf16_tflops: float = Field(default=198.0, gt=0)
     measured_peak_train_tok_s_per_node: float = Field(default=4150.0, gt=0)
     interconnect: str = "NCCL-RoCE-200GbE"

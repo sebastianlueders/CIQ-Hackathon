@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 
 from crucible.config import RecipeCandidate, StageARecipeConfig, TrainingPerfCandidate
@@ -64,7 +65,7 @@ def run_stage_a_recipe_search(
         rung_results: list[tuple[int, str, TrainingTrialSummary]] = []
         batch_durations: list[float] = []
 
-        for idx in survivor_indices:
+        def _launch_one(idx: int) -> tuple[int, str, TrainingTrialSummary]:
             cand = cfg.candidates[idx]
             trial_id = f"stagea-r{rung_idx}-c{idx}-{cand.short_id()}"
             summary = backend.run_training_trial(
@@ -73,6 +74,18 @@ def run_stage_a_recipe_search(
                 perf=baseline_perf,
                 max_steps=steps,
             )
+            return idx, trial_id, summary
+
+        # On live Fuzzball backends, submit the rung's candidate workflows concurrently so
+        # Fuzzball queues all candidates in line when GPUs are busy and executes them in parallel!
+        if getattr(backend, "backend_name", "") in {"fuzzball_mcp", "fuzzball"} and len(survivor_indices) > 1:
+            workers = min(len(survivor_indices), max(cfg.parallel_nodes, 2))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                launched = list(pool.map(_launch_one, survivor_indices))
+        else:
+            launched = [_launch_one(idx) for idx in survivor_indices]
+
+        for idx, trial_id, summary in launched:
             total_trials += 1
             summaries_by_trial[trial_id] = summary
             rung_results.append((idx, trial_id, summary))

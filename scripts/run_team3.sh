@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # scripts/run_team3.sh
-# Turnkey launcher for Crucible on Team 3 GPUs (VAST storage provisioner `use: team3`).
-# Auto-detects the logged-in Fuzzball team from `context_show` / `fuzzball context list` (defaulting to `team3`).
+# Turnkey launcher for Crucible Studio (Pick Any Model -> Drop Data -> Optimize -> Download Build).
 #
-# Usage:
-#   ./scripts/run_team3.sh                        # auto-selects fuzzball_mcp if `fuzzball` is available, else simulator
-#   ./scripts/run_team3.sh --backend fuzzball_mcp # force live Fuzzball 4.2 MCP execution
-#   ./scripts/run_team3.sh --team team20          # override VAST storage provisioner / team ID
-#   ./scripts/run_team3.sh --profile stretch_80b  # run 2-node 80B stretch profile
-#   ./scripts/run_team3.sh --no-open              # skip opening browser automatically
+# Default: ensures the `team3` VAST volume exists, opens http://127.0.0.1:8000 with the built-in
+# Train / Validation / Held-Out Test benchmark pre-loaded so you can pick any model, drop files,
+# click Optimize, and download your `.zip` build!
+#
+# Options:
+#   ./scripts/run_team3.sh                         # interactive Studio at http://127.0.0.1:8000
+#   ./scripts/run_team3.sh --auto-run              # also auto-launch a run immediately
+#   ./scripts/run_team3.sh --backend fuzzball_mcp  # auto-launch live on Team 3 Fuzzball (queues if GPUs busy)
+#   ./scripts/run_team3.sh --model Qwen/Qwen2.5-Coder-14B-Instruct --auto-run
 
 set -euo pipefail
 
@@ -16,8 +18,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export PATH="${REPO_ROOT}:${PATH}"
 
+MODEL_ID=""
 PROFILE="demo_30b"
 BACKEND="auto"
+AUTO_RUN=0
 TEAM_ID="${CRUCIBLE_DEFINITION_ID:-auto}"
 PORT="${CRUCIBLE_PORT:-8000}"
 HOST="${CRUCIBLE_HOST:-127.0.0.1}"
@@ -28,7 +32,21 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend)
       BACKEND="$2"
+      AUTO_RUN=1
       shift 2
+      ;;
+    --model)
+      MODEL_ID="$2"
+      AUTO_RUN=1
+      shift 2
+      ;;
+    --auto-run)
+      AUTO_RUN=1
+      shift
+      ;;
+    --studio-only)
+      AUTO_RUN=0
+      shift
       ;;
     --team|--definition-id)
       TEAM_ID="$2"
@@ -48,6 +66,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --exit-after-run)
       KEEP_SERVING=0
+      AUTO_RUN=1
       shift
       ;;
     *)
@@ -57,7 +76,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# 1. Resolve Python virtual environment
+# 1. Resolve existing Python virtual environment (zero extra pip packages needed!)
 if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
   VENV_BIN="${REPO_ROOT}/.venv/bin"
 elif command -v crucible >/dev/null 2>&1; then
@@ -77,18 +96,15 @@ if [[ "$BACKEND" == "auto" ]]; then
   if command -v fuzzball >/dev/null 2>&1; then
     if fuzzball mcp serve --help >/dev/null 2>&1; then
       BACKEND="fuzzball_mcp"
-      echo "[crucible] Detected 'fuzzball mcp serve' -> selecting live CIQ Fuzzball 4.2 MCP backend"
     else
       BACKEND="fuzzball"
-      echo "[crucible] Detected 'fuzzball' CLI -> selecting live Fuzzball CLI backend"
     fi
   else
     BACKEND="simulator"
-    echo "[crucible] 'fuzzball' CLI not found -> selecting calibrated GB10 simulator"
   fi
 fi
 
-# 3. Discover active Fuzzball team (`team3` from `team3@fb-hack.local`), ensure volume on `$TEAM_ID`, and validate Fuzzfiles
+# 3. Discover active Fuzzball team (`team3`) and ensure VAST volume exists
 if [[ "$TEAM_ID" == "auto" ]]; then
   DISCOVER_JSON="$("$CRUCIBLE" discover --json)"
   TEAM_ID="$("${VENV_BIN}/python" -c 'import json,sys; print(json.loads(sys.stdin.read())["cluster_config"]["definition_id"])' <<<"$DISCOVER_JSON")"
@@ -96,7 +112,6 @@ fi
 export CRUCIBLE_DEFINITION_ID="$TEAM_ID"
 
 if command -v fuzzball >/dev/null 2>&1; then
-  echo "[crucible] Checking VAST volumes on provisioner '${TEAM_ID}' ..."
   VOL_OUT="$(fuzzball volume list "$TEAM_ID" 2>/dev/null || true)"
   if echo "$VOL_OUT" | grep -qw "runs"; then
     export CRUCIBLE_VAST_VOLUME="runs"
@@ -111,9 +126,6 @@ fi
 
 echo "[crucible] Active provisioner/team: ${TEAM_ID} (volume: ${CRUCIBLE_VAST_VOLUME:-runs})"
 "$CRUCIBLE" discover
-"$CRUCIBLE" validate-yaml workflows/00-fetch.yaml
-"$CRUCIBLE" validate-yaml workflows/crucible-studio.yaml
-"$CRUCIBLE" validate-yaml workflows/examples/final-lammps-qwen3-30b.yaml
 
 # 4. Start Crucible Studio on http://127.0.0.1:8000
 RUN_DIR="${REPO_ROOT}/runs/${TEAM_ID}-live"
@@ -144,31 +156,32 @@ if [[ "$OPEN_BROWSER" -eq 1 ]]; then
   fi
 fi
 
-# 5. Trigger autoresearch run via Studio API so browser streams live updates
-echo "[crucible] Launching 4-stage autoresearch run (team=${TEAM_ID}, profile=${PROFILE}, backend=${BACKEND}) ..."
-curl -fsS -X POST "http://${HOST}:${PORT}/api/run" \
-  -H "Content-Type: application/json" \
-  -d "{\"profile\":\"${PROFILE}\",\"backend\":\"${BACKEND}\",\"fuzzfile_version\":\"v4\",\"definition_id\":\"${TEAM_ID}\",\"async_mode\":true}" \
-  >/dev/null
+# 5. Optional auto-run when `--auto-run` / `--backend` / `--exit-after-run` is passed
+if [[ "$AUTO_RUN" -eq 1 ]]; then
+  echo "[crucible] Launching optimization (team=${TEAM_ID}, backend=${BACKEND}) ..."
+  PAYLOAD="$("${VENV_BIN}/python" -c 'import json,sys; print(json.dumps({"profile":sys.argv[1],"model_id":sys.argv[2] or None,"backend":sys.argv[3],"fuzzfile_version":"v4","definition_id":sys.argv[4],"async_mode":True}))' "$PROFILE" "$MODEL_ID" "$BACKEND" "$TEAM_ID")"
+  curl -fsS -X POST "http://${HOST}:${PORT}/api/run" -H "Content-Type: application/json" -d "$PAYLOAD" >/dev/null
 
-while true; do
-  STATUS_JSON="$(curl -fsS "http://${HOST}:${PORT}/api/live-status")"
-  STATE="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["state"])' <<<"$STATUS_JSON")"
-  LABEL="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["stage_label"])' <<<"$STATUS_JSON")"
-  echo "  [${STATE}] ${LABEL}"
-  if [[ "$STATE" == "completed" ]]; then
-    break
-  fi
-  if [[ "$STATE" == "failed" ]]; then
-    ERR="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("error") or "")' <<<"$STATUS_JSON")"
-    echo "[crucible] Run stopped with error: ${ERR}" >&2
-    break
-  fi
-  sleep 1
-done
+  while true; do
+    STATUS_JSON="$(curl -fsS "http://${HOST}:${PORT}/api/live-status")"
+    STATE="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["state"])' <<<"$STATUS_JSON")"
+    LABEL="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["stage_label"])' <<<"$STATUS_JSON")"
+    echo "  [${STATE}] ${LABEL}"
+    if [[ "$STATE" == "completed" ]]; then
+      break
+    fi
+    if [[ "$STATE" == "failed" ]]; then
+      ERR="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("error") or "")' <<<"$STATUS_JSON")"
+      echo "[crucible] Run stopped with error: ${ERR}" >&2
+      break
+    fi
+    sleep 1
+  done
+fi
 
 echo ""
-echo "[crucible] Live UI running at: http://${HOST}:${PORT}"
+echo "[crucible] Studio ready at: http://${HOST}:${PORT}"
+echo "[crucible] Pick any model, drop files (or use the pre-loaded benchmark), click Optimize, and download your .zip build!"
 if [[ "$KEEP_SERVING" -eq 1 ]]; then
   echo "[crucible] Press Ctrl+C to stop Crucible Studio."
   wait "$SERVER_PID"

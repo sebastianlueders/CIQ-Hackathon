@@ -4,7 +4,7 @@
 # Cluster        : ciq-gb10-team3 | VAST Storage Provisioner: use=team3
 # Nodes          : gb10-node-01 (gb10-01), gb10-node-02 (gb10-02)
 # Node Hardware  : 1x NVIDIA-GB10 (Blackwell, sm_121), 20c arm64, 127.9 GiB/node
-# Per-Node Alloc : 8 cores, 104GiB RAM, 1x nvidia.com/gpu
+# Per-Node Alloc : 8 cores, 96GiB RAM, 1x nvidia.com/gpu
 # Shared Storage : VAST persistent volume 'runs' (use: team3) mounted at /vast
 # Base Model     : Qwen/Qwen3-Coder-30B-A3B (MoE, 151,936 vocab, 57.0 GB BF16)
 # Dataset        : lammps-cpp (whole-file sealed held-out split; raw data never left VAST)
@@ -121,7 +121,7 @@ jobs:
       cpu:
         cores: 8
       memory:
-        size: 104GiB
+        size: 96GiB
       devices:
         nvidia.com/gpu: 1
     policy:
@@ -173,7 +173,7 @@ services:
       cpu:
         cores: 8
       memory:
-        size: 104GiB
+        size: 96GiB
       devices:
         nvidia.com/gpu: 1
     persist: true

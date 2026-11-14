@@ -143,26 +143,91 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     assert live_json["definition_id"] == "team3"
     assert len(live_json["nodes"]) == 2
 
-    spark_res = client.get("/api/spark-usage")
-    assert spark_res.status_code == 200
-    spark_json = spark_res.json()
-    assert spark_json["gpus_total"] == 8
-    assert len(spark_json["spark_nodes"]) == 8
-    assert spark_json["team_provisioner"] == "team3"
+    # 1. Built-in preset dataset active out-of-the-box with Train / Val / Held-Out Test splits
+    ds_list = client.get("/api/datasets").json()
+    assert ds_list["default_dataset_id"] == "builtin-lammps-cpp-bench"
+    assert ds_list["preset"]["split_doc_counts"]["train"] >= 1
+    assert ds_list["preset"]["split_doc_counts"]["val"] >= 1
+    assert ds_list["preset"]["split_doc_counts"]["held_out"] >= 1
 
-    sync_run = client.post(
-        "/api/run",
+    # 2. Custom file drop upload (JSON + code, zero python-multipart needed!)
+    upload_res = client.post(
+        "/api/dataset/upload",
         json={
-            "profile": "demo_30b",
-            "backend": "simulator",
-            "fuzzfile_version": "v4",
-            "definition_id": "team3",
-            "async_mode": False,
+            "dataset_name": "acme-sim-drop",
+            "files": [
+                {
+                    "name": "kernels/integrator.py",
+                    "content": "\n".join(
+                        [f"def step_{i}(x, v, dt):\n    return x + v * dt * {i + 1}\n" for i in range(12)]
+                    ),
+                },
+                {
+                    "name": "tasks/tuning.jsonl",
+                    "content": "\n".join(
+                        [
+                            f'{{"instruction": "Write CUDA helper {i}", "output": "__device__ float fn_{i}(float x) {{ return x * {i}.0f; }}"}}'
+                            for i in range(10)
+                        ]
+                    ),
+                },
+            ],
         },
     )
-    assert sync_run.status_code == 200
-    assert sync_run.json()["cluster"]["definition_id"] == "team3"
-    assert sync_run.json()["cluster"]["vast"]["provisioner"] == "team3"
+    assert upload_res.status_code == 200, upload_res.text
+    uploaded_ds = upload_res.json()
+    assert uploaded_ds["dataset_id"].startswith("drop-")
+    assert uploaded_ds["split_chunk_counts"]["train"] >= 1
+    assert uploaded_ds["split_chunk_counts"]["val"] >= 1
+    assert uploaded_ds["split_chunk_counts"]["held_out"] >= 1
+
+    # 3. Optimize ANY custom HuggingFace model (Dense 14B + MoE Lite) on the dropped dataset
+    for custom_model in (
+        "Qwen/Qwen2.5-Coder-14B-Instruct",
+        "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+    ):
+        custom_run = client.post(
+            "/api/run",
+            json={
+                "model_id": custom_model,
+                "dataset_id": uploaded_ds["dataset_id"],
+                "backend": "simulator",
+                "fuzzfile_version": "v4",
+                "definition_id": "team3",
+                "async_mode": False,
+            },
+        )
+        assert custom_run.status_code == 200, custom_run.text
+        run_payload = custom_run.json()
+        assert run_payload["model_profile"]["name"] == custom_model
+        assert run_payload["cluster"]["vast"]["provisioner"] == "team3"
+
+    # 4. Download complete self-contained `.zip` build bundle and verify every artifact
+    import io
+    import zipfile
+
+    bundle_resp = client.get("/api/build/bundle.zip")
+    assert bundle_resp.status_code == 200
+    assert bundle_resp.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(bundle_resp.content)) as zf:
+        names = set(zf.namelist())
+        expected_files = {
+            "fuzzfile.yaml",
+            "configs/train_recipe.yaml",
+            "configs/vllm_serve.yaml",
+            "scripts/launch_fuzzball.sh",
+            "scripts/train_and_serve_local.py",
+            "data/train.jsonl",
+            "data/val.jsonl",
+            "data/test.jsonl",
+            "data/held_out.jsonl",
+            "data/dataset_manifest.json",
+            "BUILD_REPORT.md",
+        }
+        assert expected_files.issubset(names)
+        assert "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("fuzzfile.yaml").decode()
+        assert "team3" in zf.read("fuzzfile.yaml").decode()
+        assert "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("configs/train_recipe.yaml").decode()
 
     probe = client.post("/api/firewall-probe", json={"inject_cpp_snippet": True}).json()
     assert probe["blocked"] is True

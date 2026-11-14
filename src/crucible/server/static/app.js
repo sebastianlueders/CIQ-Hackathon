@@ -1,178 +1,170 @@
 let latestSummary = null;
 let latestLiveSnap = null;
-let yamlTab = "turnkey";
+let buildArtifacts = {};
+let selectedArtifactKey = "fuzzfile.yaml";
+let activeDatasetId = "builtin-lammps-cpp-bench";
 
-async function fetchSummary() {
-  const resp = await fetch("/api/summary");
+async function fetchJson(url) {
+  const resp = await fetch(url);
   return await resp.json();
 }
 
-async function fetchLiveStatus() {
-  const resp = await fetch("/api/live-status");
-  return await resp.json();
-}
-
-async function fetchSparkUsage() {
-  const resp = await fetch("/api/spark-usage");
-  return await resp.json();
+function currentModelId() {
+  return document.getElementById("model-id-input").value.trim() || "Qwen/Qwen3-Coder-30B-A3B-Instruct";
 }
 
 function currentTeamId() {
-  const inp = document.getElementById("team-input");
-  return (inp && inp.value.trim()) || "team3";
+  return document.getElementById("team-input").value.trim() || "team3";
 }
 
-function syncTeamLabels(team) {
-  document.getElementById("pill-def-id").textContent = team;
-  const yl = document.getElementById("yaml-team-label");
-  if (yl) yl.textContent = team;
-  const btn = document.getElementById("btn-run");
-  if (btn && !btn.disabled) {
-    btn.textContent = `Launch on ${team}`;
-  }
-}
-
-async function initBackendDefault() {
+async function refreshModelSpec(modelId) {
   try {
-    const resp = await fetch("/api/discover");
-    const info = await resp.json();
-    if (info.cluster_config && info.cluster_config.definition_id) {
-      document.getElementById("team-input").value = info.cluster_config.definition_id;
-      syncTeamLabels(info.cluster_config.definition_id);
-    }
-    const sel = document.getElementById("backend-select");
-    if (info.discovery_report && info.discovery_report.fuzzball_cli_available) {
-      sel.value = "fuzzball_mcp";
-    } else {
-      sel.value = "simulator";
-    }
+    const info = await fetchJson(`/api/models?probe_model=${encodeURIComponent(modelId)}`);
+    const m = info.inferred;
+    if (!m) return;
+    const kind = m.num_experts > 1 ? `MoE (${m.num_experts} experts, top-${m.top_k_experts})` : "Dense Transformer";
+    const kernels = m.num_experts > 1
+      ? "chunked CE + grouped MoE GEMM + fused LoRA + NVFP4"
+      : "chunked CE + fused LoRA + NVFP4";
+    document.getElementById("model-spec-line").textContent =
+      `Inferred: ${kind} · ${m.total_params_b}B total (${m.active_params_b}B active, ~${m.bf16_footprint_gb} GB BF16) · ` +
+      `${m.vocab_size.toLocaleString()} vocab · min ${m.min_nodes_required} GB10 node(s) · ${kernels}`;
+    document.querySelectorAll("#model-chips .chip").forEach((c) => {
+      c.classList.toggle("chip-active", c.dataset.modelId.toLowerCase() === modelId.toLowerCase());
+    });
   } catch (_) {}
 }
 
-function renderSparkUsage(usage) {
-  if (!usage) return;
-  const inUse = usage.gpus_in_use || 0;
-  const total = usage.gpus_total || 8;
-  const free = usage.gpus_free || 0;
-  const activeCnt = usage.active_workflows_count || 0;
-  const queuedCnt = usage.queued_workflows_count || 0;
-  const pct = Math.max(3, Math.min(100, usage.utilization_pct || 0));
-
-  document.getElementById("spark-source-badge").textContent = String(usage.source || "live").toUpperCase();
-
-  const gpuBadge = document.getElementById("spark-gpu-badge");
-  gpuBadge.textContent = `GPUs In Use: ${inUse} / ${total}`;
-  gpuBadge.className = usage.pool_saturated ? "badge badge-amber" : "badge badge-green";
-
-  document.getElementById("spark-active-badge").textContent = `Active Workflows: ${activeCnt}`;
-
-  const qBadge = document.getElementById("spark-queue-badge");
-  qBadge.textContent = `Queued / Pending: ${queuedCnt}`;
-  qBadge.className = queuedCnt > 0 ? "badge badge-amber" : "badge";
-
-  const capNote =
-    queuedCnt > 0
-      ? `${inUse} / ${total} DGX Spark GPUs In Use · ${queuedCnt} Workflow(s) QUEUED (will auto-start as GPUs free up)`
-      : `${inUse} / ${total} DGX Spark GPUs Allocated (${free} Free · VAST volume '${usage.vast_volume}' on ${usage.team_provisioner})`;
-  document.getElementById("spark-pool-caption").textContent = capNote;
-  document.getElementById("spark-updated-at").textContent = `Updated ${usage.updated_at || ""}`;
-
-  const fill = document.getElementById("spark-pool-fill");
-  fill.style.width = `${pct}%`;
-  fill.classList.toggle("saturated", Boolean(usage.pool_saturated));
-
-  const grid = document.getElementById("spark-nodes-grid");
-  grid.innerHTML = (usage.spark_nodes || [])
-    .map((n) => {
-      const busy = n.gpus_used > 0 || n.status === "BUSY";
-      const tag = busy
-        ? `<span class="tag-ok">GPU BUSY</span>`
-        : `<span class="stage-status">${n.status}</span>`;
-      const wfText = n.workflow_label ? `wf: ${n.workflow_label}` : "gpu: free";
-      return `
-        <div class="spark-mini-card ${busy ? "spark-busy" : ""}">
-          <div class="spark-mini-top">
-            <span>${n.hostname.replace("CIQ-CHI-", "")}</span>
-            ${tag}
-          </div>
-          <div class="spark-mini-meta">${n.gpus_used}/${n.gpus_total} GPU &middot; ${n.cores_used}/${n.cores_total}c &middot; ${n.mem_used_gib}/${n.mem_total_gib}G</div>
-          <div class="spark-mini-wf"><code>${wfText}</code></div>
-        </div>
-      `;
-    })
-    .join("");
-
-  const wfBody = document.querySelector("#spark-wf-table tbody");
-  const wfs = usage.workflows || [];
-  if (wfs.length === 0) {
-    wfBody.innerHTML = `<tr><td colspan="5" class="muted-small">No active or queued workflows reported right now.</td></tr>`;
-  } else {
-    wfBody.innerHTML = wfs
-      .map((w) => {
-        let stTag = `<span class="stage-status">${w.status}</span>`;
-        if (w.status === "RUNNING") stTag = `<span class="tag-ok">RUNNING</span>`;
-        else if (w.status === "QUEUED") stTag = `<span class="tag-queued">QUEUED</span>`;
-        else if (w.status === "ERRORED") stTag = `<span class="tag-reject">ERRORED</span>`;
-        return `
-          <tr class="${w.is_crucible ? "row-winner" : ""}">
-            <td><code>${String(w.id || "").slice(0, 8)}…</code></td>
-            <td><code>${w.name}</code></td>
-            <td>${w.stage || "—"}</td>
-            <td>${stTag}</td>
-            <td>${w.elapsed || "—"}</td>
-          </tr>
-        `;
-      })
-      .join("");
-  }
+function renderDatasetBanner(ds) {
+  if (!ds) return;
+  activeDatasetId = ds.dataset_id;
+  const sc = ds.split_doc_counts || {};
+  const cc = ds.split_chunk_counts || {};
+  const prefix = ds.is_preset ? "Preset Active" : "Custom Data Loaded";
+  document.getElementById("dataset-status-bar").innerHTML =
+    `${prefix}: <strong>${ds.display_name}</strong> (${ds.format_summary}) &middot; ` +
+    `<strong>${(ds.total_tokens || 0).toLocaleString()} tokens</strong> &middot; ` +
+    `Train: <code>${sc.train || 0} docs (${cc.train || 0} chunks)</code> &middot; ` +
+    `Validation: <code>${sc.val || 0} docs (${cc.val || 0} chunks)</code> &middot; ` +
+    `Held-Out Test: <code>${sc.held_out || 0} docs (${cc.held_out || 0} chunks)</code>`;
 }
 
-function renderNodeCards(liveSnap) {
-  const wrap = document.getElementById("node-cards");
-  const nodes = (liveSnap && liveSnap.nodes) || [];
-  wrap.innerHTML = nodes
-    .map((n) => {
-      const running = n.state === "RUNNING";
-      const wfText = running
-        ? `ACTIVE: ${n.active_trial_id} · wf ${String(n.active_workflow_id || "").slice(0, 12)}…`
-        : n.last_trial_id
-        ? `LAST: ${n.last_trial_id} · wf ${String(n.last_workflow_id || "").slice(0, 12)}… (${n.trials_completed} runs)`
-        : "Idle · Awaiting Fuzzball allocation";
-      const badgeCls = running ? "status-ok" : "";
-      const archInfo = n.arch_device ? ` (<code>${n.arch_device}</code>)` : "";
-      return `
-        <div class="node-card ${running ? "node-running" : ""}">
-          <div class="node-top">
-            <div>
-              <div class="node-name">${n.hostname}</div>
-              <div class="node-id"><code>${n.node_id}</code></div>
-            </div>
-            <span class="stage-status ${badgeCls}">${n.state}</span>
-          </div>
-          <div class="node-specs">
-            1&times; <code>${n.gpu_product}</code> (<code>sm_121</code>) &middot;
-            <code>${n.alloc_cores}/${n.physical_cores}c</code>${archInfo} &middot;
-            <code>${n.alloc_memory_gib}/${n.physical_memory_gib} GiB</code>
-          </div>
-          <div class="node-wf"><code>${wfText}</code></div>
-        </div>
-      `;
-    })
-    .join("");
+async function initStudio() {
+  try {
+    const [modelsResp, dsResp, discResp] = await Promise.all([
+      fetchJson("/api/models"),
+      fetchJson("/api/datasets"),
+      fetchJson("/api/discover"),
+    ]);
+
+    const chipsWrap = document.getElementById("model-chips");
+    chipsWrap.innerHTML = (modelsResp.catalog || [])
+      .map(
+        (m) =>
+          `<button type="button" class="chip" data-model-id="${m.id}" title="${m.id} (${m.family})">${m.label}</button>`
+      )
+      .join("");
+    chipsWrap.querySelectorAll(".chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById("model-id-input").value = btn.dataset.modelId;
+        refreshModelSpec(btn.dataset.modelId);
+      });
+    });
+
+    if (dsResp.preset) {
+      renderDatasetBanner(dsResp.preset);
+    }
+    if (discResp.cluster_config && discResp.cluster_config.definition_id) {
+      const team = discResp.cluster_config.definition_id;
+      document.getElementById("team-input").value = team;
+      document.getElementById("pill-def-id").textContent = team;
+    }
+    if (discResp.discovery_report && discResp.discovery_report.fuzzball_cli_available) {
+      document.getElementById("backend-select").value = "fuzzball_mcp";
+    }
+    await refreshModelSpec(currentModelId());
+  } catch (_) {}
+}
+
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function uploadFileList(fileList) {
+  const arr = Array.from(fileList || []);
+  if (arr.length === 0) return;
+  const bar = document.getElementById("dataset-status-bar");
+  bar.innerHTML = `Ingesting <strong>${arr.length}</strong> dropped file(s) locally into Train / Validation / Held-Out Test splits…`;
+
+  const encoded = [];
+  for (const f of arr.slice(0, 250)) {
+    const buf = await f.arrayBuffer();
+    encoded.push({
+      name: f.webkitRelativePath || f.name,
+      content_b64: arrayBufferToBase64(buf),
+    });
+  }
+  const dsLabel = arr.length === 1 ? arr[0].name : `${arr.length}-files-drop`;
+  const resp = await fetch("/api/dataset/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset_name: dsLabel, files: encoded }),
+  });
+  const payload = await resp.json();
+  if (!resp.ok) {
+    bar.innerHTML = `<span style="color:#fecaca">Upload error: ${payload.detail || "Invalid dataset"}</span>`;
+    return;
+  }
+  renderDatasetBanner(payload);
+}
+
+async function refreshBuildPreview() {
+  try {
+    const prev = await fetchJson("/api/build/preview");
+    buildArtifacts = prev.artifacts || {};
+    const shortModel = String(prev.model_id || "").split("/").pop();
+    const dsName = (prev.dataset && prev.dataset.display_name) || activeDatasetId;
+    document.getElementById("build-title").textContent = `Tuned Build Ready: ${shortModel}`;
+    document.getElementById("build-subtitle").innerHTML =
+      `Configured for <code>${prev.model_id}</code> on <strong>${dsName}</strong> &mdash; ` +
+      `includes turnkey <code>fuzzfile.yaml</code>, LoRA &amp; vLLM configs, launcher, and split <code>train/val/test</code> data.`;
+    document.getElementById("inspector-model-label").textContent = prev.model_id;
+    renderArtifactViewer();
+  } catch (_) {}
+}
+
+function renderArtifactViewer() {
+  const viewer = document.getElementById("yaml-viewer");
+  if (buildArtifacts[selectedArtifactKey]) {
+    viewer.textContent = buildArtifacts[selectedArtifactKey];
+  } else if (latestSummary && latestSummary.turnkey_fuzzfile) {
+    viewer.textContent = latestSummary.turnkey_fuzzfile;
+  }
 }
 
 function renderLiveTelemetry(snap) {
   latestLiveSnap = snap;
-  const team = snap.definition_id || currentTeamId();
-  syncTeamLabels(team);
-  document.getElementById("live-stage-label").textContent = snap.stage_label || `Ready on ${team}`;
+  document.getElementById("pill-def-id").textContent = snap.definition_id || currentTeamId();
+  document.getElementById("live-stage-label").textContent = snap.stage_label || "Ready";
 
   const stBadge = document.getElementById("live-run-state");
-  stBadge.textContent = `${String(snap.state || "idle").toUpperCase()} · ${snap.backend}`;
+  const st = String(snap.state || "idle");
+  stBadge.textContent =
+    st === "queued_for_gpu"
+      ? `QUEUED FOR GPU · ${snap.backend}`
+      : `${st.toUpperCase()} · ${snap.backend}`;
   stBadge.className =
-    snap.state === "running"
+    st === "queued_for_gpu"
+      ? "badge badge-amber"
+      : st === "running"
       ? "badge badge-accent"
-      : snap.state === "completed"
+      : st === "completed"
       ? "badge badge-green"
       : "badge";
 
@@ -184,47 +176,36 @@ function renderLiveTelemetry(snap) {
     errBanner.classList.add("hidden");
   }
 
-  renderNodeCards(snap);
-
   const feed = document.getElementById("live-event-feed");
-  const events = snap.events || [];
-  feed.innerHTML = events
+  feed.innerHTML = (snap.events || [])
     .slice()
     .reverse()
-    .map(
-      (ev) =>
-        `<div class="event-line"><span class="ev-ts">[${ev.time_utc}]</span>${ev.message}</div>`
-    )
+    .map((ev) => `<div class="event-line"><span class="ev-ts">[${ev.time_utc}]</span>${ev.message}</div>`)
     .join("");
 
-  if (snap.state === "running" && snap.live_curves && Object.keys(snap.live_curves).length > 0) {
-    renderLossSvg(snap.live_curves);
+  if ((st === "running" || st === "queued_for_gpu") && snap.live_curves && Object.keys(snap.live_curves).length > 0) {
+    renderLossSvg(snap.live_curves, snap.live_val_curves || {});
   }
-  if (snap.state === "running" && snap.live_firewall && snap.live_firewall.length > 0) {
-    const lastRec = snap.live_firewall[snap.live_firewall.length - 1].record || {};
-    const fwBox = document.getElementById("firewall-audit-box");
-    fwBox.innerHTML =
-      `<strong>Live Privacy Schema Firewall:</strong> ${snap.live_firewall.length} advisor payloads verified · ` +
-      `<code>contains_raw_data=false</code> · SHA-256: <code>${String(lastRec.payload_sha256 || "").slice(0, 16)}…</code>`;
-  }
-  refreshYamlViewer();
 }
 
-function renderLossSvg(curves) {
+function renderLossSvg(curves, valCurves = {}) {
   const wrap = document.getElementById("loss-chart-wrap");
   const legend = document.getElementById("loss-legend");
   const seriesDefs = [
-    { key: "stageb-00-pytorch-baseline-1node", label: "PyTorch Baseline (1-Node GB10)", color: "#38bdf8", dash: "" },
-    { key: "stageb-04-sm121-all-kernels-2node-ddp", label: "sm_121 Kernels + 2-Node DDP (Accepted)", color: "#a3e635", dash: "5,3" },
-    { key: "stageb-05-oversized-global-batch-2node", label: "Oversized Batch 96 (Rejected: Curve Drift)", color: "#f87171", dash: "2,3" },
+    { key: "stageb-00-pytorch-baseline-1node", label: "Baseline Reference Curve", color: "#38bdf8", dash: "", src: curves },
+    { key: "stageb-04-sm121-all-kernels-2node-ddp", label: "sm_121 Kernels + 2-Node DDP (Accepted)", color: "#a3e635", dash: "5,3", src: curves },
+    { key: "stageb-05-oversized-global-batch-2node", label: "Oversized Global Batch (Rejected: Drift)", color: "#f87171", dash: "2,3", src: curves },
   ];
 
-  const active = seriesDefs.filter((s) => Array.isArray(curves[s.key]) && curves[s.key].length > 1);
+  const active = seriesDefs.filter((s) => Array.isArray(s.src[s.key]) && s.src[s.key].length > 1);
   if (active.length === 0) {
-    const fallbackKeys = Object.keys(curves).slice(-3);
-    const palette = ["#38bdf8", "#a3e635", "#c084fc"];
-    fallbackKeys.forEach((k, idx) => {
-      active.push({ key: k, label: k, color: palette[idx % palette.length], dash: "" });
+    const keys = Object.keys(curves).slice(-2);
+    const palette = ["#38bdf8", "#a3e635"];
+    keys.forEach((k, idx) => {
+      active.push({ key: k, label: `${k} (train)`, color: palette[idx % palette.length], dash: "", src: curves });
+      if (Array.isArray(valCurves[k]) && valCurves[k].length > 1) {
+        active.push({ key: k, label: `${k} (val)`, color: "#fbbf24", dash: "4,3", src: valCurves });
+      }
     });
   }
   if (active.length === 0) return;
@@ -234,7 +215,7 @@ function renderLossSvg(curves) {
   const pad = { top: 14, right: 18, bottom: 26, left: 44 };
   let allVals = [];
   active.forEach((s) => {
-    allVals = allVals.concat(curves[s.key]);
+    allVals = allVals.concat(s.src[s.key]);
   });
   const yMin = Math.min(...allVals) - 0.03;
   const yMax = Math.max(...allVals) + 0.03;
@@ -252,7 +233,7 @@ function renderLossSvg(curves) {
 
   let polylines = "";
   active.forEach((s) => {
-    const arr = curves[s.key];
+    const arr = s.src[s.key];
     const pts = arr.map((v, i) => `${xScale(i, arr.length).toFixed(1)},${yScale(v).toFixed(1)}`).join(" ");
     const dashAttr = s.dash ? `stroke-dasharray="${s.dash}"` : "";
     polylines += `<polyline fill="none" stroke="${s.color}" stroke-width="2.2" ${dashAttr} points="${pts}"/>`;
@@ -262,33 +243,22 @@ function renderLossSvg(curves) {
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="none">
       ${gridLines}
       ${polylines}
-      <text x="${(width + pad.left) / 2}" y="${height - 5}" fill="#7f91ad" font-size="10.5" text-anchor="middle">Training Optimization Step (Stage B Verification Window)</text>
+      <text x="${(width + pad.left) / 2}" y="${height - 5}" fill="#7f91ad" font-size="10.5" text-anchor="middle">Training &amp; Validation Evaluation Step</text>
     </svg>
   `;
 
   legend.innerHTML = active
-    .map(
-      (s) =>
-        `<span class="legend-item"><span class="legend-swatch" style="background:${s.color}"></span>${s.label}</span>`
-    )
+    .map((s) => `<span class="legend-item"><span class="legend-swatch" style="background:${s.color}"></span>${s.label}</span>`)
     .join("");
-}
-
-function refreshYamlViewer() {
-  const viewer = document.getElementById("yaml-viewer");
-  if (yamlTab === "trial" && latestLiveSnap && latestLiveSnap.latest_trial_fuzzfile) {
-    viewer.textContent = latestLiveSnap.latest_trial_fuzzfile;
-  } else if (latestLiveSnap && latestLiveSnap.turnkey_fuzzfile) {
-    viewer.textContent = latestLiveSnap.turnkey_fuzzfile;
-  } else if (latestSummary && latestSummary.turnkey_fuzzfile) {
-    viewer.textContent = latestSummary.turnkey_fuzzfile;
-  }
 }
 
 function renderDashboard(data) {
   latestSummary = data;
   document.getElementById("pill-fz-ver").textContent = data.cluster.fuzzfile_version;
-  syncTeamLabels(data.cluster.definition_id || "team3");
+  document.getElementById("pill-def-id").textContent = data.cluster.definition_id || "team3";
+
+  const modelName = (data.model_profile && data.model_profile.name) || currentModelId();
+  document.getElementById("kpi-model-short").textContent = modelName.split("/").pop();
 
   const sa = data.stage_a;
   const sb = data.stage_b;
@@ -297,7 +267,7 @@ function renderDashboard(data) {
   const tunedPpl = sa.winning_summary.held_out_perplexity.toFixed(3);
   document.getElementById("kpi-ppl").textContent = `${sa.base_held_out_perplexity.toFixed(3)} → ${tunedPpl}`;
   document.getElementById("meta-stage-a").textContent =
-    `Winner: ${sa.winning_label} · ${sa.total_trials_launched} trials (${sa.early_stopped_count} pruned) · ${sa.two_node_wall_speedup}x faster on 2 GB10 nodes`;
+    `Winner: ${sa.winning_label} · Val loss ${sa.winning_summary.final_val_loss.toFixed(3)} · Test loss ${sa.winning_summary.held_out_eval_loss.toFixed(3)} (${sa.early_stopped_count} pruned)`;
 
   const baseTrainTok = sb.outcomes[0].summary.mean_tokens_per_sec;
   const winTrainOut = sb.outcomes.find((o) => o.label === sb.winning_label) || sb.outcomes[0];
@@ -305,16 +275,17 @@ function renderDashboard(data) {
   document.getElementById("kpi-train-speed").textContent =
     `${Math.round(bestTrainTok).toLocaleString()} tok/s (${sb.overall_speedup_x}x)`;
   document.getElementById("meta-stage-b").textContent =
-    `${Math.round(baseTrainTok).toLocaleString()} → ${Math.round(bestTrainTok).toLocaleString()} tok/s · sm_121 kernels alone: ${sb.single_node_kernel_speedup_x}x (1-node)`;
+    `${Math.round(baseTrainTok).toLocaleString()} → ${Math.round(bestTrainTok).toLocaleString()} tok/s · 1-node sm_121 speedup: ${sb.single_node_kernel_speedup_x}x`;
 
   const winServeOut = sc.outcomes.find((o) => o.label === sc.winning_label) || sc.outcomes[0];
   document.getElementById("kpi-serve-speed").textContent =
     `${Math.round(winServeOut.throughput_tokens_per_sec).toLocaleString()} tok/s (${sc.serving_speedup_x}x)`;
   document.getElementById("meta-stage-c").textContent =
-    `Winner: ${sc.winning_label} · PPL +${winServeOut.perplexity_regression_pct.toFixed(2)}% · P99 ${winServeOut.p99_latency_ms.toFixed(0)} ms`;
+    `Winner: ${sc.winning_label} · Test PPL +${winServeOut.perplexity_regression_pct.toFixed(2)}% · P99 ${winServeOut.p99_latency_ms.toFixed(0)} ms`;
 
+  const scs = data.dataset_manifest.split_file_counts || {};
   document.getElementById("meta-stage-d").textContent =
-    `use: ${data.cluster.vast.provisioner} · VAST '${data.cluster.vast.persistent_volume_name}' · ${data.dataset_manifest.held_out_files.length} sealed held-out files`;
+    `Dataset '${data.dataset_manifest.dataset_name}' (Train ${scs.train || 0} / Val ${scs.val || 0} / Test ${scs.held_out || 0}) · use: ${data.cluster.vast.provisioner}`;
 
   document.getElementById("curve-badge").textContent =
     `Winner Δ = ${winTrainOut.max_loss_curve_delta.toFixed(4)} (≤ 0.025)`;
@@ -334,7 +305,7 @@ function renderDashboard(data) {
         ? isWin
           ? `<span class="tag-ok">WINNER</span>`
           : `<span class="tag-ok">OK (Δ ${o.max_loss_curve_delta.toFixed(4)})</span>`
-        : `<span class="tag-reject">REJECTED (Δ ${o.max_loss_curve_delta.toFixed(3)})</span>`;
+        : `<span class="tag-reject">REJECTED (${o.rejection_reason || "Δ " + o.max_loss_curve_delta.toFixed(3)})</span>`;
       return `
         <div class="bar-row">
           <div class="bar-top">
@@ -391,8 +362,6 @@ function renderDashboard(data) {
   fwBox.innerHTML =
     `<strong>Privacy Schema Firewall Verified:</strong> ${audits.length} advisor payloads inspected · ` +
     `<code>contains_raw_data=false</code> on all outbound requests · Latest SHA-256: <code>${lastDigest}…</code>`;
-
-  refreshYamlViewer();
 }
 
 function connectLiveStream() {
@@ -401,36 +370,62 @@ function connectLiveStream() {
   es.onmessage = async (msg) => {
     const snap = JSON.parse(msg.data);
     renderLiveTelemetry(snap);
-    fetchSparkUsage().then(renderSparkUsage).catch(() => {});
-    if (prevState === "running" && snap.state === "completed") {
-      const summary = await fetchSummary();
+    if ((prevState === "running" || prevState === "queued_for_gpu") && snap.state === "completed") {
+      const summary = await fetchJson("/api/summary");
       renderDashboard(summary);
+      await refreshBuildPreview();
       document.getElementById("btn-run").disabled = false;
-      syncTeamLabels(currentTeamId());
+      document.getElementById("btn-run").textContent = "Optimize Model & Generate Build";
     } else if (snap.state === "failed") {
       document.getElementById("btn-run").disabled = false;
-      syncTeamLabels(currentTeamId());
+      document.getElementById("btn-run").textContent = "Optimize Model & Generate Build";
     }
     prevState = snap.state;
   };
 }
 
-document.getElementById("team-input").addEventListener("input", (ev) => {
-  syncTeamLabels(ev.currentTarget.value.trim() || "team3");
+// Model input & drag-and-drop wiring
+document.getElementById("model-id-input").addEventListener("change", (e) => refreshModelSpec(e.target.value));
+document.getElementById("model-id-input").addEventListener("blur", (e) => refreshModelSpec(e.target.value));
+
+const dz = document.getElementById("dropzone");
+dz.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  dz.classList.add("drag-over");
+});
+dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+dz.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  dz.classList.remove("drag-over");
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    await uploadFileList(e.dataTransfer.files);
+  }
+});
+
+document.getElementById("file-picker").addEventListener("change", (e) => uploadFileList(e.target.files));
+document.getElementById("folder-picker").addEventListener("change", (e) => uploadFileList(e.target.files));
+document.getElementById("btn-use-preset").addEventListener("click", async () => {
+  const resp = await fetch("/api/dataset/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ use_preset: true }),
+  });
+  renderDatasetBanner(await resp.json());
 });
 
 document.getElementById("btn-run").addEventListener("click", async () => {
   const btn = document.getElementById("btn-run");
-  const profile = document.getElementById("profile-select").value;
+  const modelId = currentModelId();
   const backend = document.getElementById("backend-select").value;
   const teamId = currentTeamId();
   btn.disabled = true;
-  btn.textContent = `Running (${backend})…`;
+  btn.textContent = `Optimizing (${backend})…`;
   const resp = await fetch("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      profile,
+      model_id: modelId,
+      dataset_id: activeDatasetId,
       backend,
       fuzzfile_version: "v4",
       definition_id: teamId,
@@ -439,13 +434,11 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   });
   if (!resp.ok) {
     btn.disabled = false;
-    syncTeamLabels(teamId);
+    btn.textContent = "Optimize Model & Generate Build";
     const err = await resp.json();
     const errBanner = document.getElementById("live-error-banner");
-    errBanner.textContent = err.detail || "Failed to start run";
+    errBanner.textContent = err.detail || "Failed to start optimization";
     errBanner.classList.remove("hidden");
-  } else {
-    fetchSparkUsage().then(renderSparkUsage).catch(() => {});
   }
 });
 
@@ -465,18 +458,13 @@ document.getElementById("btn-probe").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("btn-tab-turnkey").addEventListener("click", () => {
-  yamlTab = "turnkey";
-  document.getElementById("btn-tab-turnkey").classList.add("active-tab");
-  document.getElementById("btn-tab-trial").classList.remove("active-tab");
-  refreshYamlViewer();
-});
-
-document.getElementById("btn-tab-trial").addEventListener("click", () => {
-  yamlTab = "trial";
-  document.getElementById("btn-tab-trial").classList.add("active-tab");
-  document.getElementById("btn-tab-turnkey").classList.remove("active-tab");
-  refreshYamlViewer();
+document.querySelectorAll(".artifact-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".artifact-tab").forEach((b) => b.classList.remove("active-tab"));
+    btn.classList.add("active-tab");
+    selectedArtifactKey = btn.dataset.artifact;
+    renderArtifactViewer();
+  });
 });
 
 document.getElementById("btn-copy-yaml").addEventListener("click", async () => {
@@ -484,23 +472,17 @@ document.getElementById("btn-copy-yaml").addEventListener("click", async () => {
   await navigator.clipboard.writeText(text);
   const btn = document.getElementById("btn-copy-yaml");
   btn.textContent = "Copied!";
-  setTimeout(() => (btn.textContent = "Copy YAML"), 1400);
+  setTimeout(() => (btn.textContent = "Copy File"), 1400);
 });
 
 (async () => {
-  await initBackendDefault();
-  const [summary, liveSnap, sparkUsage] = await Promise.all([
-    fetchSummary(),
-    fetchLiveStatus(),
-    fetchSparkUsage(),
+  await initStudio();
+  const [summary, liveSnap] = await Promise.all([
+    fetchJson("/api/summary"),
+    fetchJson("/api/live-status"),
   ]);
   renderDashboard(summary);
   renderLiveTelemetry(liveSnap);
-  renderSparkUsage(sparkUsage);
-  setTimeout(() => {
-    connectLiveStream();
-    setInterval(() => {
-      fetchSparkUsage().then(renderSparkUsage).catch(() => {});
-    }, 3000);
-  }, 600);
+  await refreshBuildPreview();
+  setTimeout(connectLiveStream, 600);
 })();

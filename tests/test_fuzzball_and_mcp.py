@@ -350,7 +350,7 @@ def test_team3_fuzzfile_pinning_devices_and_egress_isolation() -> None:
     res = parsed["jobs"]["train-t01"]["resource"]
     assert res == {
         "cpu": {"cores": 8},
-        "memory": {"size": "104GiB"},
+        "memory": {"size": "96GiB"},
         "devices": {"nvidia.com/gpu": 1},
     }
 

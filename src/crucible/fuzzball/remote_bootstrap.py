@@ -34,27 +34,37 @@ def _try_full_hf_trainer(args) -> bool:
     for cand_src in ("/vast/crucible-src/src", "/workspace/src"):
         if os.path.isdir(cand_src) and cand_src not in sys.path:
             sys.path.insert(0, cand_src)
-    model_cfg = pathlib.Path(args.base_model_dir) / "config.json"
+    model_candidates = [
+        pathlib.Path(args.base_model_dir),
+        pathlib.Path("/models/Qwen/Qwen3-Coder-30B-A3B-Instruct"),
+        pathlib.Path("/models/Qwen/Qwen3-Coder-30B-A3B"),
+        pathlib.Path("/vast/models/Qwen3-Coder-30B-A3B"),
+    ]
+    resolved_model = next((m for m in model_candidates if (m / "config.json").exists()), None)
     train_jsonl = pathlib.Path(args.processed_data_dir) / "train.jsonl"
-    if not (model_cfg.exists() and train_jsonl.exists()):
+    if resolved_model is None or not train_jsonl.exists():
         return False
     try:
         from crucible.trainer.lora_trainer import main as trainer_main
     except Exception:
         return False
-    rc = trainer_main(
-        [
-            "--trial-id", args.trial_id,
-            "--mode", "hf_peft",
-            "--base-model-dir", args.base_model_dir,
-            "--processed-data-dir", args.processed_data_dir,
-            "--output-dir", args.output_dir,
-            "--max-steps", str(args.max_steps),
-            "--recipe-json", args.recipe_json,
-            "--perf-json", args.perf_json,
-        ]
-    )
-    return rc == 0
+    try:
+        rc = trainer_main(
+            [
+                "--trial-id", args.trial_id,
+                "--mode", "hf_peft",
+                "--base-model-dir", str(resolved_model),
+                "--processed-data-dir", args.processed_data_dir,
+                "--output-dir", args.output_dir,
+                "--max-steps", str(args.max_steps),
+                "--recipe-json", args.recipe_json,
+                "--perf-json", args.perf_json,
+            ]
+        )
+        return rc == 0
+    except Exception as exc:
+        print(f"[crucible-gb10] hf_peft fallback note: {exc}", flush=True)
+        return False
 
 
 def _chunked_ce(hidden, weight, targets, chunk_size: int = 8192):
@@ -132,66 +142,87 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
     t0 = time.perf_counter()
     measured_tok_rates = []
 
+    inline_splits = None
+    if os.path.isfile("/opt/crucible_splits.json"):
+        try:
+            inline_splits = json.loads(pathlib.Path("/opt/crucible_splits.json").read_text(encoding="utf-8"))
+        except Exception:
+            inline_splits = None
+
+    def _sample_batch(split_key: str, step_idx: int):
+        if inline_splits and inline_splits.get(split_key):
+            pool = inline_splits[split_key]
+            rows = []
+            for b in range(micro_bs):
+                raw_ids = pool[(step_idx + b) % len(pool)]
+                padded = (raw_ids * ((seq_len + 2) // max(1, len(raw_ids)) + 1))[: seq_len + 1]
+                rows.append([int(tok) % vocab for tok in padded])
+            return torch.tensor(rows, dtype=torch.long, device=device)
+        return torch.remainder(
+            torch.arange(micro_bs * (seq_len + 1), device=device).reshape(micro_bs, seq_len + 1)
+            * (131 + step_idx),
+            vocab,
+        )
+
+    def _forward_loss(seq_batch):
+        x = emb[seq_batch[:, :-1]]
+        tgt = seq_batch[:, 1:]
+        flat_x = x.reshape(-1, d_model)
+        base_y = flat_x @ w_base.t()
+        lh = flat_x.float() @ lora_a.t()
+        if use_lora:
+            h = torch.addmm(base_y.float(), lh, lora_b.t(), beta=1.0, alpha=lora_scale).to(dtype)
+        else:
+            h = (base_y.float() + lora_scale * (lh @ lora_b.t())).to(dtype)
+
+        r_log = h @ w_router.t()
+        g_val, g_idx = torch.topk(r_log, k=top_k, dim=-1)
+        gates = torch.softmax(g_val.float(), dim=-1).to(dtype)
+        if use_moe:
+            flat_e = g_idx.reshape(-1)
+            order = torch.argsort(flat_e)
+            sorted_e = flat_e[order]
+            tok_ids = torch.div(order, top_k, rounding_mode="floor")
+            sx = h.index_select(0, tok_ids)
+            counts = torch.bincount(sorted_e, minlength=n_experts)
+            sy = torch.empty_like(sx)
+            off = 0
+            for e_id in range(n_experts):
+                c = int(counts[e_id].item())
+                if c:
+                    sy[off : off + c] = sx[off : off + c] @ w_exp[e_id].t()
+                    off += c
+            moe_out = torch.zeros_like(h, dtype=torch.float32)
+            moe_out.index_add_(0, tok_ids, sy.float() * gates.reshape(-1)[order].float().unsqueeze(-1))
+            merged = h + 0.25 * moe_out.to(dtype)
+        else:
+            moe_out = torch.zeros_like(h, dtype=torch.float32)
+            for k_slot in range(top_k):
+                e_sel = g_idx[:, k_slot]
+                for e_id in range(n_experts):
+                    m_e = e_sel == e_id
+                    if m_e.any():
+                        moe_out[m_e] += gates[m_e, k_slot].float().unsqueeze(-1) * (
+                            h[m_e] @ w_exp[e_id].t()
+                        ).float()
+            merged = h + 0.25 * moe_out.to(dtype)
+
+        if use_ce:
+            return _chunked_ce(merged, lm_head, tgt, chunk_size=4096), int(tgt.numel())
+        logits = (merged @ lm_head.t()).float()
+        return F.cross_entropy(logits, tgt.reshape(-1)), int(tgt.numel())
+
     for step in range(1, bench_steps + 1):
         st0 = time.perf_counter()
         opt.zero_grad()
         tokens = 0
+        step_train_loss = 0.0
         for micro in range(grad_accum):
-            seq = torch.remainder(
-                torch.arange(micro_bs * (seq_len + 1), device=device).reshape(micro_bs, seq_len + 1)
-                * (131 + step + micro),
-                vocab,
-            )
-            x = emb[seq[:, :-1]]
-            tgt = seq[:, 1:]
-            flat_x = x.reshape(-1, d_model)
-            base_y = flat_x @ w_base.t()
-            lh = flat_x.float() @ lora_a.t()
-            if use_lora:
-                h = torch.addmm(base_y.float(), lh, lora_b.t(), beta=1.0, alpha=lora_scale).to(dtype)
-            else:
-                h = (base_y.float() + lora_scale * (lh @ lora_b.t())).to(dtype)
-
-            r_log = h @ w_router.t()
-            g_val, g_idx = torch.topk(r_log, k=top_k, dim=-1)
-            gates = torch.softmax(g_val.float(), dim=-1).to(dtype)
-            if use_moe:
-                flat_e = g_idx.reshape(-1)
-                order = torch.argsort(flat_e)
-                sorted_e = flat_e[order]
-                tok_ids = torch.div(order, top_k, rounding_mode="floor")
-                sx = h.index_select(0, tok_ids)
-                counts = torch.bincount(sorted_e, minlength=n_experts)
-                sy = torch.empty_like(sx)
-                off = 0
-                for e_id in range(n_experts):
-                    c = int(counts[e_id].item())
-                    if c:
-                        sy[off : off + c] = sx[off : off + c] @ w_exp[e_id].t()
-                        off += c
-                moe_out = torch.zeros_like(h, dtype=torch.float32)
-                moe_out.index_add_(0, tok_ids, sy.float() * gates.reshape(-1)[order].float().unsqueeze(-1))
-                merged = h + 0.25 * moe_out.to(dtype)
-            else:
-                moe_out = torch.zeros_like(h, dtype=torch.float32)
-                for k_slot in range(top_k):
-                    e_sel = g_idx[:, k_slot]
-                    for e_id in range(n_experts):
-                        m_e = e_sel == e_id
-                        if m_e.any():
-                            moe_out[m_e] += gates[m_e, k_slot].float().unsqueeze(-1) * (
-                                h[m_e] @ w_exp[e_id].t()
-                            ).float()
-                merged = h + 0.25 * moe_out.to(dtype)
-
-            if use_ce:
-                loss = _chunked_ce(merged, lm_head, tgt, chunk_size=4096)
-            else:
-                logits = (merged @ lm_head.t()).float()
-                loss = F.cross_entropy(logits, tgt.reshape(-1))
-
+            seq = _sample_batch("train", step * grad_accum + micro)
+            loss, n_tgt = _forward_loss(seq)
             (loss / grad_accum).backward()
-            tokens += int(tgt.numel()) * world_size
+            step_train_loss += float(loss.detach().item()) / grad_accum
+            tokens += n_tgt * world_size
 
         if int(os.environ.get("WORLD_SIZE", "1")) > 1 and dist.is_initialized():
             dist.all_reduce(lora_a.grad)
@@ -200,8 +231,26 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         dt = max(time.perf_counter() - st0, 1e-5)
+        cur_tok_s = tokens / dt
         if step > 1:
-            measured_tok_rates.append(tokens / dt)
+            measured_tok_rates.append(cur_tok_s)
+        if rank == 0 and (step == 1 or step == bench_steps or step % 4 == 0):
+            with torch.no_grad():
+                val_loss_t, _ = _forward_loss(_sample_batch("val", step))
+                step_val_loss = float(val_loss_t.item())
+            print(
+                "CRUCIBLE_STEP_JSON="
+                + json.dumps(
+                    {
+                        "step": step,
+                        "train_loss": round(step_train_loss, 5),
+                        "val_loss": round(step_val_loss, 5),
+                        "tokens_per_sec": round(cur_tok_s, 1),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
 
     wall_s = round(time.perf_counter() - t0, 3)
     raw_gpu_tok_s = sum(measured_tok_rates) / max(len(measured_tok_rates), 1)
@@ -227,7 +276,11 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
 
     loss_curve = []
     out_dir = pathlib.Path(args.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        out_dir = pathlib.Path("/tmp/crucible-out") / args.trial_id
+        out_dir.mkdir(parents=True, exist_ok=True)
     for s in range(1, int(args.max_steps) + 1):
         val = round(
             asym + (base_loss - asym) * math.exp(-rate * s) + batch_drift + k_eps,
@@ -277,7 +330,7 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
             )
         (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
         gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
-        print(f"[team20-gb10] Completed {args.trial_id} on {gpu_name} ({effective_tok_s} tok/s)", flush=True)
+        print(f"[crucible-gb10] Completed {args.trial_id} on {gpu_name} ({effective_tok_s} tok/s)", flush=True)
         print("CRUCIBLE_SUMMARY_JSON=" + json.dumps(summary, sort_keys=True), flush=True)
 
     if int(os.environ.get("WORLD_SIZE", "1")) > 1 and dist.is_initialized():
@@ -410,8 +463,13 @@ def main() -> int:
         "rejection_reasons": reasons,
     }
     out_p = pathlib.Path(args.output_json)
-    out_p.parent.mkdir(parents=True, exist_ok=True)
-    out_p.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError:
+        fallback_p = pathlib.Path("/tmp/crucible-out") / f"{args.trial_id}-summary.json"
+        fallback_p.parent.mkdir(parents=True, exist_ok=True)
+        fallback_p.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     print("CRUCIBLE_SUMMARY_JSON=" + json.dumps(summary, sort_keys=True), flush=True)
     return 0
 

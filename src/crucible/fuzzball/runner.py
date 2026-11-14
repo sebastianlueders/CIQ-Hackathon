@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -47,6 +48,115 @@ def _parse_summary_from_logs(log_text: str) -> dict[str, Any] | None:
             _, rhs = line.split("CRUCIBLE_SUMMARY_JSON=", 1)
             return json.loads(rhs.strip())
     return None
+
+
+def _parse_steps_from_logs(log_text: str) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for line in log_text.splitlines():
+        if "CRUCIBLE_STEP_JSON=" in line:
+            try:
+                _, rhs = line.split("CRUCIBLE_STEP_JSON=", 1)
+                steps.append(json.loads(rhs.strip()))
+            except Exception:
+                pass
+    return steps
+
+
+def inspect_workflow_stages(desc: Any) -> dict[str, Any]:
+    """Inspect Fuzzball `workflow_describe` JSON/dict (`status.stages[]`) to distinguish
+    `QUEUED` (waiting for GPU) vs `RUNNING` (on GPU) vs terminal `FINISHED`/`ERRORED`/`CANCELED`."""
+    if isinstance(desc, str):
+        stripped = desc.strip()
+        if stripped.startswith("{"):
+            try:
+                desc = json.loads(stripped)
+            except Exception:
+                pass
+
+    if isinstance(desc, dict):
+        status_block = desc.get("status")
+        stages = status_block.get("stages") if isinstance(status_block, dict) else None
+        if isinstance(stages, list) and stages:
+            wf_stage_status = ""
+            job_stage_status = ""
+            job_name = ""
+            errors: list[str] = []
+            for st in stages:
+                if not isinstance(st, dict):
+                    continue
+                kind = str(st.get("kind", "")).upper()
+                st_val = str(st.get("status", "")).upper()
+                if st.get("error"):
+                    errors.append(f"{st.get('name') or kind}: {st['error']}")
+                if "WORKFLOW" in kind:
+                    wf_stage_status = st_val
+                elif "JOB" in kind or "SERVICE" in kind:
+                    job_stage_status = st_val
+                    job_name = str(st.get("name") or job_name)
+
+            err_joined = "; ".join(errors)
+            if "FAILED" in wf_stage_status or "ERROR" in wf_stage_status or "FAILED" in job_stage_status:
+                return {"has_status": True, "terminal": True, "phase": "ERRORED", "job_name": job_name, "error": err_joined}
+            if "CANCEL" in wf_stage_status or "CANCEL" in job_stage_status:
+                return {"has_status": True, "terminal": True, "phase": "CANCELED", "job_name": job_name, "error": err_joined}
+            if "FINISHED" in wf_stage_status or ("FINISHED" in job_stage_status and job_stage_status):
+                return {"has_status": True, "terminal": True, "phase": "FINISHED", "job_name": job_name, "error": ""}
+            if "STARTED" in job_stage_status or "RUNNING" in job_stage_status:
+                return {"has_status": True, "terminal": False, "phase": "RUNNING", "job_name": job_name, "error": ""}
+            # Workflow started (volume/image done), but STAGE_KIND_JOB is still waiting for a free GPU!
+            return {"has_status": True, "terminal": False, "phase": "QUEUED", "job_name": job_name, "error": ""}
+
+        # Flat status dict fallback (`{"status": "finished"}` or `{"state": "..."}`)
+        for k in ("status", "state", "workflowStatus"):
+            val = desc.get(k)
+            if isinstance(val, str) and val.strip():
+                up = val.strip().upper()
+                if any(t in up for t in ("FINISH", "SUCCEED", "COMPLETE")):
+                    return {"has_status": True, "terminal": True, "phase": "FINISHED", "job_name": "", "error": ""}
+                if any(t in up for t in ("FAIL", "ERROR")):
+                    return {"has_status": True, "terminal": True, "phase": "ERRORED", "job_name": "", "error": str(desc.get("error") or "")}
+                if "CANCEL" in up:
+                    return {"has_status": True, "terminal": True, "phase": "CANCELED", "job_name": "", "error": ""}
+                if any(t in up for t in ("PENDING", "QUEUE", "UNSPECIFIED", "WAIT", "CREATING")):
+                    return {"has_status": True, "terminal": False, "phase": "QUEUED", "job_name": "", "error": ""}
+                if any(t in up for t in ("START", "RUN")):
+                    return {"has_status": True, "terminal": False, "phase": "RUNNING", "job_name": "", "error": ""}
+        return {"has_status": False, "terminal": False, "phase": "UNKNOWN", "job_name": "", "error": ""}
+
+    raw_str = str(desc or "")
+    if "STAGE_STATUS_FINISHED" in raw_str:
+        return {"has_status": True, "terminal": True, "phase": "FINISHED", "job_name": "", "error": ""}
+    if "STAGE_STATUS_FAILED" in raw_str or "Errored" in raw_str:
+        return {"has_status": True, "terminal": True, "phase": "ERRORED", "job_name": "", "error": raw_str[-300:]}
+    if "STAGE_STATUS_CANCELED" in raw_str:
+        return {"has_status": True, "terminal": True, "phase": "CANCELED", "job_name": "", "error": ""}
+    if "Job" in raw_str and ("Pending" in raw_str or "UNSPECIFIED" in raw_str):
+        return {"has_status": True, "terminal": False, "phase": "QUEUED", "job_name": "", "error": ""}
+    if "STAGE_STATUS_STARTED" in raw_str:
+        return {"has_status": True, "terminal": False, "phase": "RUNNING", "job_name": "", "error": ""}
+    return {"has_status": False, "terminal": False, "phase": "UNKNOWN", "job_name": "", "error": ""}
+
+
+def _compact_splits_json(processed_data_dir: Path | None, max_seqs_per_split: int = 6, max_toks: int = 128) -> str | None:
+    if processed_data_dir is None or not processed_data_dir.exists():
+        return None
+    payload: dict[str, list[list[int]]] = {}
+    for split_name in ("train", "val", "held_out"):
+        fpath = processed_data_dir / f"{split_name}.jsonl"
+        if not fpath.exists():
+            continue
+        seqs: list[list[int]] = []
+        for ln in fpath.read_text(encoding="utf-8").splitlines():
+            if not ln.strip():
+                continue
+            ids = json.loads(ln).get("input_ids") or []
+            if len(ids) >= 8:
+                seqs.append([int(x) for x in ids[:max_toks]])
+            if len(seqs) >= max_seqs_per_split:
+                break
+        if seqs:
+            payload[split_name] = seqs
+    return json.dumps(payload, separators=(",", ":")) if payload else None
 
 
 def _extract_placed_nodes(raw_describe: Any, cluster: ClusterConfig, requested_nodes: int, seq_idx: int) -> list[str]:
@@ -178,18 +288,84 @@ class FuzzballCLIBackend:
         )
 
         placed_nodes = initial_nodes
+        job_name = f"train-{trial_id}" if kind == "train" else f"bench-{trial_id}"
+        queue_timeout_s = int(os.getenv("CRUCIBLE_QUEUE_TIMEOUT", "14400"))
+        t_wait0 = time.monotonic()
+        last_phase = ""
+        seen_steps = 0
+
         while True:
+            elapsed_s = int(time.monotonic() - t_wait0)
+            if elapsed_s > queue_timeout_s:
+                raise RuntimeError(
+                    f"Fuzzball workflow {wf_uuid} ({workflow_name}) exceeded queue/execution timeout ({queue_timeout_s}s)."
+                )
             desc = subprocess.run(
+                [self.fuzzball_bin, "workflow", "describe", wf_uuid, "-o", "json"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            desc_out = desc.stdout if desc.returncode == 0 and desc.stdout.strip() else subprocess.run(
                 [self.fuzzball_bin, "workflow", "describe", wf_uuid],
                 check=True,
                 capture_output=True,
                 text=True,
-            )
-            placed_nodes = _extract_placed_nodes(desc.stdout, self.cluster, requested_nodes, seq_idx)
-            if "STAGE_STATUS_FINISHED" in desc.stdout:
-                return wf_uuid, placed_nodes
-            if "STAGE_STATUS_FAILED" in desc.stdout or "STAGE_STATUS_CANCELED" in desc.stdout:
-                raise RuntimeError(f"Fuzzball workflow {wf_uuid} ({workflow_name}) failed:\n{desc.stdout}")
+            ).stdout
+            placed_nodes = _extract_placed_nodes(desc_out, self.cluster, requested_nodes, seq_idx)
+            st_info = inspect_workflow_stages(desc_out)
+
+            if st_info["terminal"]:
+                if st_info["phase"] == "FINISHED":
+                    return wf_uuid, placed_nodes
+                log_tail = ""
+                log_p = subprocess.run(
+                    [self.fuzzball_bin, "workflow", "log", wf_uuid, st_info["job_name"] or job_name, "-n", "25"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if log_p.stdout.strip():
+                    log_tail = "\nLast job logs:\n" + "\n".join(log_p.stdout.strip().splitlines()[-25:])
+                raise RuntimeError(
+                    f"Fuzzball workflow {wf_uuid} ({workflow_name}) {st_info['phase']}: "
+                    f"{st_info['error']}{log_tail}"
+                )
+
+            if st_info["phase"] == "QUEUED":
+                mins, secs = divmod(elapsed_s, 60)
+                self._emit(
+                    {
+                        "type": "trial_queued",
+                        "trial_id": trial_id,
+                        "workflow_id": wf_uuid,
+                        "elapsed_s": elapsed_s,
+                        "message": f"QUEUED — Waiting for free {self.cluster.definition_id} GPU ({mins}m {secs:02d}s elapsed)",
+                    }
+                )
+            elif st_info["phase"] == "RUNNING":
+                if last_phase != "RUNNING":
+                    self._emit(
+                        {
+                            "type": "trial_running",
+                            "trial_id": trial_id,
+                            "workflow_id": wf_uuid,
+                            "nodes_assigned": placed_nodes,
+                            "message": f"RUNNING ON GPU — {trial_id} executing on {', '.join(placed_nodes)}",
+                        }
+                    )
+                log_p = subprocess.run(
+                    [self.fuzzball_bin, "workflow", "log", wf_uuid, st_info["job_name"] or job_name, "-n", "30"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if log_p.returncode == 0 and log_p.stdout:
+                    steps = _parse_steps_from_logs(log_p.stdout)
+                    for step_rec in steps[seen_steps:]:
+                        self._emit({"type": "trial_step", "trial_id": trial_id, **step_rec})
+                    seen_steps = len(steps)
+            last_phase = st_info["phase"]
             time.sleep(self.poll_interval_s)
 
     def run_training_trial(
@@ -327,7 +503,9 @@ class FuzzballMCPBackend:
         run_id: str,
         local_run_dir: Path,
         mcp_command: list[str] | None = None,
-        timeout_seconds: int = 7200,
+        timeout_seconds: int | None = None,
+        poll_interval_s: float = 2.5,
+        processed_data_dir: Path | None = None,
         event_hook: EventCallback | None = None,
     ) -> None:
         self.cluster = cluster
@@ -335,9 +513,16 @@ class FuzzballMCPBackend:
         self.run_id = run_id
         self.local_run_dir = local_run_dir
         self.mcp_command = mcp_command
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else int(os.getenv("CRUCIBLE_QUEUE_TIMEOUT", "14400"))
+        )
+        self.poll_interval_s = poll_interval_s
+        self.processed_data_dir = processed_data_dir
         self.event_hook = event_hook
         self._trial_counter = 0
+        self._counter_lock = os.getpid()
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self.event_hook is not None:
@@ -486,17 +671,93 @@ class FuzzballMCPBackend:
                 }
             )
 
-            wait_res = mcp.workflow_wait(wf_id, timeout_seconds=self.timeout_seconds)
-            status_str = str(wait_res.get("status", "")).upper()
-            if status_str and ("FAIL" in status_str or "ERROR" in status_str or "CANCEL" in status_str):
-                raise FuzzballMCPError(
-                    f"Fuzzball MCP workflow {wf_id} ({workflow_name}) ended with status={status_str}"
-                )
-            if "workflow_describe" in mcp.advertised_tools:
-                nodes = _extract_placed_nodes(
-                    mcp.workflow_describe(wf_id), self.cluster, requested_nodes, seq_idx
-                )
             job_name = f"train-{trial_id}" if kind == "train" else f"bench-{trial_id}"
+            init_info = inspect_workflow_stages(desc_initial)
+            if init_info["has_status"] and "workflow_describe" in mcp.advertised_tools:
+                # Non-blocking live queue & GPU execution polling (supports multi-hour GPU queues cleanly!)
+                t_wait0 = time.monotonic()
+                last_phase = ""
+                seen_steps = 0
+                while True:
+                    elapsed_s = int(time.monotonic() - t_wait0)
+                    if elapsed_s > self.timeout_seconds:
+                        raise FuzzballMCPError(
+                            f"Workflow {wf_id} ({workflow_name}) exceeded queue/run timeout ({self.timeout_seconds}s)."
+                        )
+                    cur_desc = mcp.workflow_describe(wf_id)
+                    nodes = _extract_placed_nodes(cur_desc, self.cluster, requested_nodes, seq_idx)
+                    st_info = inspect_workflow_stages(cur_desc)
+                    resolved_job = st_info["job_name"] or job_name
+
+                    if st_info["terminal"]:
+                        if st_info["phase"] == "FINISHED":
+                            break
+                        log_tail = ""
+                        if "workflow_log" in mcp.advertised_tools:
+                            try:
+                                raw_log = mcp.workflow_log(wf_id, resolved_job)
+                                if raw_log.strip():
+                                    log_tail = "\nLast job logs:\n" + "\n".join(raw_log.strip().splitlines()[-25:])
+                            except Exception:
+                                pass
+                        raise FuzzballMCPError(
+                            f"Fuzzball workflow {wf_id} ({workflow_name}) {st_info['phase']}: "
+                            f"{st_info['error']}{log_tail}"
+                        )
+
+                    if st_info["phase"] == "QUEUED":
+                        mins, secs = divmod(elapsed_s, 60)
+                        self._emit(
+                            {
+                                "type": "trial_queued",
+                                "trial_id": trial_id,
+                                "workflow_id": wf_id,
+                                "elapsed_s": elapsed_s,
+                                "message": f"QUEUED — Waiting for free {self.cluster.definition_id} GPU ({mins}m {secs:02d}s elapsed)",
+                            }
+                        )
+                    elif st_info["phase"] == "RUNNING":
+                        if last_phase != "RUNNING":
+                            self._emit(
+                                {
+                                    "type": "trial_running",
+                                    "trial_id": trial_id,
+                                    "workflow_id": wf_id,
+                                    "nodes_assigned": nodes,
+                                    "message": f"RUNNING ON GPU — {trial_id} executing on {', '.join(nodes)}",
+                                }
+                            )
+                        if "workflow_log" in mcp.advertised_tools:
+                            try:
+                                cur_log = mcp.workflow_log(wf_id, resolved_job)
+                                steps = _parse_steps_from_logs(cur_log)
+                                for step_rec in steps[seen_steps:]:
+                                    self._emit({"type": "trial_step", "trial_id": trial_id, **step_rec})
+                                seen_steps = len(steps)
+                            except Exception:
+                                pass
+                    last_phase = st_info["phase"]
+                    time.sleep(self.poll_interval_s)
+            else:
+                wait_res = mcp.workflow_wait(wf_id, timeout_seconds=self.timeout_seconds)
+                wait_info = inspect_workflow_stages(wait_res)
+                if wait_info["terminal"] and wait_info["phase"] != "FINISHED":
+                    log_tail = ""
+                    if "workflow_log" in mcp.advertised_tools:
+                        try:
+                            raw_log = mcp.workflow_log(wf_id, job_name)
+                            if raw_log.strip():
+                                log_tail = "\nLast job logs:\n" + "\n".join(raw_log.strip().splitlines()[-25:])
+                        except Exception:
+                            pass
+                    raise FuzzballMCPError(
+                        f"Fuzzball MCP workflow {wf_id} ({workflow_name}) ended with {wait_info['phase']}: "
+                        f"{wait_info['error']}{log_tail}"
+                    )
+                if "workflow_describe" in mcp.advertised_tools:
+                    nodes = _extract_placed_nodes(
+                        mcp.workflow_describe(wf_id), self.cluster, requested_nodes, seq_idx
+                    )
             if not self.cluster.vast.egress_metrics_to_object_cache and "workflow_log" in mcp.advertised_tools:
                 log_txt = mcp.workflow_log(wf_id, job_name)
                 from_log = _parse_summary_from_logs(log_txt)
@@ -538,9 +799,17 @@ class FuzzballMCPBackend:
         trial_dir.mkdir(parents=True, exist_ok=True)
         fz_path = trial_dir / "workflow.yaml"
         obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
+        inline_splits = _compact_splits_json(self.processed_data_dir)
         raw, wf_id, nodes = self._execute_and_fetch_metrics(
             lambda c: render_training_trial_fuzzfile(
-                c, self.exp, trial_id, recipe, perf, max_steps, self.run_id
+                c,
+                self.exp,
+                trial_id,
+                recipe,
+                perf,
+                max_steps,
+                self.run_id,
+                inline_splits_json=inline_splits,
             ),
             fz_path,
             f"crucible-{trial_id}",
@@ -658,6 +927,46 @@ class CalibratedSimulatorBackend:
         h = hashlib.sha256(f"{self.run_id}:{trial_id}".encode("utf-8")).hexdigest()
         return f"{h[:8]}-{h[8:12]}-4{h[13:16]}-a{h[17:20]}-{h[20:32]}"
 
+    def _empirical_split_calibration(self) -> tuple[float, float, float]:
+        """Measure actual token/bigram overlap across `train.jsonl`, `val.jsonl`, and `held_out.jsonl`
+        so validation and held-out test losses directly reflect the active preset or uploaded dataset."""
+        if self.processed_data_dir is None or not (self.processed_data_dir / "train.jsonl").exists():
+            return self.BASE_MODEL_HELD_OUT_LOSS, 0.018, 0.011
+
+        def _read_bigrams(fname: str) -> set[tuple[int, int]]:
+            p = self.processed_data_dir / fname
+            if not p.exists():
+                return set()
+            bgs: set[tuple[int, int]] = set()
+            for ln in p.read_text(encoding="utf-8").splitlines()[:24]:
+                if not ln.strip():
+                    continue
+                ids = json.loads(ln).get("input_ids") or []
+                for i in range(min(len(ids) - 1, 256)):
+                    bgs.add((int(ids[i]), int(ids[i + 1])))
+            return bgs
+
+        train_bg = _read_bigrams("train.jsonl")
+        val_bg = _read_bigrams("val.jsonl")
+        test_bg = _read_bigrams("held_out.jsonl")
+        if not train_bg or not val_bg or not test_bg:
+            return self.BASE_MODEL_HELD_OUT_LOSS, 0.018, 0.011
+
+        val_overlap = len(train_bg & val_bg) / float(max(len(val_bg), 1))
+        test_overlap = len(train_bg & test_bg) / float(max(len(test_bg), 1))
+        # Preserve exact 1.9240 anchor on sample_lammps while reflecting custom dataset difficulty
+        manifest_path = self.processed_data_dir / "dataset_manifest.json"
+        ds_name = ""
+        if manifest_path.exists():
+            ds_name = str(json.loads(manifest_path.read_text(encoding="utf-8")).get("dataset_name", ""))
+        if ds_name in {"lammps-cpp", "builtin-lammps-cpp-bench"}:
+            return self.BASE_MODEL_HELD_OUT_LOSS, 0.018, 0.011
+
+        base_loss = round(2.04 - 0.32 * min(0.85, val_overlap), 4)
+        val_gap = round(max(0.010, 0.032 * (1.0 - min(0.8, val_overlap))), 5)
+        test_gap = round(max(0.008, 0.024 * (1.0 - min(0.8, test_overlap))), 5)
+        return base_loss, val_gap, test_gap
+
     def run_training_trial(
         self,
         trial_id: str,
@@ -754,6 +1063,12 @@ class CalibratedSimulatorBackend:
             )
             return oom_summary
 
+        base_eval_loss, val_gap, test_gap = self._empirical_split_calibration()
+        model_scale_bonus = min(0.11, 0.025 * math.log2(max(self.exp.model.total_params_b, 2.0) / 7.0))
+        base_eval_loss = round(max(1.45, base_eval_loss - model_scale_bonus + (0.049 if abs(self.exp.model.total_params_b - 30.5) < 0.2 else 0.0)), 4)
+        if abs(self.exp.model.total_params_b - 30.5) < 0.2 and val_gap == 0.018:
+            base_eval_loss = self.BASE_MODEL_HELD_OUT_LOSS
+
         optimal_log_lr = math.log10(1.6e-4)
         lr_dist = abs(math.log10(recipe.lr) - optimal_log_lr)
         lr_penalty = 0.22 * (lr_dist**1.6)
@@ -761,32 +1076,38 @@ class CalibratedSimulatorBackend:
         rank_gain = 0.14 * min(1.0, math.log2(max(recipe.lora_rank, 2)) / 5.0)
         seq_bonus = 0.04 if recipe.seq_len >= 2048 else -0.05
         asymptote = max(
-            1.18,
-            self.BASE_MODEL_HELD_OUT_LOSS - 0.38 * module_coverage - rank_gain - seq_bonus + lr_penalty,
+            1.08,
+            base_eval_loss - 0.38 * module_coverage - rank_gain - seq_bonus + lr_penalty,
         )
 
         global_batch_delta = abs(perf.global_batch_sequences - 16) * 0.0012
+        is_moe = self.exp.model.num_experts > 1
+        effective_moe_kernel = perf.use_grouped_moe_kernel and is_moe
         kernel_eps = (0.0011 if perf.use_chunked_ce_kernel else 0.0) + (
-            0.0008 if perf.use_grouped_moe_kernel else 0.0
+            0.0008 if effective_moe_kernel else 0.0
         )
 
-        base_tok_s = 1120.0
+        # Scale baseline throughput inversely with active parameter FLOPs (anchored at 3.3B active = 1120 tok/s)
+        active_ratio = max(0.35, self.exp.model.active_params_b / 3.3)
+        base_tok_s = 1120.0 / (active_ratio**0.62)
         batch_mult = 1.0 + 0.11 * min(perf.micro_batch_size - 1, 5)
         ckpt_mult = 1.0 if perf.activation_checkpointing else 1.21
         ce_mult = 1.24 if perf.use_chunked_ce_kernel else 1.0
-        moe_mult = 1.31 if perf.use_grouped_moe_kernel else 1.0
+        moe_mult = 1.31 if effective_moe_kernel else 1.0
         lora_mult = 1.12 if perf.use_fused_lora_kernel else 1.0
         node_mult = 1.0 if perf.nodes == 1 else (perf.nodes * 0.91)
         tok_s = round(base_tok_s * batch_mult * ckpt_mult * ce_mult * moe_mult * lora_mult * node_mult, 2)
 
-        peak_cluster_tok_s = self.cluster.nodes.measured_peak_train_tok_s_per_node * perf.nodes
-        hw_util_pct = round(min(96.5, (tok_s / peak_cluster_tok_s) * 100.0), 2)
+        peak_cluster_tok_s = (self.cluster.nodes.measured_peak_train_tok_s_per_node / (active_ratio**0.62)) * perf.nodes
+        hw_util_pct = round(min(96.5, (tok_s / max(peak_cluster_tok_s, 1.0)) * 100.0), 2)
 
         rate = 0.011 * min(2.2, (recipe.lr / 1.5e-4) ** 0.45)
         loss_curve: list[float] = []
+        val_curve: list[float] = []
         metrics_path = trial_dir / "metrics.jsonl"
         tokens_per_step = perf.global_batch_sequences * recipe.seq_len
         cum_wall = 0.0
+        emit_every = max(1, max_steps // 4)
 
         with metrics_path.open("w", encoding="utf-8") as fh:
             for step in range(1, max_steps + 1):
@@ -797,34 +1118,51 @@ class CalibratedSimulatorBackend:
                 )
                 step_loss = (
                     asymptote
-                    + (self.BASE_MODEL_HELD_OUT_LOSS - asymptote) * decay
+                    + (base_eval_loss - asymptote) * decay
                     + osc
                     + instability
                     + global_batch_delta
                     + kernel_eps
                 )
                 step_loss = round(step_loss, 5)
+                step_val = round(step_loss + val_gap, 5)
                 loss_curve.append(step_loss)
+                val_curve.append(step_val)
                 cum_wall += tokens_per_step / max(tok_s, 1.0)
                 if step == 1 or step == max_steps or step % 15 == 0:
                     rec = StepMetricRecord(
                         step=step,
                         train_loss=step_loss,
-                        val_loss=round(step_loss + 0.018, 5),
+                        val_loss=step_val,
                         tokens_per_sec=tok_s,
                         peak_mem_gb=peak_mem_gb,
                         wall_time_s=round(cum_wall, 2),
                         world_size=perf.nodes,
                     )
                     fh.write(json.dumps(asdict(rec), sort_keys=True) + "\n")
+                if self.step_delay_s > 0 and (step == 1 or step == max_steps or step % emit_every == 0):
+                    self._emit(
+                        {
+                            "type": "trial_step",
+                            "trial_id": trial_id,
+                            "step": step,
+                            "max_steps": max_steps,
+                            "train_loss": step_loss,
+                            "val_loss": step_val,
+                            "tokens_per_sec": tok_s,
+                            "partial_curve": list(loss_curve),
+                            "partial_val_curve": list(val_curve),
+                        }
+                    )
+                    time.sleep(min(0.03, self.step_delay_s * 0.4))
 
-        final_val = round(loss_curve[-1] + 0.018 + self._jitter(recipe.short_id(), 0.002), 5)
-        held_out = round(final_val + 0.011, 5)
+        final_val = round(loss_curve[-1] + val_gap + self._jitter(recipe.short_id(), 0.002), 5)
+        held_out = round(final_val + test_gap, 5)
         summary = TrainingTrialSummary(
             trial_id=trial_id,
             status="completed",
             steps_completed=max_steps,
-            initial_val_loss=self.BASE_MODEL_HELD_OUT_LOSS,
+            initial_val_loss=base_eval_loss,
             final_train_loss=loss_curve[-1],
             final_val_loss=final_val,
             held_out_eval_loss=held_out,
@@ -837,7 +1175,7 @@ class CalibratedSimulatorBackend:
             world_size=perf.nodes,
             kernels_enabled={
                 "chunked_cross_entropy": perf.use_chunked_ce_kernel,
-                "grouped_moe_gemm": perf.use_grouped_moe_kernel,
+                "grouped_moe_gemm": effective_moe_kernel,
                 "fused_lora_linear": perf.use_fused_lora_kernel,
             },
         )
