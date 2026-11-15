@@ -1,4 +1,4 @@
-# PerfMaxxer: An Autoresearch Agent for Local Fine-Tuning and Serving
+# Alchemy: An Autoresearch Agent for Local Fine-Tuning and Serving
 
 **Bring your data, your base model, and your hardware. Our agent runs the experiments on your own cluster and hands back one Fuzzball workflow that fine-tunes and serves the best model your hardware allows, without your data ever leaving the room.**
 
@@ -24,7 +24,7 @@ A deterministic optimizer decides which experiments run and a measured adoption 
 
 | Result (all measured on GB10, logged in `results/`) | Value |
 |----------------------------|------------------------------------------|
-| Held-out LAMMPS loss (perplexity), base → fine-tuned | 1.175 (3.24) → **1.037 (2.82)**, −11.7%, after 750k tokens; 4 → 2 → 1 configs by successive halving |
+| Held-out LAMMPS loss (perplexity), base → fine-tuned | **0.730 (2.08) → 0.600 (1.82), −17.8%** on all 374 held-out files after 2M tokens in the final 2-node `pipeline.yaml` run; recipe search (4 → 2 → 1 configs): 1.175 → 1.037 on a fast eval subset |
 | Training throughput (stock → best) | 356 → **2,858 tokens/s (8.0×)** inside the final `pipeline.yaml` run on 2 nodes: grouped experts 1.9×, torch.compile 1.5×, no activation checkpointing 1.35×, 2 nodes 1.98×; loss unchanged. **~19% of measured BF16 peak** (2 × 99 TFLOP/s; 4 × active params per token) |
 | `pipeline.yaml` end to end | ran in ~35 min: ingest → train → FP8 + LoRA serving in vLLM |
 | Custom Triton fused linear + cross-entropy (152k vocab) | 2.1–2.35× faster and 7.0 → 0.34 GiB alone; in training −6.2 GiB peak memory, exact loss |
