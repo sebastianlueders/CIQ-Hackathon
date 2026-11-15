@@ -8,6 +8,10 @@ let activeCategory = "Featured";
 let resolvedTeamId = "team3";
 let resolvedClusterEndpoint = "api.fb-hack.civilfritz.net:443";
 let userPickedBackend = false;
+let lastObservedRunState = "idle";
+let currentLifecyclePhase = "pre_run";
+let activeDatasetMeta = null;
+let activePollTimer = null;
 
 async function fetchJson(url, opts) {
   const resp = await fetch(url, opts);
@@ -37,6 +41,8 @@ function syncCompanyBranding() {
   const dlHref = `/api/build/bundle.zip?company_name=${encodeURIComponent(comp)}`;
   const topDl = document.getElementById("btn-top-download");
   if (topDl) topDl.href = dlHref;
+  const bannerDl = document.getElementById("btn-banner-download");
+  if (bannerDl) bannerDl.href = dlHref;
   const cardDl = document.getElementById("btn-card-download");
   if (cardDl) cardDl.href = dlHref;
   const uz = document.getElementById("unzip-cmd-line");
@@ -194,15 +200,26 @@ function renderCategoryTabs(categories) {
 function renderDatasetBanner(ds) {
   if (!ds) return;
   activeDatasetId = ds.dataset_id;
+  activeDatasetMeta = ds;
   const sc = ds.split_doc_counts || {};
   const cc = ds.split_chunk_counts || {};
-  const prefix = ds.is_preset ? "Preset Active" : "Private Corpus Staged";
+  const tc = (ds.teacher_curriculum && ds.teacher_curriculum.split_pair_counts) || {};
+  const prefix = ds.is_preset ? "Preset Active" : "Uploaded Corpus Active";
+  const teacherNote =
+    tc.train != null
+      ? ` &middot; <strong>Remote Teacher SFT Splits:</strong> <code>${tc.train || 0} Train</code> / <code>${tc.val || 0} Val</code> / <code>${tc.test || 0} Test</code> pairs (0 leakage)`
+      : "";
   document.getElementById("dataset-status-bar").innerHTML =
     `${prefix}: <strong>${ds.display_name}</strong> (${ds.format_summary}) &middot; ` +
     `<strong>${(ds.total_tokens || 0).toLocaleString()} tokens</strong> &middot; ` +
-    `Train: <code>${sc.train || 0} docs (${cc.train || 0})</code> &middot; ` +
-    `Val: <code>${sc.val || 0} docs (${cc.val || 0})</code> &middot; ` +
-    `Sealed Test: <code>${sc.held_out || 0} docs (${cc.held_out || 0})</code>`;
+    `Docs: <code>${sc.train || 0}T / ${sc.val || 0}V / ${sc.held_out || 0}Test</code> &middot; ` +
+    `Packed Chunks: <code>${cc.train || 0}T / ${cc.val || 0}V / ${cc.held_out || 0}Test</code>` +
+    teacherNote;
+
+  const chipEl = document.getElementById("lifecycle-teacher-chip");
+  if (chipEl && tc.train != null && currentLifecyclePhase === "pre_run") {
+    chipEl.textContent = `Teacher SFT Staged: ${tc.train} Train · ${tc.val} Val · ${tc.test} Test pairs`;
+  }
 }
 
 function renderClientMachineBridge(clientInfo, clusterEp, teamId) {
@@ -228,17 +245,26 @@ function renderNetworkBridgeState(discReport, clusterCfg) {
   if (!discReport || !statusEl) return;
 
   const reachable = Boolean(discReport.cluster_reachable);
+  const cordoned = Boolean(discReport.all_nodes_cordoned);
   const cliOk = Boolean(discReport.fuzzball_cli_available);
   const vol = (clusterCfg && clusterCfg.vast && clusterCfg.vast.persistent_volume_name) || "runs";
   const prov = (clusterCfg && clusterCfg.vast && clusterCfg.vast.provisioner) || "team3";
 
-  if (reachable) {
+  if (reachable && !cordoned) {
     if (dot) dot.className = "dot dot-green";
     statusEl.innerHTML =
       `<strong style="color:#a3e635">LIVE CLUSTER CONNECTED</strong> &middot; Fuzzball MCP Ready &middot; ` +
       `VAST Volume <code>${vol}</code> (<code>use: ${prov}</code>)`;
-    if (cliOk && backendSel) {
+    if (cliOk && backendSel && !userPickedBackend) {
       backendSel.value = "fuzzball_mcp";
+    }
+  } else if (reachable && cordoned) {
+    if (dot) dot.className = "dot dot-amber";
+    statusEl.innerHTML =
+      `<strong style="color:#fbbf24">FUZZBALL CONTROL PLANE CONNECTED (GPUs Cordoned for Judging)</strong> &middot; ` +
+      `VAST <code>${vol}</code> (<code>use: ${prov}</code>) &middot; GB10 Empirical Twin Active`;
+    if (backendSel && !userPickedBackend) {
+      backendSel.value = "simulator";
     }
   } else {
     if (dot) dot.className = "dot dot-amber";
@@ -341,11 +367,254 @@ async function refreshBuildPreview() {
 
 function renderArtifactViewer() {
   const viewer = document.getElementById("yaml-viewer");
+  if (currentLifecyclePhase === "pre_run") {
+    viewer.textContent =
+      "# PRE-RUN: Output package has not been generated yet.\n" +
+      "# Click 'Tune on Fuzzball & Generate Local LLM' above to synthesize Teacher Train/Val/Test SFT splits,\n" +
+      "# optimize your model on GB10, and unlock your turnkey Copilot & .zip bundle here.";
+    return;
+  }
+  if (currentLifecyclePhase === "running") {
+    viewer.textContent =
+      "# RUNNING: Optimization in progress on Fuzzball GB10...\n" +
+      "# Packaging final fuzzfile.yaml, run_company_app.py, Modelfile.ollama, and Teacher SFT splits once stages complete.";
+    return;
+  }
   if (buildArtifacts[selectedArtifactKey]) {
     viewer.textContent = buildArtifacts[selectedArtifactKey];
   } else if (latestSummary && latestSummary.turnkey_fuzzfile) {
     viewer.textContent = latestSummary.turnkey_fuzzfile;
   }
+}
+
+function renderLifecycleState(phase, snap = null, summary = null) {
+  currentLifecyclePhase = phase;
+  const topPill = document.getElementById("header-lifecycle-pill");
+  const banner = document.getElementById("lifecycle-banner");
+  const stateChip = document.getElementById("lifecycle-state-chip");
+  const teacherChip = document.getElementById("lifecycle-teacher-chip");
+  const headline = document.getElementById("lifecycle-headline");
+  const sub = document.getElementById("lifecycle-sub");
+  const jumpBtn = document.getElementById("btn-jump-output");
+  const bannerDl = document.getElementById("btn-banner-download");
+  const topDl = document.getElementById("btn-top-download");
+  const cardDl = document.getElementById("btn-card-download");
+  const stepPre = document.getElementById("lc-step-prerun");
+  const stepRun = document.getElementById("lc-step-running");
+  const stepFin = document.getElementById("lc-step-finished");
+  const progFill = document.getElementById("lifecycle-progress-fill");
+
+  const outBanner = document.getElementById("output-readiness-banner");
+  const outTag = document.getElementById("output-state-tag");
+  const outText = document.getElementById("output-banner-text");
+  const outPill = document.getElementById("output-ready-pill");
+  const outSection = document.getElementById("final-copilot-section");
+  const btnLiveCopilot = document.getElementById("btn-run-cluster-copilot");
+  const btnPreviewCopilot = document.getElementById("btn-run-playground");
+  const copilotBadge = document.getElementById("copilot-exec-badge");
+  const stageDPill = document.getElementById("stage-d-status-pill");
+  const kpiDag = document.getElementById("kpi-dag");
+
+  const tcLive = (snap && snap.live_teacher_curriculum && snap.live_teacher_curriculum.split_pair_counts) ||
+    (summary && summary.teacher_curriculum && summary.teacher_curriculum.split_pair_counts) ||
+    (activeDatasetMeta && activeDatasetMeta.teacher_curriculum && activeDatasetMeta.teacher_curriculum.split_pair_counts) ||
+    null;
+  const tcText = tcLive
+    ? `Teacher SFT Splits: ${tcLive.train || 0} Train · ${tcLive.val || 0} Val · ${tcLive.test || 0} Test pairs`
+    : "Teacher SFT Splits Ready on Launch";
+
+  if (phase === "running") {
+    const curStage = String((snap && snap.current_stage) || "starting");
+    const stagePctMap = {
+      starting: 12,
+      ingest: 18,
+      teacher_curriculum: 26,
+      stage_a_recipe: 44,
+      stage_b_training_perf: 64,
+      stage_c_inference_perf: 80,
+      continuous_teacher_loop: 90,
+      stage_d_emit: 96,
+    };
+    const pct = stagePctMap[curStage] || 30;
+
+    topPill.className = "lifecycle-top-pill lifecycle-pill-running";
+    topPill.innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>STATE: RUNNING (${pct}%)`;
+
+    banner.className = "lifecycle-banner lifecycle-running";
+    stateChip.innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>STEP 2 OF 3 &middot; RUNNING`;
+    teacherChip.textContent = tcText;
+    headline.textContent = `Running Live Optimization — ${(snap && snap.stage_label) || "Processing Teacher Splits & GB10 Trials…"}`;
+    sub.textContent =
+      "Output is still building and NOT ready yet. Watch real-time loss curves, throughput bars, and vLLM gates stream below; your Copilot & .zip unlock automatically at Step 3.";
+    jumpBtn.classList.add("hidden");
+    bannerDl.classList.add("hidden");
+
+    stepPre.className = "lc-step lc-step-done";
+    stepPre.querySelector(".lc-num").textContent = "✓";
+    stepRun.className = "lc-step lc-step-active";
+    stepRun.querySelector(".lc-num").textContent = "2";
+    stepFin.className = "lc-step";
+    stepFin.querySelector(".lc-num").textContent = "3";
+    progFill.style.width = `${pct}%`;
+
+    topDl.className = "btn btn-download btn-locked";
+    topDl.setAttribute("aria-disabled", "true");
+    topDl.innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>Building Output…`;
+    cardDl.className = "btn btn-download btn-sm btn-locked";
+    cardDl.setAttribute("aria-disabled", "true");
+    cardDl.textContent = "Building…";
+
+    if (stageDPill) {
+      stageDPill.className = "stage-status";
+      stageDPill.textContent = "Building…";
+    }
+    if (kpiDag) {
+      kpiDag.innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>Building…`;
+    }
+
+    outBanner.className = "output-readiness-banner output-banner-running";
+    outTag.innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>STATE: RUNNING &middot; OUTPUT STILL BUILDING`;
+    outText.innerHTML = `Currently executing <strong>${(snap && snap.stage_label) || "GB10 optimization"}</strong>. Final Private Copilot and downloadable <code>.zip</code> will unlock automatically as soon as Step 3 (FINISHED) completes.`;
+    outPill.className = "badge badge-amber";
+    outPill.textContent = "BUILDING · NOT READY YET";
+
+    outSection.classList.add("output-section-locked");
+    outSection.classList.remove("output-section-ready");
+    btnLiveCopilot.disabled = true;
+    btnPreviewCopilot.disabled = true;
+    if (copilotBadge) {
+      copilotBadge.className = "badge badge-amber";
+      copilotBadge.textContent = "TUNING IN PROGRESS…";
+    }
+    document.getElementById("pg-base-out").textContent = "Optimization running on Fuzzball GB10…";
+    document.getElementById("pg-tuned-out").textContent =
+      "Teaching model with Remote Teacher Train/Val/Test SFT splits — output unlocks automatically when FINISHED.";
+    renderArtifactViewer();
+    return;
+  }
+
+  if (phase === "finished") {
+    topPill.className = "lifecycle-top-pill lifecycle-pill-finished";
+    topPill.textContent = "✓ STATE: FINISHED · OUTPUT READY";
+
+    banner.className = "lifecycle-banner lifecycle-finished";
+    stateChip.textContent = "✓ STEP 3 OF 3 · FINISHED — OUTPUT READY";
+    teacherChip.textContent = tcText;
+    const comp = currentCompanyName();
+    const shortM = String(((summary && summary.model_profile && summary.model_profile.name) || currentModelId())).split("/").pop();
+    headline.textContent = `Finished! ${comp}'s Tuned ${shortM} Copilot & Turnkey .zip Package Are Ready`;
+    const pplSummary =
+      summary && summary.stage_a
+        ? `Held-Out PPL ${summary.stage_a.base_held_out_perplexity.toFixed(3)} → ${summary.stage_a.winning_summary.held_out_perplexity.toFixed(3)} · Train ${summary.stage_b.overall_speedup_x}x · vLLM Serve ${summary.stage_c.serving_speedup_x}x`
+        : "All Teacher SFT splits, LoRA weights, custom sm_121 kernels, and vLLM gates verified.";
+    sub.textContent = `${pplSummary} — Click "Jump to Tuned Output" to test your model or "Download Ready .zip" to deploy.`;
+    jumpBtn.classList.remove("hidden");
+    bannerDl.classList.remove("hidden");
+
+    stepPre.className = "lc-step lc-step-done";
+    stepPre.querySelector(".lc-num").textContent = "✓";
+    stepRun.className = "lc-step lc-step-done";
+    stepRun.querySelector(".lc-num").textContent = "✓";
+    stepFin.className = "lc-step lc-step-active";
+    stepFin.querySelector(".lc-num").textContent = "✓";
+    progFill.style.width = "100%";
+
+    topDl.className = "btn btn-download btn-ready-glow";
+    topDl.setAttribute("aria-disabled", "false");
+    topDl.textContent = "✓ Output Ready · Download .zip";
+    cardDl.className = "btn btn-download btn-sm btn-ready-glow";
+    cardDl.setAttribute("aria-disabled", "false");
+    cardDl.textContent = "✓ Download .zip";
+
+    if (stageDPill) {
+      stageDPill.className = "stage-status status-ok";
+      stageDPill.textContent = "✓ Output Ready";
+    }
+    if (kpiDag) {
+      kpiDag.textContent = "Output Ready";
+    }
+
+    outBanner.className = "output-readiness-banner output-banner-finished";
+    outTag.textContent = "✓ STATE: FINISHED · OUTPUT READY TO TEST & DOWNLOAD";
+    outText.innerHTML = `Your tuned <strong>${comp}</strong> Private Copilot, Remote-Teacher SFT splits (<code>teacher_sft_train.jsonl</code>), and turnkey <code>.zip</code> bundle are unlocked and ready below.`;
+    outPill.className = "badge badge-green";
+    outPill.textContent = "✓ OUTPUT READY";
+
+    outSection.classList.remove("output-section-locked");
+    outSection.classList.add("output-section-ready");
+    btnLiveCopilot.disabled = false;
+    btnPreviewCopilot.disabled = false;
+    renderArtifactViewer();
+    return;
+  }
+
+  if (phase === "failed") {
+    topPill.className = "lifecycle-top-pill lifecycle-pill-failed";
+    topPill.textContent = "STATE: FAILED";
+    banner.className = "lifecycle-banner lifecycle-failed";
+    stateChip.textContent = "RUN FAILED";
+    headline.textContent = `Optimization Stopped With Error: ${(snap && snap.error) || "Check error banner below"}`;
+    sub.textContent = "Adjust configuration or execution backend and click Tune on Fuzzball & Generate Local LLM to retry.";
+    jumpBtn.classList.add("hidden");
+    bannerDl.classList.add("hidden");
+    return;
+  }
+
+  // Default: PRE-RUN
+  topPill.className = "lifecycle-top-pill lifecycle-pill-prerun";
+  topPill.textContent = "STATE: PRE-RUN";
+
+  banner.className = "lifecycle-banner lifecycle-prerun";
+  stateChip.textContent = "STEP 1 OF 3 · PRE-RUN";
+  teacherChip.textContent = tcText;
+  headline.textContent = "Pre-Run: Configure Model, Upload Private Data & Click “Tune on Fuzzball & Generate Local LLM”";
+  sub.textContent =
+    "Output is locked until optimization runs. Uploading files triggers the Remote Teacher to synthesize leak-free Train (80%), Validation (10%), and Test (10%) SFT teaching data.";
+  jumpBtn.classList.add("hidden");
+  bannerDl.classList.add("hidden");
+
+  stepPre.className = "lc-step lc-step-active";
+  stepPre.querySelector(".lc-num").textContent = "1";
+  stepRun.className = "lc-step";
+  stepRun.querySelector(".lc-num").textContent = "2";
+  stepFin.className = "lc-step";
+  stepFin.querySelector(".lc-num").textContent = "3";
+  progFill.style.width = "8%";
+
+  topDl.className = "btn btn-download btn-locked";
+  topDl.setAttribute("aria-disabled", "true");
+  topDl.textContent = "Output Locked (Pre-Run)";
+  cardDl.className = "btn btn-download btn-sm btn-locked";
+  cardDl.setAttribute("aria-disabled", "true");
+  cardDl.textContent = "Output Locked";
+
+  if (stageDPill) {
+    stageDPill.className = "stage-status";
+    stageDPill.textContent = "Pre-Run · Locked";
+  }
+  if (kpiDag) {
+    kpiDag.textContent = "Awaiting Run";
+  }
+
+  outBanner.className = "output-readiness-banner output-banner-prerun";
+  outTag.textContent = "STATE: PRE-RUN · OUTPUT NOT READY YET";
+  outText.innerHTML =
+    "Start an optimization run above to teach your selected model on the synthesized Train / Val / Test SFT splits and unlock your Private Copilot &amp; downloadable <code>.zip</code> bundle.";
+  outPill.className = "badge";
+  outPill.textContent = "LOCKED UNTIL FINISHED";
+
+  outSection.classList.add("output-section-locked");
+  outSection.classList.remove("output-section-ready");
+  btnLiveCopilot.disabled = true;
+  btnPreviewCopilot.disabled = true;
+  if (copilotBadge) {
+    copilotBadge.className = "badge";
+    copilotBadge.textContent = "PRE-RUN · LOCKED";
+  }
+  document.getElementById("pg-base-out").textContent = "Pre-Run: No optimization executed yet…";
+  document.getElementById("pg-tuned-out").textContent =
+    "Click 'Tune on Fuzzball & Generate Local LLM' above — your tuned Copilot comparison unlocks automatically when the run reaches FINISHED.";
+  renderArtifactViewer();
 }
 
 function updateSingleGpuSvg(idx, node) {
@@ -492,33 +761,169 @@ function renderRealtimeAnalysis(snap) {
 
   const ledgerBody = document.querySelector("#live-trial-ledger tbody");
   if (ledgerBody) {
-    const rows = (snap.completed_trials || []).slice().reverse().slice(0, 8);
-    ledgerBody.innerHTML = rows
-      .map(
-        (t) => `
-        <tr>
-          <td><code>${t.trial_id}</code></td>
-          <td>${t.world_size || 1}&times;GB10</td>
-          <td><strong>${Math.round(Number(t.tokens_per_sec || 0)).toLocaleString()}</strong></td>
-          <td>${t.val_loss != null ? Number(t.val_loss).toFixed(4) : "—"}</td>
-          <td>${t.held_out_perplexity ? Number(t.held_out_perplexity).toFixed(3) : "—"}</td>
-        </tr>
-      `
-      )
-      .join("");
+  const rows = !snap.user_triggered ? [] : (snap.completed_trials || []).slice().reverse().slice(0, 8);
+    if (rows.length === 0) {
+      const activeRun = snap.state === "running" || snap.state === "queued_for_gpu";
+      ledgerBody.innerHTML = activeRun
+        ? `<tr><td colspan="5" class="table-placeholder-cell"><span class="spinner-ring spinner-ring-sm"></span>Streaming first trial completion from GB10…</td></tr>`
+        : `<tr><td colspan="5" class="table-placeholder-cell">No trials executed in this session yet. Start a run above to stream trial metrics.</td></tr>`;
+    } else {
+      ledgerBody.innerHTML = rows
+        .map(
+          (t) => `
+          <tr>
+            <td><code>${t.trial_id}</code></td>
+            <td>${t.world_size || 1}&times;GB10</td>
+            <td><strong>${Math.round(Number(t.tokens_per_sec || 0)).toLocaleString()}</strong></td>
+            <td>${t.val_loss != null ? Number(t.val_loss).toFixed(4) : "—"}</td>
+            <td>${t.held_out_perplexity ? Number(t.held_out_perplexity).toFixed(3) : "—"}</td>
+          </tr>
+        `
+        )
+        .join("");
+    }
   }
+}
+
+function renderEmptyPanelsBeforeRun(seedSummary = null) {
+  if (seedSummary && seedSummary.cluster) {
+    document.getElementById("pill-fz-ver").textContent = seedSummary.cluster.fuzzfile_version || "v4";
+    document.getElementById("pill-def-id").textContent = seedSummary.cluster.definition_id || "team3";
+  }
+  const shortModel = currentModelId().split("/").pop();
+  document.getElementById("kpi-model-short").textContent = shortModel;
+  document.getElementById("kpi-ppl").textContent = "—";
+  document.getElementById("meta-stage-a").textContent = "Awaiting run · Parallel LoRA recipe search with Successive Halving";
+  document.getElementById("kpi-train-speed").textContent = "—";
+  document.getElementById("meta-stage-b").textContent = "Awaiting Stage A · Custom sm_121 Triton + 2×GB10 scaling sweep";
+  document.getElementById("kpi-serve-speed").textContent = "—";
+  document.getElementById("meta-stage-c").textContent = "Awaiting Stage B · vLLM BF16 / FP8 / NVFP4 quality-floor sweep";
+  document.getElementById("meta-stage-d").textContent = "Ready to package brandable Copilot .zip once optimization finishes";
+
+  const curveBadge = document.getElementById("curve-badge");
+  curveBadge.textContent = "Awaiting Run";
+  curveBadge.className = "badge";
+  document.getElementById("loss-chart-wrap").innerHTML = `
+    <div class="panel-empty-state">
+      <div class="panel-state-title">No Optimization Curves Yet</div>
+      <div class="panel-state-sub">Click <strong>Tune on Fuzzball &amp; Generate Local LLM</strong> above to stream live train &amp; validation loss trajectories step-by-step.</div>
+    </div>
+  `;
+  document.getElementById("loss-legend").innerHTML = "";
+
+  const utilBadge = document.getElementById("util-badge");
+  utilBadge.textContent = "Awaiting Run";
+  utilBadge.className = "badge";
+  document.getElementById("train-bars").innerHTML = `
+    <div class="panel-empty-state">
+      <div class="panel-state-title">Stage B &amp; Teacher Waterfall Empty</div>
+      <div class="panel-state-sub">Streams live tokens/sec bars across PyTorch baseline, custom <code>sm_121</code> kernels, 2-node NCCL DDP, and Continuous Teacher rounds during the run.</div>
+    </div>
+  `;
+
+  document.querySelector("#serving-table tbody").innerHTML = `
+    <tr>
+      <td colspan="6" class="table-placeholder-cell">
+        No Stage C vLLM sweep data yet &mdash; populates live as BF16, FP8, and Blackwell NVFP4 topologies are benchmarked on the Sealed Test Split.
+      </td>
+    </tr>
+  `;
+
+  document.querySelector("#kernel-table tbody").innerHTML = `
+    <tr>
+      <td colspan="4" class="table-placeholder-cell">
+        Awaiting <code>sm_121</code> numerical parity microbenchmarks vs. FP32 PyTorch reference.
+      </td>
+    </tr>
+  `;
+
+  document.getElementById("advisor-rationales").innerHTML = `
+    <div class="panel-empty-state" style="min-height:84px">
+      <div class="panel-state-sub">Stage-by-stage Remote-Teacher rationales &amp; cryptographic SHA-256 firewall audits will stream here during the run.</div>
+    </div>
+  `;
+  const fwBox = document.getElementById("firewall-audit-box");
+  fwBox.classList.remove("blocked-alert");
+  fwBox.innerHTML = `<strong>Zero-Egress Firewall Armed:</strong> <code>contains_raw_data=false</code> schema guard active &mdash; waiting for optimization telemetry.`;
+}
+
+function resetPanelsForLoading(modelId) {
+  const shortModel = String(modelId || currentModelId()).split("/").pop();
+  document.getElementById("kpi-model-short").textContent = shortModel;
+  document.getElementById("kpi-ppl").innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>Searching…`;
+  document.getElementById("meta-stage-a").textContent = "Initializing dataset splits & Stage A parallel LoRA search…";
+  document.getElementById("kpi-train-speed").innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>Queued…`;
+  document.getElementById("meta-stage-b").textContent = "Waiting for Stage A winning LoRA recipe…";
+  document.getElementById("kpi-serve-speed").innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>Queued…`;
+  document.getElementById("meta-stage-c").textContent = "Waiting for Stage B training lock-in…";
+  document.getElementById("meta-stage-d").textContent = "Bundle updates automatically when stages complete…";
+
+  const curveBadge = document.getElementById("curve-badge");
+  curveBadge.textContent = "STREAMING SOON…";
+  curveBadge.className = "badge badge-amber";
+  document.getElementById("loss-chart-wrap").innerHTML = `
+    <div class="panel-loading-state">
+      <div class="spinner-ring"></div>
+      <div class="panel-state-title">Initializing GB10 Optimization Stream…</div>
+      <div class="panel-state-sub">Partitioning Train / Val / Sealed Test splits &amp; streaming live forward/backward loss curves in real time.</div>
+    </div>
+  `;
+  document.getElementById("loss-legend").innerHTML = "";
+
+  const utilBadge = document.getElementById("util-badge");
+  utilBadge.textContent = "WAITING ON STAGE A";
+  utilBadge.className = "badge badge-amber";
+  document.getElementById("train-bars").innerHTML = `
+    <div class="panel-loading-state">
+      <div class="spinner-ring"></div>
+      <div class="panel-state-title">Waiting for Stage A Recipe Lock-In…</div>
+      <div class="panel-state-sub">Stage B <code>sm_121</code> kernel &amp; Dual-GPU scaling bars will stream here live in real time once Stage A selects the optimal LoRA recipe.</div>
+    </div>
+  `;
+
+  document.querySelector("#serving-table tbody").innerHTML = `
+    <tr>
+      <td colspan="6" class="table-placeholder-cell">
+        <span class="spinner-ring spinner-ring-sm"></span>
+        Waiting for Stage B training lock-in &mdash; Stage C vLLM BF16 / FP8 / NVFP4 sweep runs next…
+      </td>
+    </tr>
+  `;
+
+  document.querySelector("#kernel-table tbody").innerHTML = `
+    <tr>
+      <td colspan="4" class="table-placeholder-cell">
+        <span class="spinner-ring spinner-ring-sm"></span>
+        Running <code>sm_121</code> numerical parity suite vs. FP32 PyTorch reference…
+      </td>
+    </tr>
+  `;
+
+  document.getElementById("advisor-rationales").innerHTML = `
+    <div class="inline-stream-spinner">
+      <span class="spinner-ring spinner-ring-sm"></span>
+      <span>Awaiting Stage A sanitized telemetry digest (<code>contains_raw_data=false</code>)…</span>
+    </div>
+  `;
+  const fwBox = document.getElementById("firewall-audit-box");
+  fwBox.classList.remove("blocked-alert");
+  fwBox.innerHTML = `<span class="spinner-ring spinner-ring-sm"></span><strong>Live Privacy Firewall Active:</strong> Inspecting outbound hyperparameter &amp; loss telemetry…`;
 }
 
 function renderLiveTelemetry(snap) {
   latestLiveSnap = snap;
   renderClientMachineBridge(snap.client_machine, snap.cluster_endpoint, snap.definition_id || currentTeamId());
-  document.getElementById("live-stage-label").textContent = snap.stage_label || "Ready";
+  document.getElementById("live-stage-label").textContent = !snap.user_triggered
+    ? "Ready — Click Tune on Fuzzball & Generate Local LLM to start live run"
+    : snap.stage_label || "Ready";
 
   const stBadge = document.getElementById("live-run-state");
-  const st = String(snap.state || "idle");
+  const st = !snap.user_triggered && snap.state === "completed" ? "idle" : String(snap.state || "idle");
   stBadge.textContent =
     st === "queued_for_gpu"
       ? `QUEUED ON FUZZBALL · ${snap.backend}`
+      : st === "idle"
+      ? `READY · IDLE`
       : `${st.toUpperCase()} · ${snap.backend}`;
   stBadge.className =
     st === "queued_for_gpu"
@@ -538,11 +943,15 @@ function renderLiveTelemetry(snap) {
   }
 
   const feed = document.getElementById("live-event-feed");
-  feed.innerHTML = (snap.events || [])
-    .slice()
-    .reverse()
-    .map((ev) => `<div class="event-line"><span class="ev-ts">[${ev.time_utc}]</span>${ev.message}</div>`)
-    .join("");
+  if (!snap.user_triggered) {
+    feed.innerHTML = `<div class="event-line"><span class="ev-ts">[READY]</span>Awaiting optimization run &mdash; select a model &amp; click Tune on Fuzzball &amp; Generate Local LLM.</div>`;
+  } else {
+    feed.innerHTML = (snap.events || [])
+      .slice()
+      .reverse()
+      .map((ev) => `<div class="event-line"><span class="ev-ts">[${ev.time_utc}]</span>${ev.message}</div>`)
+      .join("");
+  }
 
   renderDualGpuFabric(snap);
   renderRealtimeAnalysis(snap);
@@ -552,10 +961,27 @@ function renderLiveTelemetry(snap) {
     stopBtn.classList.toggle("hidden", !(st === "running" || st === "queued_for_gpu"));
   }
 
+  const serverPhase = snap.lifecycle_phase || (st === "running" || st === "queued_for_gpu" ? "running" : st === "completed" && snap.user_triggered ? "finished" : st === "failed" ? "failed" : "pre_run");
+  if (serverPhase === "running" || serverPhase === "pre_run" || serverPhase === "failed") {
+    renderLifecycleState(serverPhase, snap, latestSummary);
+  }
+
   if (st === "running" || st === "queued_for_gpu") {
     const activeTid = (snap.live_step_metrics && snap.live_step_metrics.trial_id) || "";
-    if (snap.live_curves && Object.keys(snap.live_curves).length > 0) {
+    const curveKeys = Object.keys(snap.live_curves || {}).filter(
+      (k) => Array.isArray(snap.live_curves[k]) && snap.live_curves[k].length > 1
+    );
+    if (curveKeys.length > 0) {
       renderLossSvg(snap.live_curves, snap.live_val_curves || {}, activeTid, snap.live_curve_equivalence || {});
+    } else {
+      document.getElementById("loss-chart-wrap").innerHTML = `
+        <div class="panel-loading-state">
+          <div class="spinner-ring"></div>
+          <div class="panel-state-title">${st === "queued_for_gpu" ? "Queued on Fuzzball Cluster…" : "Streaming First Optimization Step…"}</div>
+          <div class="panel-state-sub">${snap.stage_label || "Loading base weights & partitioning dataset splits…"}</div>
+        </div>
+      `;
+      document.getElementById("loss-legend").innerHTML = "";
     }
     renderIncrementalStagePanels(snap);
   }
@@ -564,6 +990,7 @@ function renderLiveTelemetry(snap) {
 function renderIncrementalStagePanels(snap) {
   const shortModel = String(snap.model_id || currentModelId()).split("/").pop();
   document.getElementById("kpi-model-short").textContent = shortModel;
+  const curStage = String(snap.current_stage || "");
 
   // 1. Live Curve Equivalence Badge
   const eq = snap.live_curve_equivalence || {};
@@ -572,12 +999,16 @@ function renderIncrementalStagePanels(snap) {
     const d = Number(eq.max_delta);
     const ok = eq.accepted !== false;
     curveBadge.textContent = ok
-      ? `Live Δ = ${d.toFixed(4)} (≤ 0.025 PASS)`
-      : `Live Δ = ${d.toFixed(4)} (> 0.025 DRIFT)`;
+      ? `LIVE Δ = ${d.toFixed(4)} (≤ 0.025 PASS)`
+      : `LIVE Δ = ${d.toFixed(4)} (> 0.025 DRIFT)`;
     curveBadge.className = ok ? "badge badge-green" : "badge badge-amber";
-  } else if (snap.current_stage === "stage_a_recipe") {
-    curveBadge.textContent = `Stage A Live Val Curves (${Object.keys(snap.live_curves || {}).length} trials)`;
-    curveBadge.className = "badge";
+  } else if (curStage === "stage_a_recipe") {
+    const nCurves = Object.keys(snap.live_curves || {}).length;
+    curveBadge.textContent = nCurves > 0 ? `LIVE STAGE A (${nCurves} trial curves)` : "LOADING STAGE A…";
+    curveBadge.className = "badge badge-accent";
+  } else {
+    curveBadge.textContent = "INITIALIZING…";
+    curveBadge.className = "badge badge-amber";
   }
 
   // 2. Stage A Live Funnel Card
@@ -586,19 +1017,23 @@ function renderIncrementalStagePanels(snap) {
     document.getElementById("kpi-ppl").textContent = `${Number(saLive.base_perplexity).toFixed(3)} → ${Number(saLive.best_perplexity).toFixed(3)}`;
     document.getElementById("meta-stage-a").textContent =
       `Leading: ${saLive.best_trial_id} · Val ${Number(saLive.best_val_loss).toFixed(3)} (${saLive.trials_completed} trial(s) done)`;
-  } else if (snap.current_stage === "stage_a_recipe") {
-    document.getElementById("meta-stage-a").textContent = "Running parallel Successive Halving rungs…";
+  } else {
+    document.getElementById("kpi-ppl").innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>Searching…`;
+    document.getElementById("meta-stage-a").textContent = "Running parallel Successive Halving LoRA rungs…";
   }
 
-  // 3. Stage B Live Throughput Waterfall + Funnel Card
+  // 3. Stage B & Continuous Teacher Live Throughput Waterfall + Funnel Card
   const sbList = (snap.live_stage_b_outcomes || []).slice();
   const activeStep = snap.live_step_metrics || {};
-  if (activeStep.trial_id && String(activeStep.trial_id).startsWith("stageb-")) {
-    const alreadyDone = sbList.some((o) => o.trial_id === activeStep.trial_id);
+  const activeTid = String(activeStep.trial_id || "");
+  if (activeTid && (activeTid.startsWith("stageb-") || activeTid.startsWith("teacher-"))) {
+    const alreadyDone = sbList.some((o) => o.trial_id === activeTid);
     if (!alreadyDone) {
-      const lbl = String(activeStep.trial_id).split("-").slice(2).join("-") || activeStep.trial_id;
+      const lbl = activeTid.startsWith("stageb-")
+        ? activeTid.split("-").slice(2).join("-") || activeTid
+        : activeTid;
       sbList.push({
-        trial_id: activeStep.trial_id,
+        trial_id: activeTid,
         label: lbl,
         in_progress: true,
         accepted: activeStep.live_curve_delta == null || Number(activeStep.live_curve_delta) <= 0.025,
@@ -612,6 +1047,8 @@ function renderIncrementalStagePanels(snap) {
       });
     }
   }
+
+  const utilBadge = document.getElementById("util-badge");
   if (sbList.length > 0) {
     const baseTok = Math.max(sbList[0].summary.mean_tokens_per_sec, 1);
     const acceptedDone = sbList.filter((o) => !o.in_progress && o.accepted);
@@ -623,19 +1060,25 @@ function renderIncrementalStagePanels(snap) {
     document.getElementById("kpi-train-speed").textContent =
       `${Math.round(bestOut.summary.mean_tokens_per_sec).toLocaleString()} tok/s (${speedup}x)`;
     document.getElementById("meta-stage-b").textContent =
-      `Live Stage B (${sbList.filter((x) => !x.in_progress).length} swept) · Best: ${bestOut.label}`;
-    document.getElementById("util-badge").textContent =
-      `${Number(bestOut.summary.hardware_utilization_pct || 0).toFixed(1)}% Cluster Peak`;
+      `Streaming live (${sbList.filter((x) => !x.in_progress).length} completed) · Leading: ${bestOut.label}`;
+    utilBadge.textContent = `LIVE · ${Number(bestOut.summary.hardware_utilization_pct || 0).toFixed(1)}% Peak`;
+    utilBadge.className = "badge badge-accent";
 
     const maxTok = Math.max(...sbList.map((o) => o.summary.mean_tokens_per_sec), 1);
-    document.getElementById("train-bars").innerHTML = sbList
+    const barsHtml = sbList
       .map((o) => {
         const tok = o.summary.mean_tokens_per_sec;
         const pct = Math.max(6, (tok / maxTok) * 100).toFixed(1);
         const isWin = !o.in_progress && o.trial_id === bestOut.trial_id && o.accepted;
-        const cls = !o.accepted ? "bar-fill bar-fill-rejected" : isWin ? "bar-fill bar-fill-winner" : "bar-fill";
+        const cls = o.in_progress
+          ? "bar-fill bar-fill-running"
+          : !o.accepted
+          ? "bar-fill bar-fill-rejected"
+          : isWin
+          ? "bar-fill bar-fill-winner"
+          : "bar-fill";
         const statusTag = o.in_progress
-          ? `<span class="tag-ok">RUNNING (Δ ${o.max_loss_curve_delta.toFixed(4)})</span>`
+          ? `<span class="tag-ok"><span class="spinner-ring spinner-ring-sm"></span>STREAMING (Δ ${o.max_loss_curve_delta.toFixed(4)})</span>`
           : o.accepted
           ? isWin
             ? `<span class="tag-ok">LEADING</span>`
@@ -652,6 +1095,24 @@ function renderIncrementalStagePanels(snap) {
         `;
       })
       .join("");
+    const moreStreaming =
+      (curStage === "stage_b_training_perf" || curStage === "continuous_teacher_loop") &&
+      !sbList.some((o) => o.in_progress)
+        ? `<div class="inline-stream-spinner"><span class="spinner-ring spinner-ring-sm"></span><span>Dispatching next ${curStage === "continuous_teacher_loop" ? "Remote-Teacher mutation" : "Stage B kernel/DDP"} trial…</span></div>`
+        : "";
+    document.getElementById("train-bars").innerHTML = barsHtml + moreStreaming;
+  } else {
+    document.getElementById("kpi-train-speed").innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>After Stage A…`;
+    document.getElementById("meta-stage-b").textContent = "Waiting for Stage A recipe lock-in before kernel & DDP sweep…";
+    utilBadge.textContent = "WAITING ON STAGE A";
+    utilBadge.className = "badge badge-amber";
+    document.getElementById("train-bars").innerHTML = `
+      <div class="panel-loading-state">
+        <div class="spinner-ring"></div>
+        <div class="panel-state-title">Stage A Recipe Search Running…</div>
+        <div class="panel-state-sub">Stage B <code>sm_121</code> kernel &amp; 2-GPU scaling waterfall streams live right after Stage A locks in the winning LoRA recipe.</div>
+      </div>
+    `;
   }
 
   // 4. Stage C Live Serving Sweep Table + Funnel Card
@@ -668,7 +1129,7 @@ function renderIncrementalStagePanels(snap) {
       `${Math.round(bestSrv.throughput_tokens_per_sec).toLocaleString()} tok/s (${srvSpeedup}x)`;
     document.getElementById("meta-stage-c").textContent =
       `Live Stage C (${scList.length} swept) · Leading: ${bestSrv.label}`;
-    document.querySelector("#serving-table tbody").innerHTML = scList
+    const rowsHtml = scList
       .map((s) => {
         const isWin = s.label === bestSrv.label && s.accepted;
         const badge = s.accepted
@@ -687,16 +1148,67 @@ function renderIncrementalStagePanels(snap) {
         `;
       })
       .join("");
+    const tailSpinner =
+      curStage === "stage_c_inference_perf"
+        ? `<tr><td colspan="6" class="table-placeholder-cell"><span class="spinner-ring spinner-ring-sm"></span>Benchmarking next vLLM precision &amp; tensor-parallel topology on Sealed Test Split…</td></tr>`
+        : "";
+    document.querySelector("#serving-table tbody").innerHTML = rowsHtml + tailSpinner;
+  } else {
+    document.getElementById("kpi-serve-speed").innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>After Stage B…`;
+    document.getElementById("meta-stage-c").textContent =
+      curStage === "stage_c_inference_perf"
+        ? "Launching vLLM BF16 / FP8 / NVFP4 benchmarks on Sealed Test Split…"
+        : "Waiting for Stage B training lock-in before vLLM serving sweep…";
+    document.querySelector("#serving-table tbody").innerHTML = `
+      <tr>
+        <td colspan="6" class="table-placeholder-cell">
+          <span class="spinner-ring spinner-ring-sm"></span>
+          ${
+            curStage === "stage_c_inference_perf"
+              ? "Benchmarking first vLLM BF16 baseline replica on Sealed Test Split…"
+              : "Waiting for Stage B training lock-in &mdash; Stage C vLLM BF16 / FP8 / NVFP4 sweep streams next…"
+          }
+        </td>
+      </tr>
+    `;
   }
 
-  // 5. Live Advisor Rationales & Firewall Audit Stream
+  // 5. Live Custom sm_121 Kernel Parity Table
+  const liveKernels = snap.live_kernels || [];
+  if (liveKernels.length > 0) {
+    document.querySelector("#kernel-table tbody").innerHTML = liveKernels
+      .map(
+        (k) => `
+        <tr>
+          <td><code>${k.kernel_name}</code></td>
+          <td><code>${Number(k.max_abs_error).toExponential(2)}</code></td>
+          <td>${Number(k.memory_reduction_ratio).toFixed(2)}&times;</td>
+          <td><span class="tag-ok">${k.correctness_passed ? "PASS" : "FAIL"}</span></td>
+        </tr>
+      `
+      )
+      .join("");
+  } else {
+    document.querySelector("#kernel-table tbody").innerHTML = `
+      <tr>
+        <td colspan="4" class="table-placeholder-cell">
+          <span class="spinner-ring spinner-ring-sm"></span>
+          Verifying custom <code>sm_121</code> kernel numerical parity vs. FP32 PyTorch…
+        </td>
+      </tr>
+    `;
+  }
+
+  // 6. Live Advisor Rationales & Firewall Audit Stream
   if (Array.isArray(snap.live_firewall) && snap.live_firewall.length > 0) {
     const exps = snap.live_firewall.filter((f) => f.explanation && f.explanation.rationale);
-    if (exps.length > 0) {
-      document.getElementById("advisor-rationales").innerHTML = exps
-        .map((f) => `<div class="advisor-item"><strong>[${f.explanation.stage}]</strong> ${f.explanation.rationale}</div>`)
-        .join("");
-    }
+    const itemsHtml = exps
+      .map((f) => `<div class="advisor-item"><strong>[${f.explanation.stage}]</strong> ${f.explanation.rationale}</div>`)
+      .join("");
+    document.getElementById("advisor-rationales").innerHTML =
+      itemsHtml +
+      `<div class="inline-stream-spinner"><span class="spinner-ring spinner-ring-sm"></span><span>Streaming next stage / Remote-Teacher firewalled audit…</span></div>`;
+
     const lastRec = snap.live_firewall[snap.live_firewall.length - 1].record || {};
     const sha = String(lastRec.payload_sha256 || "").slice(0, 16);
     const fwBox = document.getElementById("firewall-audit-box");
@@ -704,6 +1216,13 @@ function renderIncrementalStagePanels(snap) {
     fwBox.innerHTML =
       `<strong>Live Privacy Firewall Stream:</strong> ${snap.live_firewall.length} stage payload(s) verified &middot; ` +
       `<code>contains_raw_data=false</code> &middot; Latest SHA-256: <code>${sha}…</code>`;
+  } else {
+    document.getElementById("advisor-rationales").innerHTML = `
+      <div class="inline-stream-spinner">
+        <span class="spinner-ring spinner-ring-sm"></span>
+        <span>Waiting for Stage A completion to audit &amp; emit first advisor rationale…</span>
+      </div>
+    `;
   }
 }
 
@@ -711,7 +1230,12 @@ function renderLossSvg(curves, valCurves = {}, activeTrialId = "", liveEq = {}) 
   const wrap = document.getElementById("loss-chart-wrap");
   const legend = document.getElementById("loss-legend");
   const allKeys = Object.keys(curves).filter((k) => Array.isArray(curves[k]) && curves[k].length > 1);
-  const stageBKeys = allKeys.filter((k) => k.startsWith("stageb-")).sort();
+  // Include Continuous Teacher trial curves in renderLossSvg too!
+  const stageBKeys = allKeys.filter((k) => k.startsWith("stageb-") || k.startsWith("teacher-")).sort((a, b) => {
+    const aIsB = a.startsWith("stageb-") ? 0 : 1;
+    const bIsB = b.startsWith("stageb-") ? 0 : 1;
+    return aIsB !== bIsB ? aIsB - bIsB : a.localeCompare(b);
+  });
 
   const active = [];
   if (stageBKeys.length > 0) {
@@ -724,25 +1248,31 @@ function renderLossSvg(curves, valCurves = {}, activeTrialId = "", liveEq = {}) 
       src: curves,
     });
 
-    // Include currently running Stage B candidate live as steps arrive!
+    // Include currently running Stage B / Teacher candidate live as steps arrive!
     if (activeTrialId && activeTrialId !== refKey && Array.isArray(curves[activeTrialId]) && curves[activeTrialId].length > 1) {
       const drifting = liveEq && liveEq.accepted === false;
+      const cleanName = activeTrialId.startsWith("stageb-")
+        ? activeTrialId.split("-").slice(2).join("-")
+        : activeTrialId;
       active.push({
         key: activeTrialId,
-        label: `Live: ${activeTrialId.split("-").slice(2).join("-")} (streaming)`,
+        label: `Live: ${cleanName} (streaming)`,
         color: drifting ? "#f87171" : "#a3e635",
         dash: "5,3",
         src: curves,
       });
     } else {
-      // Otherwise show best accepted Stage B winner + any rejected drift curve (works for both 1-node & 2-node models)
+      // Otherwise show best accepted Stage B / Teacher winner + any rejected drift curve
       const otherB = stageBKeys.slice(1);
       const driftKey = otherB.find((k) => k.includes("oversized"));
       const bestAcceptedKey = otherB.filter((k) => k !== driftKey).pop();
       if (bestAcceptedKey) {
+        const cleanBest = bestAcceptedKey.startsWith("stageb-")
+          ? bestAcceptedKey.split("-").slice(2).join("-")
+          : bestAcceptedKey;
         active.push({
           key: bestAcceptedKey,
-          label: `${bestAcceptedKey.split("-").slice(2).join("-")} (Accepted)`,
+          label: `${cleanBest} (Accepted)`,
           color: "#a3e635",
           dash: "5,3",
           src: curves,
@@ -849,8 +1379,10 @@ function renderDashboard(data) {
 
   document.getElementById("curve-badge").textContent =
     `Winner Δ = ${winTrainOut.max_loss_curve_delta.toFixed(4)} (≤ 0.025)`;
+  document.getElementById("curve-badge").className = "badge badge-green";
   document.getElementById("util-badge").textContent =
     `${winTrainOut.summary.hardware_utilization_pct.toFixed(1)}% Cluster Peak`;
+  document.getElementById("util-badge").className = "badge badge-green";
 
   renderLossSvg(data.trial_loss_curves || {});
 
@@ -977,24 +1509,57 @@ async function runPlaygroundSample(executeOnCluster = false) {
   }
 }
 
+async function handleLiveSnapUpdate(snap) {
+  renderLiveTelemetry(snap);
+  const wasActive = lastObservedRunState === "running" || lastObservedRunState === "queued_for_gpu";
+  if (wasActive && snap.state === "completed") {
+    lastObservedRunState = snap.state;
+    stopActivePollLoop();
+    const summary = await fetchJson("/api/summary");
+    renderDashboard(summary);
+    renderLifecycleState("finished", snap, summary);
+    await refreshBuildPreview();
+    await runPlaygroundSample(false);
+    document.getElementById("btn-run").disabled = false;
+    document.getElementById("btn-run").textContent = "Tune on Fuzzball & Generate Local LLM";
+    return;
+  }
+  if (snap.state === "failed") {
+    lastObservedRunState = snap.state;
+    stopActivePollLoop();
+    renderLifecycleState("failed", snap, latestSummary);
+    document.getElementById("btn-run").disabled = false;
+    document.getElementById("btn-run").textContent = "Tune on Fuzzball & Generate Local LLM";
+    return;
+  }
+  if (snap.state === "running" || snap.state === "queued_for_gpu") {
+    ensureActivePollLoop();
+  }
+  lastObservedRunState = snap.state;
+}
+
+function ensureActivePollLoop() {
+  if (activePollTimer) return;
+  activePollTimer = setInterval(async () => {
+    try {
+      const snap = await fetchJson("/api/live-status");
+      await handleLiveSnapUpdate(snap);
+    } catch (_) {}
+  }, 650);
+}
+
+function stopActivePollLoop() {
+  if (activePollTimer) {
+    clearInterval(activePollTimer);
+    activePollTimer = null;
+  }
+}
+
 function connectLiveStream() {
   const es = new EventSource("/api/events");
-  let prevState = null;
   es.onmessage = async (msg) => {
     const snap = JSON.parse(msg.data);
-    renderLiveTelemetry(snap);
-    if ((prevState === "running" || prevState === "queued_for_gpu") && snap.state === "completed") {
-      const summary = await fetchJson("/api/summary");
-      renderDashboard(summary);
-      await refreshBuildPreview();
-      await runPlaygroundSample();
-      document.getElementById("btn-run").disabled = false;
-      document.getElementById("btn-run").textContent = "Tune on Fuzzball & Generate Local LLM";
-    } else if (snap.state === "failed") {
-      document.getElementById("btn-run").disabled = false;
-      document.getElementById("btn-run").textContent = "Tune on Fuzzball & Generate Local LLM";
-    }
-    prevState = snap.state;
+    await handleLiveSnapUpdate(snap);
   };
 }
 
@@ -1003,8 +1568,10 @@ document.getElementById("company-name-input").addEventListener("input", () => {
   syncCompanyBranding();
 });
 document.getElementById("company-name-input").addEventListener("change", () => {
-  refreshBuildPreview();
-  runPlaygroundSample(false);
+  if (currentLifecyclePhase === "finished") {
+    refreshBuildPreview();
+    runPlaygroundSample(false);
+  }
 });
 
 document.getElementById("model-id-input").addEventListener("change", (e) => {
@@ -1100,6 +1667,8 @@ document.getElementById("btn-run").addEventListener("click", async () => {
 
   btn.disabled = true;
   btn.textContent = `Tuning (${backend})…`;
+  resetPanelsForLoading(modelId);
+  renderLifecycleState("running", { current_stage: "starting", stage_label: `Synthesizing Remote Teacher Train/Val/Test SFT splits & launching ${modelId}…` }, null);
   const resp = await fetch("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1122,14 +1691,39 @@ document.getElementById("btn-run").addEventListener("click", async () => {
     btn.disabled = false;
     btn.textContent = "Tune on Fuzzball & Generate Local LLM";
     const err = await resp.json();
+    const errMsg = err.detail || "Failed to start optimization";
+    renderLifecycleState("failed", { error: errMsg }, null);
     const errBanner = document.getElementById("live-error-banner");
-    errBanner.textContent = err.detail || "Failed to start optimization";
+    errBanner.textContent = errMsg;
     errBanner.classList.remove("hidden");
+  } else {
+    lastObservedRunState = "running";
+    ensureActivePollLoop();
   }
 });
 
-document.getElementById("btn-run-playground").addEventListener("click", () => runPlaygroundSample(false));
-document.getElementById("btn-run-cluster-copilot").addEventListener("click", () => runPlaygroundSample(true));
+document.getElementById("btn-jump-output").addEventListener("click", () => {
+  const outEl = document.getElementById("output-readiness-banner");
+  if (outEl) outEl.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+["btn-top-download", "btn-card-download"].forEach((dlId) => {
+  const el = document.getElementById(dlId);
+  if (!el) return;
+  el.addEventListener("click", (ev) => {
+    if (currentLifecyclePhase !== "finished") {
+      ev.preventDefault();
+      document.getElementById("btn-run").scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+});
+
+document.getElementById("btn-run-playground").addEventListener("click", () => {
+  if (currentLifecyclePhase === "finished") runPlaygroundSample(false);
+});
+document.getElementById("btn-run-cluster-copilot").addEventListener("click", () => {
+  if (currentLifecyclePhase === "finished") runPlaygroundSample(true);
+});
 
 document.getElementById("btn-probe").addEventListener("click", async () => {
   const resp = await fetch("/api/firewall-probe", {
@@ -1170,8 +1764,22 @@ document.getElementById("btn-copy-yaml").addEventListener("click", async () => {
     fetchJson("/api/summary"),
     fetchJson("/api/live-status"),
   ]);
-  renderDashboard(summary);
-  renderLiveTelemetry(liveSnap);
-  await refreshBuildPreview();
-  setTimeout(connectLiveStream, 350);
+  lastObservedRunState = !liveSnap.user_triggered ? "idle" : String(liveSnap.state || "idle");
+  if (liveSnap.user_triggered && (liveSnap.state === "running" || liveSnap.state === "queued_for_gpu")) {
+    resetPanelsForLoading(liveSnap.model_id);
+    renderLiveTelemetry(liveSnap);
+    renderLifecycleState("running", liveSnap, null);
+    ensureActivePollLoop();
+  } else if (liveSnap.user_triggered && liveSnap.state === "completed") {
+    renderDashboard(summary);
+    renderLiveTelemetry(liveSnap);
+    renderLifecycleState("finished", liveSnap, summary);
+    await refreshBuildPreview();
+    await runPlaygroundSample(false);
+  } else {
+    renderEmptyPanelsBeforeRun(summary);
+    renderLiveTelemetry(liveSnap);
+    renderLifecycleState("pre_run", liveSnap, null);
+  }
+  setTimeout(connectLiveStream, 250);
 })();

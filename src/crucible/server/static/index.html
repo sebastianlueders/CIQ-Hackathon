@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Alchemy Client Studio — Fuzzball Remote GPU Server &amp; Local LLM Forge</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261115f" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261115j" />
 </head>
 <body>
   <!-- ENTERPRISE CLIENT WORKSTATION HEADER -->
@@ -15,7 +15,7 @@
         <div class="brand-title-row">
           <h1>Alchemy</h1>
           <span class="badge badge-accent">Enterprise Client Studio</span>
-          <span class="badge">Client UI &harr; Fuzzball GPU Server</span>
+          <span class="lifecycle-top-pill lifecycle-pill-prerun" id="header-lifecycle-pill">STATE: PRE-RUN</span>
         </div>
         <p class="subtitle">
           Run on your business workstation &middot; Dispatch private LoRA &amp; <code>sm_121</code> kernel optimization to your remote CIQ Fuzzball 2&times;GB10 server &middot; Receive a turnkey local LLM build.
@@ -31,12 +31,52 @@
     </div>
 
     <div class="actions">
-      <a href="/api/build/bundle.zip" id="btn-top-download" class="btn btn-download" download>Download Local LLM Build (.zip)</a>
+      <a href="/api/build/bundle.zip" id="btn-top-download" class="btn btn-download btn-locked" aria-disabled="true">Output Locked (Pre-Run)</a>
       <button id="btn-probe" class="btn btn-outline" title="Simulate a raw code exfiltration attempt and verify the local schema firewall blocks it">Verify Zero-Leak Guard</button>
     </div>
   </header>
 
   <main class="container">
+    <!-- 3-STATE PROCESS LIFECYCLE & OUTPUT READINESS STEPPER (PRE-RUN -> RUNNING -> FINISHED) -->
+    <section class="lifecycle-banner lifecycle-prerun" id="lifecycle-banner" aria-live="polite">
+      <div class="lifecycle-top-row">
+        <div class="lifecycle-copy">
+          <div class="lifecycle-badge-row">
+            <span class="lifecycle-state-chip" id="lifecycle-state-chip">STEP 1 OF 3 &middot; PRE-RUN</span>
+            <span class="lifecycle-teacher-chip" id="lifecycle-teacher-chip">Teacher SFT Splits Ready on Launch</span>
+          </div>
+          <h2 class="lifecycle-headline" id="lifecycle-headline">Pre-Run: Configure Model, Upload Private Data &amp; Click &ldquo;Tune on Fuzzball &amp; Generate Local LLM&rdquo;</h2>
+          <p class="lifecycle-sub" id="lifecycle-sub">Final output is locked until optimization runs. Your uploaded corpus will be partitioned by the Remote Teacher into leak-free Train (80%), Val (10%), and Test (10%) teaching pairs.</p>
+        </div>
+
+        <div class="lifecycle-cta-group" id="lifecycle-cta-group">
+          <button type="button" id="btn-jump-output" class="btn btn-primary btn-sm hidden">Jump to Tuned Output &darr;</button>
+          <a href="/api/build/bundle.zip" id="btn-banner-download" class="btn btn-download btn-sm hidden" download>Download Ready .zip</a>
+        </div>
+      </div>
+
+      <div class="lifecycle-stepper">
+        <div class="lc-step lc-step-active" id="lc-step-prerun">
+          <span class="lc-num">1</span>
+          <span><strong>PRE-RUN</strong> &middot; Select Model &amp; Upload Data</span>
+        </div>
+        <div class="lc-arrow">&rarr;</div>
+        <div class="lc-step" id="lc-step-running">
+          <span class="lc-num">2</span>
+          <span><strong>RUNNING</strong> &middot; Teacher Train/Val/Test SFT &amp; GB10 Tuning</span>
+        </div>
+        <div class="lc-arrow">&rarr;</div>
+        <div class="lc-step" id="lc-step-finished">
+          <span class="lc-num">3</span>
+          <span><strong>FINISHED</strong> &middot; Tuned Copilot &amp; .zip Output Ready</span>
+        </div>
+      </div>
+
+      <div class="lifecycle-progress-track">
+        <div class="lifecycle-progress-fill" id="lifecycle-progress-fill" style="width: 8%"></div>
+      </div>
+    </section>
+
     <!-- CLIENT WORKSTATION <-> FUZZBALL CLUSTER BRIDGE BANNER -->
     <section class="panel topology-bridge-panel">
       <div class="bridge-grid">
@@ -464,14 +504,14 @@
         <div class="stage-meta" id="meta-stage-c">Loading serving configs...</div>
       </article>
 
-      <article class="stage-card stage-card-highlight">
+      <article class="stage-card stage-card-highlight" id="stage-d-card">
         <div class="stage-header">
           <span class="stage-tag">STAGE D &middot; CLIENT LLM BUILD</span>
-          <span class="stage-status status-ok">Ready for Client</span>
+          <span class="stage-status" id="stage-d-status-pill">Pre-Run &middot; Locked</span>
         </div>
-        <div class="metric-big" id="kpi-dag">Local + Fuzzball</div>
+        <div class="metric-big" id="kpi-dag">Awaiting Run</div>
         <div class="metric-label">Tuned for <code id="kpi-model-short">Qwen3-Coder-30B-A3B</code></div>
-        <div class="stage-meta" id="meta-stage-d">Includes Ollama Modelfile + vLLM + Fuzzfile</div>
+        <div class="stage-meta" id="meta-stage-d">Unlocks once Teacher SFT + Stages A/B/C finish</div>
       </article>
     </section>
 
@@ -549,8 +589,18 @@
       </div>
     </section>
 
-    <!-- FINAL RESULT: BRANDED ENTERPRISE PRIVATE AI COPILOT + DEPLOYABLE .ZIP INSPECTOR -->
-    <section class="grid-two" id="final-copilot-section">
+    <!-- OUTPUT READINESS CALLOUT + FINAL RESULT: BRANDED ENTERPRISE PRIVATE AI COPILOT & DEPLOYABLE .ZIP -->
+    <section class="output-readiness-banner output-banner-prerun" id="output-readiness-banner">
+      <div class="output-banner-left">
+        <span class="output-state-tag" id="output-state-tag">PRE-RUN &middot; OUTPUT NOT READY YET</span>
+        <div class="output-banner-text" id="output-banner-text">
+          Start an optimization run above to generate your tuned LoRA adapter, Teacher SFT splits, Private Copilot, and downloadable <code>.zip</code> bundle.
+        </div>
+      </div>
+      <span class="badge" id="output-ready-pill">LOCKED UNTIL FINISHED</span>
+    </section>
+
+    <section class="grid-two output-section-locked" id="final-copilot-section">
       <div class="panel playground-panel">
         <div class="copilot-brand-bar">
           <div class="copilot-brand-left">
@@ -561,7 +611,7 @@
               <p class="panel-sub" id="copilot-model-sub">Powered by <code>Qwen3-Coder-30B-A3B</code> + Tuned LoRA &middot; Zero Cloud Data Egress</p>
             </div>
           </div>
-          <span class="badge badge-green" id="copilot-exec-badge">READY</span>
+          <span class="badge" id="copilot-exec-badge">PRE-RUN &middot; LOCKED</span>
         </div>
 
         <div class="copilot-prompt-bar">
@@ -572,18 +622,18 @@
             value="Write a SIMD-friendly neighbor-bin loop for a cutoff molecular dynamics force kernel."
             aria-label="Test Prompt"
           />
-          <button id="btn-run-cluster-copilot" class="btn btn-primary btn-sm" title="Submit prompt to your live CIQ Fuzzball GB10 GPU and compare untuned vs tuned output">Run Live on Fuzzball GPU</button>
-          <button id="btn-run-playground" class="btn btn-outline btn-sm" title="Instant preview comparison">Instant Preview</button>
+          <button id="btn-run-cluster-copilot" class="btn btn-primary btn-sm" disabled title="Unlocks automatically when optimization finishes">Run Live on Fuzzball GPU</button>
+          <button id="btn-run-playground" class="btn btn-outline btn-sm" disabled title="Unlocks automatically when optimization finishes">Instant Preview</button>
         </div>
 
         <div class="playground-compare">
           <div class="pg-col">
             <div class="sub-kicker">UNTUNED BASE MODEL</div>
-            <pre class="pg-code" id="pg-base-out">Click "Run Live on Fuzzball GPU" (or "Instant Preview") to compare base vs. tuned output…</pre>
+            <pre class="pg-code" id="pg-base-out">Awaiting optimization run completion…</pre>
           </div>
           <div class="pg-col pg-col-tuned">
             <div class="sub-kicker" style="color:#a3e635;" id="pg-tuned-kicker">APEX DYNAMICS TUNED PRIVATE COPILOT</div>
-            <pre class="pg-code" id="pg-tuned-out">Ready to query tuned adapter…</pre>
+            <pre class="pg-code" id="pg-tuned-out">Output unlocks automatically as soon as your tuning run reaches FINISHED.</pre>
           </div>
         </div>
       </div>
@@ -596,7 +646,7 @@
             <h2 id="build-title">Apex Dynamics LLM Package (<code id="inspector-model-label">Qwen/Qwen3-Coder-30B-A3B-Instruct</code>)</h2>
             <p class="panel-sub" id="build-subtitle">Unzip &amp; run <code>python3 scripts/run_company_app.py</code> on your laptop to launch this exact branded app backed by Fuzzball GPUs!</p>
           </div>
-          <a href="/api/build/bundle.zip" id="btn-card-download" class="btn btn-download btn-sm" download>Download .zip</a>
+          <a href="/api/build/bundle.zip" id="btn-card-download" class="btn btn-download btn-sm btn-locked" aria-disabled="true">Output Locked</a>
         </div>
         <div class="unzip-quickstart">
           <span>Unzip &amp; Launch Locally:</span>
@@ -604,6 +654,7 @@
         </div>
         <div class="yaml-controls">
           <button data-artifact="scripts/run_company_app.py" class="btn btn-outline btn-sm artifact-tab active-tab">run_company_app.py</button>
+          <button data-artifact="data/teacher_sft_train.jsonl" class="btn btn-outline btn-sm artifact-tab">teacher_sft_train.jsonl</button>
           <button data-artifact="fuzzfile.yaml" class="btn btn-outline btn-sm artifact-tab">fuzzfile.yaml</button>
           <button data-artifact="Modelfile.ollama" class="btn btn-outline btn-sm artifact-tab">Modelfile.ollama</button>
           <button data-artifact="scripts/client_query_llm.py" class="btn btn-outline btn-sm artifact-tab">client_query_llm.py</button>
@@ -611,11 +662,11 @@
           <button data-artifact="BUILD_REPORT.md" class="btn btn-outline btn-sm artifact-tab">BUILD_REPORT.md</button>
           <button id="btn-copy-yaml" class="btn btn-outline btn-sm">Copy</button>
         </div>
-        <pre class="code-viewer" id="yaml-viewer">Loading build package...</pre>
+        <pre class="code-viewer" id="yaml-viewer">Awaiting optimization run completion to finalize turnkey artifacts…</pre>
       </div>
     </section>
   </main>
 
-  <script src="/static/app.js?v=20261115f"></script>
+  <script src="/static/app.js?v=20261115j" ></script>
 </body>
 </html>

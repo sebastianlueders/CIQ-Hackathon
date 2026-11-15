@@ -247,9 +247,10 @@ class FirewalledLLMAdvisor:
                 f"micro_batch={new_mb} across {target_nodes}x GB10 DDP while holding global batch=16 for loss parity."
             )
         elif strategy == 2:
-            # Fine LR + context window refinement
+            # Fine LR + 4k context window refinement (enable activation checkpointing so 4k seq fits cleanly in VRAM)
             nudged_lr = round(max(8e-5, min(3e-4, best_r.lr * 0.88)), 6)
             new_rank = 48 if best_r.lora_rank < 48 else 64
+            safe_4k_mb = min(4, best_p.micro_batch_size)
             rec = RecipeCandidate(
                 lr=nudged_lr,
                 lora_rank=new_rank,
@@ -259,7 +260,12 @@ class FirewalledLLMAdvisor:
                 seq_len=4096 if best_r.seq_len <= 2048 else best_r.seq_len,
             )
             perf = best_p.model_copy(
-                update={"label": f"teacher-r{round_idx}-ctx4k-rk{new_rank}"}
+                update={
+                    "label": f"teacher-r{round_idx}-ctx4k-rk{new_rank}",
+                    "micro_batch_size": safe_4k_mb,
+                    "grad_accum_steps": max(1, 16 // max(1, best_p.nodes * safe_4k_mb)),
+                    "activation_checkpointing": True,
+                }
             )
             why = (
                 f"Teacher Round {round_idx} (Long-Context Intelligence): extended sequence window to {rec.seq_len} "

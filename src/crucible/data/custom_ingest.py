@@ -32,6 +32,7 @@ from crucible.data.lammps_ingest import (
     build_encoder,
     pack_split_chunks,
 )
+from crucible.data.teacher_curriculum import synthesize_teacher_curriculum
 
 TEXT_AND_CODE_EXTENSIONS = frozenset(
     {
@@ -338,20 +339,28 @@ def ingest_universal_dataset(
     vocab_size: int = 151936,
     hf_model_dir: Path | None = None,
 ) -> tuple[DatasetManifest, str]:
-    """Ingest any code/JSONL/CSV/text corpus into `train.jsonl`, `val.jsonl`, and sealed `held_out.jsonl`."""
+    """Ingest any code/JSONL/CSV/text corpus into leak-free Teacher SFT + packed `train`/`val`/`test` splits."""
     docs, format_summary = discover_universal_documents(source_root)
     splits = assign_whole_file_splits(docs, split_cfg)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Synthesize split-isolated Remote Teacher SFT instruction/reasoning/response pairs
+    teacher_docs, teacher_summary = synthesize_teacher_curriculum(
+        splits=splits,
+        output_dir=output_dir,
+        dataset_name=split_cfg.name,
+    )
     encode_fn = build_encoder(vocab_size=vocab_size, hf_model_dir=hf_model_dir)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     split_chunk_counts: dict[str, int] = {}
     split_lexeme_counts: dict[str, int] = {}
 
     hasher = hashlib.sha256()
     for split_name in ("train", "val", "held_out"):
+        combined_docs = list(splits[split_name]) + list(teacher_docs.get(split_name, []))
         chunks, lex_count = pack_split_chunks(
             split_name=split_name,
-            docs=splits[split_name],
+            docs=combined_docs,
             encode_fn=encode_fn,
             seq_len=split_cfg.chunk_seq_len,
             overlap=split_cfg.chunk_overlap,
@@ -364,6 +373,10 @@ def ingest_universal_dataset(
                 line = json.dumps(asdict(ch), sort_keys=True)
                 hasher.update(line.encode("utf-8"))
                 fh.write(line + "\n")
+
+    held_out_file = output_dir / "held_out.jsonl"
+    if held_out_file.exists():
+        (output_dir / "test.jsonl").write_bytes(held_out_file.read_bytes())
 
     held_out_sources_path = output_dir / "held_out_documents.jsonl"
     with held_out_sources_path.open("w", encoding="utf-8") as fh:
@@ -385,8 +398,10 @@ def ingest_universal_dataset(
         manifest_sha256=hasher.hexdigest(),
         raw_data_export_permitted=False,
     )
+    manifest_payload = asdict(manifest)
+    manifest_payload["teacher_curriculum"] = teacher_summary
     (output_dir / "dataset_manifest.json").write_text(
-        json.dumps(asdict(manifest), indent=2, sort_keys=True),
+        json.dumps(manifest_payload, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     return manifest, format_summary

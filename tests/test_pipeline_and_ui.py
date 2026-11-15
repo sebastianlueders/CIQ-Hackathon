@@ -16,6 +16,7 @@ from crucible.config import (
     repo_root,
 )
 from crucible.data.lammps_ingest import ingest_lammps_corpus
+from crucible.data.teacher_curriculum import is_allowed_private_teacher_url
 from crucible.fuzzball.validator import validate_fuzzfile
 from crucible.optimizer.pipeline import run_autoresearch_pipeline
 from crucible.server.app import create_app
@@ -142,6 +143,13 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     live_json = live_res.json()
     assert live_json["definition_id"] == "team3"
     assert len(live_json["nodes"]) == 2
+    assert live_json["lifecycle_phase"] == "pre_run"
+    assert live_json["output_ready"] is False
+
+    # Private teacher URL guard: allow Fuzzball enclave / localhost, block public internet domains
+    assert is_allowed_private_teacher_url("http://127.0.0.1:8001/v1") is True
+    assert is_allowed_private_teacher_url("https://vllm.fb-hack.civilfritz.net/v1") is True
+    assert is_allowed_private_teacher_url("https://api.openai.com/v1") is False
 
     # 1. Built-in preset dataset active out-of-the-box with Train / Val / Held-Out Test splits
     ds_list = client.get("/api/datasets").json()
@@ -201,6 +209,12 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     assert uploaded_ds["split_chunk_counts"]["train"] >= 1
     assert uploaded_ds["split_chunk_counts"]["val"] >= 1
     assert uploaded_ds["split_chunk_counts"]["held_out"] >= 1
+    tc_upload = uploaded_ds["teacher_curriculum"]
+    assert tc_upload["zero_cross_split_leakage"] is True
+    assert tc_upload["raw_cloud_egress_bytes"] == 0
+    assert tc_upload["split_pair_counts"]["train"] >= 1
+    assert tc_upload["split_pair_counts"]["val"] >= 1
+    assert tc_upload["split_pair_counts"]["test"] >= 1
 
     # 3. Optimize ANY custom HuggingFace model (Dense 14B + MoE Lite) on the dropped dataset
     for custom_model in (
@@ -247,9 +261,16 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
             "data/test.jsonl",
             "data/held_out.jsonl",
             "data/dataset_manifest.json",
+            "data/teacher_sft_train.jsonl",
+            "data/teacher_sft_val.jsonl",
+            "data/teacher_sft_test.jsonl",
+            "data/teacher_curriculum_manifest.json",
             "BUILD_REPORT.md",
         }
         assert expected_files.issubset(names)
+        assert zf.read("data/teacher_sft_train.jsonl").decode().strip() != ""
+        assert zf.read("data/teacher_sft_val.jsonl").decode().strip() != ""
+        assert zf.read("data/teacher_sft_test.jsonl").decode().strip() != ""
         assert "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("fuzzfile.yaml").decode()
         assert "team3" in zf.read("fuzzfile.yaml").decode()
         assert "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("configs/train_recipe.yaml").decode()
@@ -258,8 +279,11 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
         assert "Apex Dynamics" in company_app_code
         compile(company_app_code, "run_company_app.py", "exec")
 
-    # Verify live dual-GPU telemetry & step diagnostics populated after run
+    # Verify live dual-GPU telemetry, step diagnostics, & FINISHED output-ready lifecycle after run
     post_live = client.get("/api/live-status").json()
+    assert post_live["lifecycle_phase"] == "finished"
+    assert post_live["output_ready"] is True
+    assert post_live["live_teacher_curriculum"]["total_teaching_pairs"] >= 3
     assert "gpu_telemetry" in post_live
     assert len(post_live["nodes"]) == 2
     assert post_live["live_step_metrics"]["tokens_per_sec"] > 0
