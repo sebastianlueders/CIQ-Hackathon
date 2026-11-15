@@ -13,3 +13,7 @@ docs/build/*
 !docs/build/build-onepager.sh
 !docs/build/grid_tables.py
 !docs/build/onepager-plain.tex
+!docs/slides.md
+!docs/slides.pdf
+!docs/build/build-slides.sh
+!docs/build/slides-plain.tex
