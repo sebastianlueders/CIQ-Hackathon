@@ -1,14 +1,15 @@
-% Plain LaTeX look for the one-pager: black text, no color, compact spacing.
+% Plain LaTeX look for the one-pager: black text, no color.
 \usepackage{enumitem}
 \setlist{itemsep=1pt,topsep=2pt,parsep=0pt}
 \setlength{\parskip}{4pt}
 \setlength{\parindent}{0pt}
 \pagestyle{empty}
-\renewcommand{\arraystretch}{1.25}
+\renewcommand{\arraystretch}{1.2}
+\setlength{\tabcolsep}{5pt}
 \usepackage{titlesec}
 \titleformat{\subsection}{\normalsize\bfseries}{}{0pt}{}
 \titlespacing*{\subsection}{0pt}{6pt}{2pt}
 \makeatletter
-\renewcommand{\maketitle}{\begin{center}{\large\bfseries\@title\par}\end{center}\vspace{-2pt}}
+\renewcommand{\maketitle}{\begin{center}{\Large\bfseries\@title\par}\end{center}\vspace{2pt}}
 \makeatother
 \AtBeginDocument{\fontsize{9.3}{11.2}\selectfont}

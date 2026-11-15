@@ -1,9 +1,13 @@
-# Alchemy: A Performance Engineering Agent for Local Fine-Tuning and Serving
+# Alchemy: Turning Private Data into Fast, Fine-Tuned Local Models
 
-**Bring your data, your base model, and your hardware. Our agent runs the experiments on your own hardware and hands back one Fuzzball workflow that fine-tunes the model and serves it as fast as your hardware allows, without your data ever leaving the room.**
+\begin{center}
+\begin{minipage}{0.92\linewidth}\centering\itshape
+Bring your data, your base model, and your hardware. Our agent runs the experiments on your own hardware and hands back one Fuzzball workflow that fine-tunes the model and serves it as fast as your hardware allows, without your data ever leaving the room.
+\end{minipage}
 
-**Team:** Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania \
-**Track:** Multi-Node Training
+\vspace{4pt}
+\textbf{Team:} Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania \quad\textbar\quad \textbf{Track:} Multi-Node Training
+\end{center}
 
 ### The problem
 
@@ -27,7 +31,7 @@ An agent that does all three as experiments on the customer's own hardware. Ever
 ### Demo: a coding assistant for a private HPC codebase
 **LAMMPS**, a large public C++ simulation code, stands in for a lab's private code. The base model is **Qwen3-Coder-30B-A3B** (MoE, BF16), with whole LAMMPS files held out for evaluation.
 
-| Result (all measured on GB10, logged in `results/`) | Value |
+| **Result** | **Value** (all measured on GB10; logged in `results/`) |
 |------------------|--------------------------------------------------|
 | Held-out LAMMPS loss (perplexity), base → fine-tuned | **0.730 (2.08) → 0.600 (1.82), −17.8%** on all 374 held-out files after 2M tokens in the final 2-node `pipeline.yaml` run; recipe search (4 → 2 → 1 configs): 1.175 → 1.037 on a fast eval subset |
 | Training throughput (stock → best) | 356 → **2,858 tokens/s (8.0×)** inside the final `pipeline.yaml` run on 2 nodes: grouped experts 1.9×, torch.compile 1.5×, no activation checkpointing 1.35×, 2 nodes 1.98×; loss unchanged. **~19% of measured BF16 peak** (2 × 99 TFLOP/s; 4 × active params per token) |
