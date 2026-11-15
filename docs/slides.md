@@ -5,80 +5,143 @@ author: "Tushar Sonthalia · Kunlin Han · Sebastian Lueders · Akshat Singhania
 date: "Multi-Node Training Track"
 ---
 
-# The problem
+# {.plain}
 
-- Private data can't go to a cloud API
-- Local hardware means smaller models
-- Fine-tuning closes the gap, but takes three scarce skills:
-    - ML research
-    - Training performance engineering
-    - Inference performance engineering
+```{=latex}
+\vfill
+{\Large Part 1\par}\vspace{6pt}
+{\Huge\bfseries The problem and our system\par}
+\vfill
+```
+
+# Private data has to stay local
+
+- Proprietary data can't be sent to cloud LLM providers
+- Local hardware can't host frontier open-source models
+    - e.g. Kimi K3 (~2.8T parameters) needs GB300-class systems
+- So institutions run smaller models: **3B–80B parameters**
+- Smaller models fall short of frontier quality
+- **Fine-tuning on their own data** is the best way to close the gap
+
+# Fine-tuning well is hard
+
+1. **ML research**
+    - Hyperparameter search for the fine-tuning runs
+2. **Training performance engineering**
+    - Older or consumer-grade GPUs, mixed hardware
+    - Missing kernels, or kernels not tuned for this hardware
+3. **Inference engineering**
+    - Serving that wins on both throughput and latency
+
+Deeply technical, and not most institutions' core skill
 
 # Alchemy
 
-- **In:** your data, your base model, your hardware
-- **The agent runs the experiments** on your cluster
-- **Out:** one Fuzzball workflow that fine-tunes and serves the model
-- Data never leaves the room
+- **Hyperparameter search** on its own
+- **Training performance engineering** loop
+- **Inference engineering** loop
+- **Out:** one Fuzzball workflow, ending in a vLLM server and a URL
 
-# How it works
+# Hyperparameter search
 
-1. **Recipe search:** find the best fine-tuning recipe
-2. **Training performance:** make that recipe fast
-3. **Inference performance:** serve it fast, without losing quality
-4. **Emit:** one tuned Fuzzball workflow
+- Many LoRA experiments in parallel
+    - LoRA ranks, learning rates, batch sizes
+- Weak runs stopped early, strong runs get more data
+- Winner: best loss on a held-out eval set
 
-Every experiment is a Fuzzball workflow the agent launches itself
+# Training performance engineering
 
-# How the agent decides
-
-- Successive halving: stop weak trials early
+- **Baseline the hardware:** compute FLOPs, memory bandwidth, network bandwidth
+- **Kernels:** write custom Triton kernels, patch and tune existing ones
+- **Parallelism:** data, expert, tensor parallel; whichever fits the hardware
+- **Overlap and fusion:** compute/communication overlap, CUDA streams, CUDA graphs
 - Keep a change only if it's faster **and** the loss holds
-- Reject serving configs below a quality floor
-- Every number is measured, never assumed
 
-# Demo
+# Inference engineering
 
-- **Codebase:** LAMMPS, standing in for a lab's private code
-- **Model:** Qwen3-Coder-30B-A3B (MoE)
-- **Hardware:** 2 × NVIDIA GB10
-- Whole files held out for evaluation
+- Custom kernels for serving
+- Best serving path for the hardware
+- Best precision the hardware supports: FP8, BF16
+- Stands up a vLLM server
 
-# Results
+# The output: one Fuzzball workflow
 
-- **Quality:** held-out loss **−19.3%**
-- **Training:** **8.0× faster** (356 → 2,858 tokens/s)
-- **Serving:** FP8 **1.8× faster**, quality within 0.2%
-- **End to end:** raw code → served model in ~66 min, one workflow
+- Hyperparameter search
+- Training performance engineering
+- Inference engineering
+- **Ends with a vLLM server and a URL you can use**
 
-# Where the speed came from
+# {.plain}
 
-- Grouped expert GEMMs: **1.9×**
-- torch.compile: **1.5×**
-- No activation checkpointing: **1.35×**
-- Second node: **1.98×**
-- Custom Triton kernel: **up to 38× less memory** for the loss
+```{=latex}
+\vfill
+{\Large Part 2\par}\vspace{6pt}
+{\Huge\bfseries The experiment\par}
+\vfill
+```
 
-# What the second node unlocked
+# Setup
 
-- Data-parallel training across both GB10 nodes
-- **1.98× speedup, 99% scaling efficiency**
-- Parallel experiments on one shared copy of the data
+- **Data:** LAMMPS, a large C++ simulation codebase
+    - 18.4M training tokens; 374 whole files held out
+- **Model:** Qwen3-Coder-30B-A3B (mixture of experts)
+- **Hardware:** 2 × NVIDIA DGX Spark (GB10)
+- **Platform:** CIQ Fuzzball, VAST Data storage
 
-# Built on
+# Hardware baseline (measured)
 
-- **CIQ Fuzzball:** every experiment, and the final deliverable
-- **VAST Data:** shared weights, data, and results across nodes
-- **NVIDIA:** GB10, custom sm_121 kernels, NCCL, FP8
+- **Compute:** 99 TFLOP/s BF16, 199 TFLOP/s FP8 per node
+- **Memory bandwidth:** 209 GB/s per node
+- **Storage (VAST):** 1.64 GB/s per stream
+- **Network:** 2-node gradient sync in 0.05–0.5 s per step
+
+# Hyperparameter search
+
+- 4 configs: learning rate 1e-4 to 1e-3, LoRA rank 8 to 64
+- Successive halving: 4 → 2 → 1
+- **Winner:** learning rate 1e-3, rank 8
+- Held-out loss **1.175 → 1.037** after 750k tokens
+
+# Training performance
+
+- Stock: **356** tokens/s
+- Grouped expert GEMMs: **675** (1.9×)
+- \+ torch.compile: **1,011** (1.5×)
+- \+ no activation checkpointing: **1,366** (1.35×)
+- \+ second node: **2,858** tokens/s, **8.0× overall**
+- Model load per run: 10 min → 62 s
+
+# Kernels we wrote
+
+- **Fused linear + cross-entropy** (Triton, 152k vocabulary)
+    - Exact loss; 2.1–2.35× faster; 20–38× less memory
+    - **Adopted:** the memory it frees makes room to drop checkpointing
+- **Grouped expert GEMM** (Triton, sm_121)
+    - Correct; 1.9× faster than a per-expert loop
+    - 0.4–0.7× of PyTorch's grouped GEMM, so **not adopted**
+
+# Inference engineering
+
+- **Base model, BF16 → FP8:** 113 → 203 tokens/s (1.8×), quality within 0.2%
+- **Fine-tuned, FP8 + LoRA:** 192 tokens/s at 16 users, 441 at 64
+- Fine-tuned held-out loss **1.293 → 1.145**
+
+# End to end
+
+- One `pipeline.yaml`, on 2 nodes, in **66 min**
+- Held-out loss **0.730 → 0.589 (−19.3%)**
+- Training **8.0× faster**, serving **1.8× faster**
 
 # Next
 
-- Grouped expert GEMM kernel for sm_121
+- Tune the grouped expert GEMM to beat PyTorch
 - Tuned MoE kernels for serving
 - An LLM layer that explains every decision
 
 # {.plain}
 
+```{=latex}
 \vfill
 \begin{center}{\Huge\bfseries Thank you}\end{center}
 \vfill
+```
