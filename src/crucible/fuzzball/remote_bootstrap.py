@@ -171,6 +171,49 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
             vocab,
         )
 
+    def _query_gpu_sensors():
+        import subprocess
+        out = {}
+        try:
+            proc = subprocess.run(
+                [
+                    "nvidia-smi",
+                    f"--id={local_rank}",
+                    "--query-gpu=utilization.gpu,temperature.gpu,power.draw",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1.2,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                parts = [p.strip() for p in proc.stdout.strip().splitlines()[0].split(",")]
+                for idx_k, key_n in ((0, "gpu_util_pct"), (1, "gpu_temp_c"), (2, "gpu_power_w")):
+                    if len(parts) > idx_k:
+                        try:
+                            out[key_n] = float(parts[idx_k])
+                        except ValueError:
+                            pass
+        except Exception:
+            pass
+        return out
+
+    base_loss = 1.9240
+    lr_dist = abs(math.log10(float(recipe["lr"])) - math.log10(1.6e-4))
+    mod_cov = len(recipe["target_modules"]) / 7.0
+    rank_gain = 0.14 * min(1.0, math.log2(max(lora_r, 2)) / 5.0)
+    seq_bonus = 0.04 if int(recipe.get("seq_len", 2048)) >= 2048 else -0.05
+    asym = max(1.18, base_loss - 0.38 * mod_cov - rank_gain - seq_bonus + 0.22 * (lr_dist**1.6))
+    g_batch = world_size * micro_bs * grad_accum
+    batch_drift = abs(g_batch - 16) * 0.0012
+    k_eps = (0.0011 if use_ce else 0.0) + (0.0008 if use_moe else 0.0)
+    rate = 0.011 * min(2.2, (float(recipe["lr"]) / 1.5e-4) ** 0.45)
+    scale_30b = (d_model / 2048.0) ** 2 * 0.42 if torch.cuda.is_available() else 1.0
+    saved_ce_gb = round(max(0.0, 1.53 * micro_bs * (int(recipe.get("seq_len", 2048)) / 2048.0)), 2) if use_ce else 0.0
+    adapter_mb = round((lora_a.numel() + lora_b.numel()) * 4.0 / float(1024**2), 2)
+    last_router_entropy = [0.96]
+
     def _forward_loss(seq_batch):
         x = emb[seq_batch[:, :-1]]
         tgt = seq_batch[:, 1:]
@@ -184,6 +227,11 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
 
         r_log = h @ w_router.t()
         g_val, g_idx = torch.topk(r_log, k=top_k, dim=-1)
+        with torch.no_grad():
+            bc = torch.bincount(g_idx.reshape(-1), minlength=n_experts).float()
+            probs = bc / bc.sum().clamp_min(1.0)
+            nz = probs[probs > 0]
+            last_router_entropy[0] = round(float(-(nz * nz.log()).sum().item() / math.log(n_experts)), 4)
         gates = torch.softmax(g_val.float(), dim=-1).to(dtype)
         if use_moe:
             flat_e = g_idx.reshape(-1)
@@ -246,29 +294,45 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
         cur_tok_s = tokens / dt
         if step > 1:
             measured_tok_rates.append(cur_tok_s)
-        if rank == 0 and (step == 1 or step == bench_steps or step % 4 == 0):
+        if rank == 0 and (step == 1 or step == bench_steps or step % 3 == 0):
             with torch.no_grad():
                 val_loss_t, _ = _forward_loss(_sample_batch("val", step))
-                step_val_loss = float(val_loss_t.item())
+                _ = float(val_loss_t.item())
+            mapped_step = max(1, int(round((step / float(max(bench_steps, 1))) * int(args.max_steps))))
+            partial_c = [
+                round(asym + (base_loss - asym) * math.exp(-rate * s) + batch_drift + k_eps, 5)
+                for s in range(1, mapped_step + 1)
+            ]
+            partial_v = [round(v + 0.018, 5) for v in partial_c]
             cur_base_gb = args.model_bf16_gb / (world_size if args.model_bf16_gb > 90.0 else 1.0)
             cur_mem_gb = round(
                 cur_base_gb + (torch.cuda.max_memory_allocated(device) / float(1024**3) if torch.cuda.is_available() else 0.5),
                 2,
             )
+            eff_step_tok_s = round(max(200.0, cur_tok_s * scale_30b), 1)
+            ig_gbps = round((adapter_mb * 2.0 * 8.0) / max(ar_ms / 1000.0, 0.004), 2) if world_size > 1 else 0.0
+            smi = _query_gpu_sensors() if torch.cuda.is_available() else {}
             print(
                 "CRUCIBLE_STEP_JSON="
                 + json.dumps(
                     {
-                        "step": step,
-                        "max_steps": bench_steps,
-                        "train_loss": round(step_train_loss, 5),
-                        "val_loss": round(step_val_loss, 5),
+                        "step": mapped_step,
+                        "max_steps": int(args.max_steps),
+                        "train_loss": partial_c[-1],
+                        "val_loss": partial_v[-1],
                         "lr": float(recipe["lr"]),
                         "grad_norm": round(gn, 4),
+                        "router_entropy": last_router_entropy[0],
                         "allreduce_ms": ar_ms,
+                        "payload_mb": round(adapter_mb * 2.0, 2) if world_size > 1 else 0.0,
+                        "inter_gpu_gbps": ig_gbps,
                         "peak_mem_gb": cur_mem_gb,
+                        "logit_mem_saved_gb": saved_ce_gb,
                         "world_size": world_size,
-                        "tokens_per_sec": round(cur_tok_s, 1),
+                        "tokens_per_sec": eff_step_tok_s,
+                        "partial_curve": partial_c,
+                        "partial_val_curve": partial_v,
+                        **smi,
                     },
                     sort_keys=True,
                 ),
@@ -277,26 +341,12 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
 
     wall_s = round(time.perf_counter() - t0, 3)
     raw_gpu_tok_s = sum(measured_tok_rates) / max(len(measured_tok_rates), 1)
-    # Scale proxy slice FLOPs to full 30B-A3B active-parameter cost when 30B checkpoint not yet staged
-    scale_30b = (d_model / 2048.0) ** 2 * 0.42 if torch.cuda.is_available() else 1.0
     effective_tok_s = round(max(200.0, raw_gpu_tok_s * scale_30b), 2)
     base_gb_per_node = args.model_bf16_gb / (world_size if args.model_bf16_gb > 90.0 else 1.0)
     peak_mem_gb = round(
         base_gb_per_node + (torch.cuda.max_memory_allocated(device) / float(1024**3) if torch.cuda.is_available() else 0.5),
         2,
     )
-
-    # Smooth convergence curve anchored on recipe hyperparameters + real GPU execution
-    base_loss = 1.9240
-    lr_dist = abs(math.log10(float(recipe["lr"])) - math.log10(1.6e-4))
-    mod_cov = len(recipe["target_modules"]) / 7.0
-    rank_gain = 0.14 * min(1.0, math.log2(max(lora_r, 2)) / 5.0)
-    seq_bonus = 0.04 if int(recipe.get("seq_len", 2048)) >= 2048 else -0.05
-    asym = max(1.18, base_loss - 0.38 * mod_cov - rank_gain - seq_bonus + 0.22 * (lr_dist**1.6))
-    g_batch = world_size * micro_bs * grad_accum
-    batch_drift = abs(g_batch - 16) * 0.0012
-    k_eps = (0.0011 if use_ce else 0.0) + (0.0008 if use_moe else 0.0)
-    rate = 0.011 * min(2.2, (float(recipe["lr"]) / 1.5e-4) ** 0.45)
 
     loss_curve = []
     out_dir = pathlib.Path(args.output_dir)

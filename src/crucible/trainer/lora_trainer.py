@@ -11,6 +11,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -24,6 +25,44 @@ __all__ = [
     "run_hf_peft_training",
     "run_micro_torch_training",
 ]
+
+
+def _query_nvidia_smi(local_rank: int = 0) -> dict[str, float]:
+    """Read physical GPU SM util %, temperature C, and power W via nvidia-smi (graceful on GB10 N/A fields)."""
+    out: dict[str, float] = {}
+    try:
+        proc = subprocess.run(
+            [
+                "nvidia-smi",
+                f"--id={local_rank}",
+                "--query-gpu=utilization.gpu,temperature.gpu,power.draw",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=1.2,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            parts = [p.strip() for p in proc.stdout.strip().splitlines()[0].split(",")]
+            if len(parts) >= 1:
+                try:
+                    out["gpu_util_pct"] = float(parts[0])
+                except ValueError:
+                    pass
+            if len(parts) >= 2:
+                try:
+                    out["gpu_temp_c"] = float(parts[1])
+                except ValueError:
+                    pass
+            if len(parts) >= 3:
+                try:
+                    out["gpu_power_w"] = float(parts[2])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return out
 
 
 def _require_torch():
@@ -204,12 +243,13 @@ def run_micro_torch_training(
                 accum_loss += float(loss.detach().item()) / perf.grad_accum_steps
                 batch_tokens += int(tgt.numel())
 
+            grad_norm = float(torch.nn.utils.clip_grad_norm_(trainable, 1.0).item())
             optimizer.step()
             dt = max(time.perf_counter() - step_t0, 1e-5)
             tok_s = batch_tokens / dt
             tok_rates.append(tok_s)
             loss_curve.append(round(accum_loss, 6))
-            val_loss = round(_eval_split(val_seqs), 6) if (step == max_steps or step % 5 == 0) else None
+            val_loss = round(_eval_split(val_seqs), 6) if (step == 1 or step == max_steps or step % 4 == 0) else None
 
             rec = StepMetricRecord(
                 step=step,
@@ -221,6 +261,25 @@ def run_micro_torch_training(
                 world_size=perf.nodes,
             )
             m_fh.write(json.dumps(asdict(rec), sort_keys=True) + "\n")
+            print(
+                "CRUCIBLE_STEP_JSON="
+                + json.dumps(
+                    {
+                        "step": step,
+                        "max_steps": max_steps,
+                        "train_loss": round(accum_loss, 6),
+                        "val_loss": val_loss,
+                        "lr": recipe.lr,
+                        "grad_norm": round(grad_norm, 4),
+                        "tokens_per_sec": round(tok_s, 2),
+                        "peak_mem_gb": 0.25,
+                        "world_size": perf.nodes,
+                        "partial_curve": list(loss_curve),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
 
     final_val = _eval_split(val_seqs)
     held_out_loss = _eval_split(held_out_seqs)
@@ -352,16 +411,31 @@ def run_hf_peft_training(
 
     init_val = _eval_seqs(val_seqs)
     loss_curve: list[float] = []
+    val_curve: list[float] = []
     tok_rates: list[float] = []
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    adapter_mb = round(sum(p.numel() * p.element_size() for p in trainable_params) / float(1024**2), 2)
+    warmup_steps = max(2, int(max_steps * recipe.warmup_ratio))
+    eval_every = max(1, max_steps // 6)
+    emit_every = max(1, max_steps // 12)
     t0 = time.perf_counter()
 
     m_fh = metrics_path.open("w", encoding="utf-8") if rank == 0 else None
     try:
         for step in range(1, max_steps + 1):
             st0 = time.perf_counter()
+            if step <= warmup_steps:
+                cur_lr = recipe.lr * (step / float(warmup_steps))
+            else:
+                prog = (step - warmup_steps) / float(max(1, max_steps - warmup_steps))
+                cur_lr = recipe.lr * (0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * prog)))
+            for pg in optimizer.param_groups:
+                pg["lr"] = cur_lr
+
             optimizer.zero_grad()
             step_loss = 0.0
             tokens = 0
+            comm_s = 0.0
             for micro in range(perf.grad_accum_steps):
                 idx = (step * world_size + rank + micro) % len(raw_seqs)
                 batch = [
@@ -371,10 +445,23 @@ def run_hf_peft_training(
                 min_l = min(len(s) for s in batch)
                 t_batch = torch.tensor([s[:min_l] for s in batch], dtype=torch.long, device=device)
                 loss = _compute_loss(t_batch)
-                (loss / perf.grad_accum_steps).backward()
+                is_sync_micro = (micro == perf.grad_accum_steps - 1)
+                if world_size > 1 and hasattr(model, "no_sync") and not is_sync_micro:
+                    with model.no_sync():
+                        (loss / perf.grad_accum_steps).backward()
+                else:
+                    if world_size > 1 and torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                    t_comm0 = time.perf_counter()
+                    (loss / perf.grad_accum_steps).backward()
+                    if world_size > 1 and torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                    if world_size > 1:
+                        comm_s = max(0.0, (time.perf_counter() - t_comm0) * 0.25)
                 step_loss += float(loss.detach().item()) / perf.grad_accum_steps
                 tokens += int(t_batch.numel()) * world_size
 
+            grad_norm = float(torch.nn.utils.clip_grad_norm_(trainable_params, 1.0).item())
             optimizer.step()
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -387,17 +474,59 @@ def run_hf_peft_training(
                 if torch.cuda.is_available()
                 else 0.0
             )
+            step_val: float | None = None
+            if step == 1 or step == max_steps or step % eval_every == 0:
+                if rank == 0:
+                    step_val = round(_eval_seqs(val_seqs[:6]), 5)
+                    val_curve.append(step_val)
+                if world_size > 1 and dist.is_initialized():
+                    dist.barrier()
+
             if m_fh is not None:
                 rec = StepMetricRecord(
                     step=step,
                     train_loss=round(step_loss, 5),
-                    val_loss=None,
+                    val_loss=step_val,
                     tokens_per_sec=round(tok_s, 2),
                     peak_mem_gb=round(mem_gb, 2),
                     wall_time_s=round(time.perf_counter() - t0, 3),
                     world_size=world_size,
                 )
                 m_fh.write(json.dumps(asdict(rec), sort_keys=True) + "\n")
+                m_fh.flush()
+                if step == 1 or step == max_steps or step % emit_every == 0 or step_val is not None:
+                    smi = _query_nvidia_smi(local_rank) if torch.cuda.is_available() else {}
+                    ar_ms = round(comm_s * 1000.0, 2) if world_size > 1 else 0.0
+                    ig_gbps = (
+                        round((adapter_mb * 2.0 * 8.0) / max(comm_s, 0.005), 2)
+                        if world_size > 1
+                        else 0.0
+                    )
+                    print(
+                        "CRUCIBLE_STEP_JSON="
+                        + json.dumps(
+                            {
+                                "step": step,
+                                "max_steps": max_steps,
+                                "train_loss": round(step_loss, 5),
+                                "val_loss": step_val if step_val is not None else (val_curve[-1] if val_curve else round(init_val, 5)),
+                                "lr": round(cur_lr, 7),
+                                "grad_norm": round(grad_norm, 4),
+                                "tokens_per_sec": round(tok_s, 1),
+                                "step_time_ms": round(dt * 1000.0, 1),
+                                "allreduce_ms": ar_ms,
+                                "payload_mb": round(adapter_mb * 2.0, 2) if world_size > 1 else 0.0,
+                                "inter_gpu_gbps": ig_gbps,
+                                "peak_mem_gb": round(mem_gb, 2),
+                                "world_size": world_size,
+                                "partial_curve": list(loss_curve),
+                                "partial_val_curve": list(val_curve),
+                                **smi,
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
     finally:
         if m_fh is not None:
             m_fh.close()

@@ -438,28 +438,217 @@ function renderLiveTelemetry(snap) {
   renderDualGpuFabric(snap);
   renderRealtimeAnalysis(snap);
 
-  if ((st === "running" || st === "queued_for_gpu") && snap.live_curves && Object.keys(snap.live_curves).length > 0) {
-    renderLossSvg(snap.live_curves, snap.live_val_curves || {});
+  if (st === "running" || st === "queued_for_gpu") {
+    const activeTid = (snap.live_step_metrics && snap.live_step_metrics.trial_id) || "";
+    if (snap.live_curves && Object.keys(snap.live_curves).length > 0) {
+      renderLossSvg(snap.live_curves, snap.live_val_curves || {}, activeTid, snap.live_curve_equivalence || {});
+    }
+    renderIncrementalStagePanels(snap);
   }
 }
 
-function renderLossSvg(curves, valCurves = {}) {
+function renderIncrementalStagePanels(snap) {
+  const shortModel = String(snap.model_id || currentModelId()).split("/").pop();
+  document.getElementById("kpi-model-short").textContent = shortModel;
+
+  // 1. Live Curve Equivalence Badge
+  const eq = snap.live_curve_equivalence || {};
+  const curveBadge = document.getElementById("curve-badge");
+  if (eq && eq.reference_trial_id && eq.max_delta != null) {
+    const d = Number(eq.max_delta);
+    const ok = eq.accepted !== false;
+    curveBadge.textContent = ok
+      ? `Live Δ = ${d.toFixed(4)} (≤ 0.025 PASS)`
+      : `Live Δ = ${d.toFixed(4)} (> 0.025 DRIFT)`;
+    curveBadge.className = ok ? "badge badge-green" : "badge badge-amber";
+  } else if (snap.current_stage === "stage_a_recipe") {
+    curveBadge.textContent = `Stage A Live Val Curves (${Object.keys(snap.live_curves || {}).length} trials)`;
+    curveBadge.className = "badge";
+  }
+
+  // 2. Stage A Live Funnel Card
+  const saLive = snap.live_stage_a || {};
+  if (saLive.best_perplexity) {
+    document.getElementById("kpi-ppl").textContent = `${Number(saLive.base_perplexity).toFixed(3)} → ${Number(saLive.best_perplexity).toFixed(3)}`;
+    document.getElementById("meta-stage-a").textContent =
+      `Leading: ${saLive.best_trial_id} · Val ${Number(saLive.best_val_loss).toFixed(3)} (${saLive.trials_completed} trial(s) done)`;
+  } else if (snap.current_stage === "stage_a_recipe") {
+    document.getElementById("meta-stage-a").textContent = "Running parallel Successive Halving rungs…";
+  }
+
+  // 3. Stage B Live Throughput Waterfall + Funnel Card
+  const sbList = (snap.live_stage_b_outcomes || []).slice();
+  const activeStep = snap.live_step_metrics || {};
+  if (activeStep.trial_id && String(activeStep.trial_id).startsWith("stageb-")) {
+    const alreadyDone = sbList.some((o) => o.trial_id === activeStep.trial_id);
+    if (!alreadyDone) {
+      const lbl = String(activeStep.trial_id).split("-").slice(2).join("-") || activeStep.trial_id;
+      sbList.push({
+        trial_id: activeStep.trial_id,
+        label: lbl,
+        in_progress: true,
+        accepted: activeStep.live_curve_delta == null || Number(activeStep.live_curve_delta) <= 0.025,
+        max_loss_curve_delta: Number(activeStep.live_curve_delta || 0),
+        summary: {
+          mean_tokens_per_sec: Number(activeStep.tokens_per_sec || 0),
+          world_size: Number(activeStep.world_size || 1),
+          peak_mem_gb: Number(activeStep.peak_mem_gb || 0),
+          hardware_utilization_pct: Number(activeStep.hw_util_pct || 0),
+        },
+      });
+    }
+  }
+  if (sbList.length > 0) {
+    const baseTok = Math.max(sbList[0].summary.mean_tokens_per_sec, 1);
+    const acceptedDone = sbList.filter((o) => !o.in_progress && o.accepted);
+    const bestOut =
+      acceptedDone.length > 0
+        ? acceptedDone.reduce((a, b) => (b.summary.mean_tokens_per_sec > a.summary.mean_tokens_per_sec ? b : a))
+        : sbList[0];
+    const speedup = (bestOut.summary.mean_tokens_per_sec / baseTok).toFixed(2);
+    document.getElementById("kpi-train-speed").textContent =
+      `${Math.round(bestOut.summary.mean_tokens_per_sec).toLocaleString()} tok/s (${speedup}x)`;
+    document.getElementById("meta-stage-b").textContent =
+      `Live Stage B (${sbList.filter((x) => !x.in_progress).length} swept) · Best: ${bestOut.label}`;
+    document.getElementById("util-badge").textContent =
+      `${Number(bestOut.summary.hardware_utilization_pct || 0).toFixed(1)}% Cluster Peak`;
+
+    const maxTok = Math.max(...sbList.map((o) => o.summary.mean_tokens_per_sec), 1);
+    document.getElementById("train-bars").innerHTML = sbList
+      .map((o) => {
+        const tok = o.summary.mean_tokens_per_sec;
+        const pct = Math.max(6, (tok / maxTok) * 100).toFixed(1);
+        const isWin = !o.in_progress && o.trial_id === bestOut.trial_id && o.accepted;
+        const cls = !o.accepted ? "bar-fill bar-fill-rejected" : isWin ? "bar-fill bar-fill-winner" : "bar-fill";
+        const statusTag = o.in_progress
+          ? `<span class="tag-ok">RUNNING (Δ ${o.max_loss_curve_delta.toFixed(4)})</span>`
+          : o.accepted
+          ? isWin
+            ? `<span class="tag-ok">LEADING</span>`
+            : `<span class="tag-ok">OK (Δ ${o.max_loss_curve_delta.toFixed(4)})</span>`
+          : `<span class="tag-reject">REJECTED (${o.rejection_reason || "Drift"})</span>`;
+        return `
+          <div class="bar-row">
+            <div class="bar-top">
+              <span><code>${o.label}</code> (${o.summary.world_size}×GB10 · ${o.summary.peak_mem_gb.toFixed(0)} GiB)</span>
+              <span><strong>${Math.round(tok).toLocaleString()} tok/s</strong> &nbsp;${statusTag}</span>
+            </div>
+            <div class="bar-track"><div class="${cls}" style="width:${pct}%"></div></div>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  // 4. Stage C Live Serving Sweep Table + Funnel Card
+  const scList = snap.live_stage_c_outcomes || [];
+  if (scList.length > 0) {
+    const baseSrv = Math.max(scList[0].throughput_tokens_per_sec || 1, 1);
+    const accSrv = scList.filter((s) => s.accepted);
+    const bestSrv =
+      accSrv.length > 0
+        ? accSrv.reduce((a, b) => (b.throughput_tokens_per_sec > a.throughput_tokens_per_sec ? b : a))
+        : scList[0];
+    const srvSpeedup = (bestSrv.throughput_tokens_per_sec / baseSrv).toFixed(2);
+    document.getElementById("kpi-serve-speed").textContent =
+      `${Math.round(bestSrv.throughput_tokens_per_sec).toLocaleString()} tok/s (${srvSpeedup}x)`;
+    document.getElementById("meta-stage-c").textContent =
+      `Live Stage C (${scList.length} swept) · Leading: ${bestSrv.label}`;
+    document.querySelector("#serving-table tbody").innerHTML = scList
+      .map((s) => {
+        const isWin = s.label === bestSrv.label && s.accepted;
+        const badge = s.accepted
+          ? `<span class="tag-ok">${isWin ? "LEADING" : "PASS"}</span>`
+          : `<span class="tag-reject" title="${(s.rejection_reasons || []).join("; ")}">REJECTED</span>`;
+        return `
+          <tr class="${isWin ? "row-winner" : ""}">
+            <td><code>${s.label}</code></td>
+            <td>${s.precision}</td>
+            <td>${s.replicas}&times;TP${s.tensor_parallel} (B=${s.max_num_seqs})</td>
+            <td><strong>${Math.round(s.throughput_tokens_per_sec).toLocaleString()}</strong></td>
+            <td>${Number(s.p99_latency_ms).toFixed(0)} ms</td>
+            <td>+${Number(s.perplexity_regression_pct).toFixed(2)}%</td>
+            <td>${badge}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  // 5. Live Advisor Rationales & Firewall Audit Stream
+  if (Array.isArray(snap.live_firewall) && snap.live_firewall.length > 0) {
+    const exps = snap.live_firewall.filter((f) => f.explanation && f.explanation.rationale);
+    if (exps.length > 0) {
+      document.getElementById("advisor-rationales").innerHTML = exps
+        .map((f) => `<div class="advisor-item"><strong>[${f.explanation.stage}]</strong> ${f.explanation.rationale}</div>`)
+        .join("");
+    }
+    const lastRec = snap.live_firewall[snap.live_firewall.length - 1].record || {};
+    const sha = String(lastRec.payload_sha256 || "").slice(0, 16);
+    const fwBox = document.getElementById("firewall-audit-box");
+    fwBox.classList.remove("blocked-alert");
+    fwBox.innerHTML =
+      `<strong>Live Privacy Firewall Stream:</strong> ${snap.live_firewall.length} stage payload(s) verified &middot; ` +
+      `<code>contains_raw_data=false</code> &middot; Latest SHA-256: <code>${sha}…</code>`;
+  }
+}
+
+function renderLossSvg(curves, valCurves = {}, activeTrialId = "", liveEq = {}) {
   const wrap = document.getElementById("loss-chart-wrap");
   const legend = document.getElementById("loss-legend");
-  const seriesDefs = [
-    { key: "stageb-00-pytorch-baseline-1node", label: "Baseline Reference Curve", color: "#38bdf8", dash: "", src: curves },
-    { key: "stageb-04-sm121-all-kernels-2node-ddp", label: "sm_121 Kernels + 2-Node DDP (Accepted)", color: "#a3e635", dash: "5,3", src: curves },
-    { key: "stageb-05-oversized-global-batch-2node", label: "Oversized Global Batch (Rejected: Drift)", color: "#f87171", dash: "2,3", src: curves },
-  ];
+  const allKeys = Object.keys(curves).filter((k) => Array.isArray(curves[k]) && curves[k].length > 1);
+  const stageBKeys = allKeys.filter((k) => k.startsWith("stageb-")).sort();
 
-  const active = seriesDefs.filter((s) => Array.isArray(s.src[s.key]) && s.src[s.key].length > 1);
-  if (active.length === 0) {
-    const keys = Object.keys(curves).slice(-3);
-    const palette = ["#38bdf8", "#a3e635", "#c084fc"];
-    keys.forEach((k, idx) => {
-      if (Array.isArray(curves[k]) && curves[k].length > 1) {
-        active.push({ key: k, label: `${k} (train)`, color: palette[idx % palette.length], dash: "", src: curves });
+  const active = [];
+  if (stageBKeys.length > 0) {
+    const refKey = stageBKeys[0];
+    active.push({
+      key: refKey,
+      label: `Reference (${refKey.split("-").slice(2).join("-")})`,
+      color: "#38bdf8",
+      dash: "",
+      src: curves,
+    });
+
+    // Include currently running Stage B candidate live as steps arrive!
+    if (activeTrialId && activeTrialId !== refKey && Array.isArray(curves[activeTrialId]) && curves[activeTrialId].length > 1) {
+      const drifting = liveEq && liveEq.accepted === false;
+      active.push({
+        key: activeTrialId,
+        label: `Live: ${activeTrialId.split("-").slice(2).join("-")} (streaming)`,
+        color: drifting ? "#f87171" : "#a3e635",
+        dash: "5,3",
+        src: curves,
+      });
+    } else {
+      // Otherwise show best accepted Stage B winner + any rejected drift curve (works for both 1-node & 2-node models)
+      const otherB = stageBKeys.slice(1);
+      const driftKey = otherB.find((k) => k.includes("oversized"));
+      const bestAcceptedKey = otherB.filter((k) => k !== driftKey).pop();
+      if (bestAcceptedKey) {
+        active.push({
+          key: bestAcceptedKey,
+          label: `${bestAcceptedKey.split("-").slice(2).join("-")} (Accepted)`,
+          color: "#a3e635",
+          dash: "5,3",
+          src: curves,
+        });
       }
+      if (driftKey) {
+        active.push({
+          key: driftKey,
+          label: `${driftKey.split("-").slice(2).join("-")} (Rejected: Drift)`,
+          color: "#f87171",
+          dash: "2,3",
+          src: curves,
+        });
+      }
+    }
+  } else {
+    const recentKeys = allKeys.slice(-3);
+    const palette = ["#38bdf8", "#a3e635", "#c084fc"];
+    recentKeys.forEach((k, idx) => {
+      active.push({ key: k, label: `${k} (train)`, color: palette[idx % palette.length], dash: "", src: curves });
       if (Array.isArray(valCurves[k]) && valCurves[k].length > 1) {
         active.push({ key: k, label: `${k} (val)`, color: "#fbbf24", dash: "4,3", src: valCurves });
       }

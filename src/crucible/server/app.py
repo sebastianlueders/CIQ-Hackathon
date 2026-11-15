@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import os
 import platform
 import socket
@@ -15,6 +16,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+
+import httpx
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -150,6 +153,10 @@ class LiveRunState:
         self.completed_trials: list[dict[str, Any]] = []
         self.live_curves: dict[str, list[float]] = {}
         self.live_val_curves: dict[str, list[float]] = {}
+        self.live_curve_equivalence: dict[str, Any] = {}
+        self.live_stage_a: dict[str, Any] = {}
+        self.live_stage_b_outcomes: list[dict[str, Any]] = []
+        self.live_stage_c_outcomes: list[dict[str, Any]] = []
         self.live_step_metrics: dict[str, Any] = {}
         self.step_history: list[dict[str, Any]] = []
         self.live_firewall: list[dict[str, Any]] = []
@@ -233,12 +240,52 @@ class LiveRunState:
             self.completed_trials = []
             self.live_curves = {}
             self.live_val_curves = {}
+            self.live_curve_equivalence = {}
+            self.live_stage_a = {}
+            self.live_stage_b_outcomes = []
+            self.live_stage_c_outcomes = []
             self.live_step_metrics = {}
             self.step_history = []
             self.live_firewall = []
             self.events = []
             self._reset_nodes(cluster)
             self.seq += 1
+
+    @staticmethod
+    def _compute_curve_delta(ref_curve: list[float], cand_curve: list[float]) -> float:
+        if not ref_curve or not cand_curve:
+            return 0.0
+        n = min(len(ref_curve), len(cand_curve))
+        indices = sorted({0, n // 4, n // 2, (3 * n) // 4, n - 1})
+        return round(max(abs(ref_curve[i] - cand_curve[i]) for i in indices), 5)
+
+    def _refresh_live_curve_equivalence(self, active_tid: str) -> float | None:
+        ref_tid = next(
+            (k for k in sorted(self.live_curves) if k.startswith("stageb-00-")),
+            None,
+        )
+        if not ref_tid or not self.live_curves.get(ref_tid):
+            return None
+        ref_curve = self.live_curves[ref_tid]
+        cand_tid = active_tid if (active_tid.startswith("stageb-") and active_tid != ref_tid) else None
+        if cand_tid and self.live_curves.get(cand_tid):
+            delta = self._compute_curve_delta(ref_curve, self.live_curves[cand_tid])
+            self.live_curve_equivalence = {
+                "reference_trial_id": ref_tid,
+                "candidate_trial_id": cand_tid,
+                "max_delta": delta,
+                "tolerance": 0.025,
+                "accepted": delta <= 0.025,
+            }
+            return delta
+        self.live_curve_equivalence = {
+            "reference_trial_id": ref_tid,
+            "candidate_trial_id": ref_tid,
+            "max_delta": 0.0,
+            "tolerance": 0.025,
+            "accepted": True,
+        }
+        return 0.0
 
     def _update_gpu_fabric(
         self,
@@ -252,6 +299,9 @@ class LiveRunState:
         inter_gpu_gbps: float,
         payload_mb: float,
         kind: str = "train",
+        gpu_util_pct: float | None = None,
+        gpu_temp_c: float | None = None,
+        gpu_power_w: float | None = None,
     ) -> None:
         slot_list = list(self.node_slots.values())
         assigned_set = set(nodes_assigned)
@@ -262,20 +312,22 @@ class LiveRunState:
             is_target = (slot["hostname"] in assigned_set) or (multi_gpu and idx < 2)
             if is_target:
                 jitter = (idx * 1.7) - 0.8
-                sm_u = round(min(98.5, max(34.0, (hw_util_pct or 76.0) + jitter)), 1)
+                base_util = gpu_util_pct if gpu_util_pct is not None else (hw_util_pct or 76.0)
+                sm_u = round(min(99.0, max(12.0, base_util + (0.0 if gpu_util_pct is not None else jitter))), 1)
                 tc_u = round(min(96.0, sm_u * (0.91 if kind == "train" else 0.86)), 1)
-                vram = round(max(14.5, peak_mem_gb or 64.8), 1)
+                vram = round(max(1.5, peak_mem_gb or 64.8), 1)
                 bw = round(min(209.4, 88.0 + (sm_u / 100.0) * 116.0), 1)
                 tflops = round(min(198.6, (sm_u / 100.0) * (99.1 if kind == "train" else 164.0)), 1)
                 slot["state"] = "RUNNING"
                 slot["sm_util_pct"] = sm_u
                 slot["tensor_core_pct"] = tc_u
-                slot["vram_used_gib"] = min(slot["physical_memory_gib"] - 4.0, vram)
+                slot["vram_used_gib"] = min(slot["physical_memory_gib"] - 2.0, vram)
                 slot["mem_bw_gbs"] = bw
                 slot["bf16_tflops"] = tflops
                 slot["tokens_per_sec"] = per_gpu_tok_s
-                slot["temp_c"] = int(min(79, 46 + sm_u * 0.31))
-                slot["power_w"] = int(min(140, 42 + sm_u * 0.94))
+                slot["temp_c"] = int(gpu_temp_c) if gpu_temp_c is not None else int(min(79, 46 + sm_u * 0.31))
+                slot["power_w"] = int(gpu_power_w) if gpu_power_w is not None else int(min(140, 42 + sm_u * 0.94))
+                slot["telemetry_source"] = "nvidia-smi" if gpu_util_pct is not None or gpu_temp_c is not None else "calibrated"
                 if multi_gpu:
                     if comm_mode == "NCCL_FSDP_SHARDED":
                         slot["role"] = f"Rank {idx} · FSDP ZeRO-3 Shard + AllGather"
@@ -451,7 +503,13 @@ class LiveRunState:
                 elif v_loss is not None:
                     self.live_val_curves.setdefault(tid, []).append(float(v_loss))
 
-                ppl_val = float(payload.get("perplexity") or (2.71828 ** min(float(v_loss or t_loss), 10.0)))
+                live_delta = self._refresh_live_curve_equivalence(tid) if tid.startswith("stageb-") else None
+
+                ppl_val = float(payload.get("perplexity") or math.exp(min(float(v_loss or t_loss), 10.0)))
+                gpu_u_raw = float(payload["gpu_util_pct"]) if payload.get("gpu_util_pct") is not None else None
+                gpu_t_raw = float(payload["gpu_temp_c"]) if payload.get("gpu_temp_c") is not None else None
+                gpu_p_raw = float(payload["gpu_power_w"]) if payload.get("gpu_power_w") is not None else None
+
                 step_record = {
                     "trial_id": tid,
                     "kind": payload.get("kind", "train"),
@@ -474,6 +532,7 @@ class LiveRunState:
                     "logit_mem_saved_gb": float(payload.get("logit_mem_saved_gb") or 0.0),
                     "bf16_tflops": float(payload.get("bf16_tflops") or 0.0),
                     "hw_util_pct": hw_u,
+                    "live_curve_delta": live_delta,
                     "world_size": w_size,
                     "comm_mode": c_mode,
                     "time_utc": now,
@@ -494,6 +553,9 @@ class LiveRunState:
                     inter_gpu_gbps=ig_gbps,
                     payload_mb=pay_mb,
                     kind=str(payload.get("kind", "train")),
+                    gpu_util_pct=gpu_u_raw,
+                    gpu_temp_c=gpu_t_raw,
+                    gpu_power_w=gpu_p_raw,
                 )
 
                 v_str = f" · val={float(v_loss):.4f}" if v_loss is not None else ""
@@ -547,6 +609,57 @@ class LiveRunState:
                         "status": summ.get("status", "accepted" if summ.get("accepted", True) else "rejected"),
                     }
                 )
+
+                # Incrementally update Stage A, Stage B, and Stage C live results so all panels stream in real time
+                if tid.startswith("stagea-") and isinstance(summ, dict):
+                    init_v = float(summ.get("initial_val_loss") or 1.924)
+                    base_ppl = round(math.exp(min(init_v, 15.0)), 3)
+                    cur_ppl = float(ppl or 999.0)
+                    prev_best = float(self.live_stage_a.get("best_perplexity") or 9999.0)
+                    trials_done = int(self.live_stage_a.get("trials_completed") or 0) + 1
+                    if cur_ppl < prev_best:
+                        self.live_stage_a = {
+                            "base_perplexity": base_ppl,
+                            "best_perplexity": round(cur_ppl, 3),
+                            "best_trial_id": tid,
+                            "best_val_loss": round(float(v_loss or 0.0), 4),
+                            "best_test_loss": round(float(summ.get("held_out_eval_loss") or v_loss or 0.0), 4),
+                            "trials_completed": trials_done,
+                        }
+                    else:
+                        self.live_stage_a["trials_completed"] = trials_done
+                elif tid.startswith("stageb-") and isinstance(summ, dict):
+                    parts = tid.split("-", 2)
+                    cand_label = parts[2] if len(parts) == 3 else tid
+                    ref_tid = next((k for k in sorted(self.live_curves) if k.startswith("stageb-00-")), tid)
+                    ref_c = self.live_curves.get(ref_tid) or []
+                    cand_c = self.live_curves.get(tid) or []
+                    if summ.get("status") == "oom":
+                        delta = 999.0
+                        acc = False
+                        rej = f"OOM ({float(summ.get('peak_mem_gb', 0)):.1f} GB)"
+                    else:
+                        delta = self._compute_curve_delta(ref_c, cand_c) if ref_c and cand_c else 0.0
+                        acc = delta <= 0.025
+                        rej = None if acc else f"Δ {delta:.4f} > 0.025"
+                    self._refresh_live_curve_equivalence(tid)
+                    self.live_stage_b_outcomes.append(
+                        {
+                            "trial_id": tid,
+                            "label": cand_label,
+                            "accepted": acc,
+                            "max_loss_curve_delta": delta,
+                            "rejection_reason": rej,
+                            "summary": {
+                                "mean_tokens_per_sec": float(tok_s),
+                                "world_size": w_size,
+                                "peak_mem_gb": float(summ.get("peak_mem_gb") or 0.0),
+                                "hardware_utilization_pct": float(summ.get("hardware_utilization_pct") or 0.0),
+                            },
+                        }
+                    )
+                elif tid.startswith("stagec-") and isinstance(summ, dict) and summ.get("label"):
+                    self.live_stage_c_outcomes.append(summ)
                 entry["message"] = (
                     f"Completed {tid} ({w_size}x GB10) · {float(tok_s):,.0f} tok/s · Held-Out PPL {float(ppl):.3f}"
                 )
@@ -620,6 +733,10 @@ class LiveRunState:
                 "completed_trials": self.completed_trials[-16:],
                 "live_curves": dict(self.live_curves),
                 "live_val_curves": dict(self.live_val_curves),
+                "live_curve_equivalence": dict(self.live_curve_equivalence),
+                "live_stage_a": dict(self.live_stage_a),
+                "live_stage_b_outcomes": list(self.live_stage_b_outcomes),
+                "live_stage_c_outcomes": list(self.live_stage_c_outcomes),
                 "live_step_metrics": dict(self.live_step_metrics),
                 "step_history": list(self.step_history[-40:]),
                 "live_firewall": list(self.live_firewall),
@@ -1013,7 +1130,53 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         held_files = ds.get("held_out_test_files") or ["pair_lj_cut.cpp", "neighbor_bin.cpp"]
 
         prompt_clean = req.prompt.strip() or "Optimize inner neighbor loop."
+        live_endpoint = os.getenv("CRUCIBLE_LLM_ENDPOINT", "").strip()
+        if live_endpoint:
+            try:
+                with httpx.Client(timeout=20.0) as hclient:
+                    r_ft = hclient.post(
+                        live_endpoint,
+                        json={
+                            "model": os.getenv("CRUCIBLE_SERVED_MODEL", "crucible-tuned"),
+                            "messages": [{"role": "user", "content": prompt_clean}],
+                            "temperature": 0.2,
+                            "max_tokens": 384,
+                        },
+                    )
+                    r_ft.raise_for_status()
+                    tuned_live_txt = r_ft.json()["choices"][0]["message"]["content"]
+                    base_live_txt = None
+                    if req.compare_base:
+                        r_base = hclient.post(
+                            live_endpoint,
+                            json={
+                                "model": model_name,
+                                "messages": [{"role": "user", "content": prompt_clean}],
+                                "temperature": 0.2,
+                                "max_tokens": 384,
+                            },
+                        )
+                        if r_base.status_code == 200:
+                            base_live_txt = r_base.json()["choices"][0]["message"]["content"]
+                    return {
+                        "source": "live_vllm_endpoint",
+                        "endpoint": live_endpoint,
+                        "prompt": prompt_clean,
+                        "model_id": model_name,
+                        "serving_config": win_serve["label"],
+                        "precision": win_serve["precision"],
+                        "ttft_ms": win_serve["ttft_ms"],
+                        "throughput_tok_s": win_serve["throughput_tokens_per_sec"],
+                        "base_perplexity": sa["base_held_out_perplexity"],
+                        "tuned_perplexity": sa["winning_summary"]["held_out_perplexity"],
+                        "base_output": base_live_txt,
+                        "tuned_output": tuned_live_txt,
+                    }
+            except Exception:
+                pass
+
         base_resp = (
+            f"// [Preview Sample — set CRUCIBLE_LLM_ENDPOINT to query live Fuzzball vLLM service]\n"
             f"// Generic untuned {model_name.split('/')[-1]} response (no private {ds['display_name']} domain context):\n"
             "void compute_forces(std::vector<Particle>& p, double cutoff) {\n"
             "    for (size_t i = 0; i < p.size(); ++i) {\n"
@@ -1022,6 +1185,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             "}"
         )
         tuned_resp = (
+            f"// [Preview Sample — set CRUCIBLE_LLM_ENDPOINT to query live Fuzzball vLLM service]\n"
             f"// Domain-tuned {model_name.split('/')[-1]} + LoRA (r={win_recipe['lora_rank']}, alpha={win_recipe['lora_alpha']}, "
             f"served via vLLM {win_serve['precision']} @ {win_serve['throughput_tokens_per_sec']:,.0f} tok/s)\n"
             f"// Aligned to private corpus conventions (verified on sealed test splits: {', '.join(held_files[:2])}):\n"

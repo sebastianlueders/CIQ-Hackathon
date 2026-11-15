@@ -710,3 +710,71 @@ def test_fuzzball_v43_mcp_stage_inspection_multinode_ssh_quoting_and_team3_volum
     syntax_check = subprocess.run(["bash", "-n", str(script_file)], capture_output=True, text=True, check=False)
     assert syntax_check.returncode == 0, syntax_check.stderr
 
+
+def test_live_mid_run_curve_equivalence_stage_waterfall_and_nvidia_smi_streaming() -> None:
+    """Verifies that LiveRunState updates loss curves, Max Delta equivalence, Stage B waterfall,
+    Stage C table, and physical nvidia-smi GPU sensors mid-run BEFORE run_completed."""
+    from crucible.server.app import LiveRunState
+
+    cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+    live = LiveRunState(cluster)
+    live.begin_run(cluster, "custom", "fuzzball_mcp", "Qwen/Qwen3-Coder-30B-A3B-Instruct", "builtin-lammps-cpp-bench")
+
+    # Reference Stage B baseline finishes
+    live.record_event(
+        {
+            "type": "trial_finished",
+            "trial_id": "stageb-00-pytorch-baseline-1node",
+            "kind": "train",
+            "workflow_id": "wf-b0",
+            "nodes_assigned": ["gb10-node-01"],
+            "summary": {
+                "status": "completed",
+                "mean_tokens_per_sec": 675.0,
+                "held_out_perplexity": 3.12,
+                "final_val_loss": 1.14,
+                "peak_mem_gb": 62.0,
+                "hardware_utilization_pct": 42.0,
+                "world_size": 1,
+                "loss_curve": [1.80, 1.50, 1.30, 1.18],
+            },
+        }
+    )
+
+    # Next Stage B candidate streams mid-run step 3/4 from real Fuzzball GB10 GPU with nvidia-smi sensors
+    live.record_event(
+        {
+            "type": "trial_step",
+            "trial_id": "stageb-01-sm121-all-kernels-2node-ddp",
+            "step": 3,
+            "max_steps": 4,
+            "train_loss": 1.306,
+            "val_loss": 1.321,
+            "tokens_per_sec": 2006.0,
+            "allreduce_ms": 53.3,
+            "inter_gpu_gbps": 48.2,
+            "payload_mb": 32.0,
+            "peak_mem_gb": 64.9,
+            "world_size": 2,
+            "nodes_assigned": ["gb10-node-01", "gb10-node-02"],
+            "partial_curve": [1.802, 1.505, 1.306],
+            "partial_val_curve": [1.820, 1.522, 1.321],
+            "gpu_util_pct": 91.0,
+            "gpu_temp_c": 63.0,
+            "gpu_power_w": 118.0,
+        }
+    )
+
+    snap = live.snapshot()
+    assert snap["state"] == "running"
+    assert len(snap["live_stage_b_outcomes"]) == 1
+    assert snap["live_curve_equivalence"]["reference_trial_id"] == "stageb-00-pytorch-baseline-1node"
+    assert snap["live_curve_equivalence"]["candidate_trial_id"] == "stageb-01-sm121-all-kernels-2node-ddp"
+    assert 0.0 < snap["live_curve_equivalence"]["max_delta"] <= 0.01
+    assert snap["live_curve_equivalence"]["accepted"] is True
+    assert snap["nodes"][0]["telemetry_source"] == "nvidia-smi"
+    assert snap["nodes"][0]["sm_util_pct"] == 91.0
+    assert snap["nodes"][0]["temp_c"] == 63
+    assert snap["nodes"][0]["power_w"] == 118
+
+
