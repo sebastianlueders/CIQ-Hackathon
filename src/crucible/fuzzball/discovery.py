@@ -229,6 +229,7 @@ def _clean_image(val: Any) -> str | None:
 class ClusterDiscoveryReport:
     fuzzball_cli_available: bool = False
     cluster_reachable: bool = False
+    all_nodes_cordoned: bool = False
     cluster_endpoint: str = "api.fb-hack.civilfritz.net:443"
     mcp_source_used: str | None = None
     fetch_workflow_inspected: str | None = None
@@ -619,13 +620,21 @@ def apply_mcp_discovery_payload(
                 discovered_queues.append(inv_entry)
 
             # Exclude tiny non-GPU substrate/management nodes (e.g. hack-sub1/sub2 @ 8 GiB) when GB10 nodes exist
-            gb10_only = [
+            gb10_all = [item for item in inventory if item["memory_gib"] >= 32.0]
+            gb10_ready = [
                 item
-                for item in inventory
-                if item["memory_gib"] >= 32.0 and "CORDONED" not in str(item["status"]).upper()
+                for item in gb10_all
+                if "CORDONED" not in str(item["status"]).upper()
             ]
-            if gb10_only:
-                inventory = gb10_only
+            if gb10_all and not gb10_ready:
+                report.all_nodes_cordoned = True
+                report.notes.append("All GB10 compute nodes on the cluster are currently CORDONED.")
+            if gb10_ready:
+                inventory = gb10_ready
+            elif gb10_all:
+                # Keep real GB10 hardware specs (e.g. SPARK05/SPARK06 @ 127.9 GiB) even while nodes are cordoned
+                spark_team = [item for item in gb10_all if "SPARK05" in item["hostname"] or "SPARK06" in item["hostname"]]
+                inventory = spark_team if len(spark_team) >= 2 else gb10_all
             if len(inventory) > 2:
                 inventory = inventory[:2]
 

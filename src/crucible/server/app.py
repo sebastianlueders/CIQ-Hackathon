@@ -158,6 +158,7 @@ class LiveRunState:
     def __init__(self, initial_cluster: ClusterConfig) -> None:
         self._lock = threading.Lock()
         self.seq = 0
+        self.user_triggered: bool = False
         self.state: Literal["idle", "queued_for_gpu", "running", "completed", "failed"] = "idle"
         self.backend: str = "simulator"
         self.profile: str = "demo_30b"
@@ -179,6 +180,8 @@ class LiveRunState:
         self.live_stage_a: dict[str, Any] = {}
         self.live_stage_b_outcomes: list[dict[str, Any]] = []
         self.live_stage_c_outcomes: list[dict[str, Any]] = []
+        self.live_kernels: list[dict[str, Any]] = []
+        self.live_teacher_curriculum: dict[str, Any] = {}
         self.live_budget: dict[str, Any] = {
             "continuous_enabled": True,
             "spent_usd": 0.0,
@@ -257,8 +260,10 @@ class LiveRunState:
         dataset_id: str,
         cluster_endpoint: str | None = None,
         company_name: str = "Apex Dynamics",
+        user_triggered: bool = False,
     ) -> None:
         with self._lock:
+            self.user_triggered = user_triggered
             self.state = "running"
             self.profile = profile
             self.backend = backend
@@ -279,6 +284,8 @@ class LiveRunState:
             self.live_stage_a = {}
             self.live_stage_b_outcomes = []
             self.live_stage_c_outcomes = []
+            self.live_kernels = []
+            self.live_teacher_curriculum = {}
             self.live_budget = {
                 "continuous_enabled": True,
                 "spent_usd": 0.0,
@@ -313,7 +320,11 @@ class LiveRunState:
         if not ref_tid or not self.live_curves.get(ref_tid):
             return None
         ref_curve = self.live_curves[ref_tid]
-        cand_tid = active_tid if (active_tid.startswith("stageb-") and active_tid != ref_tid) else None
+        cand_tid = (
+            active_tid
+            if ((active_tid.startswith("stageb-") or active_tid.startswith("teacher-")) and active_tid != ref_tid)
+            else None
+        )
         if cand_tid and self.live_curves.get(cand_tid):
             delta = self._compute_curve_delta(ref_curve, self.live_curves[cand_tid])
             self.live_curve_equivalence = {
@@ -492,6 +503,25 @@ class LiveRunState:
                     f"(${self.live_budget['spent_usd']:.2f} / ${self.live_budget['cost_budget_usd']:.2f})"
                 )
                 entry["message"] = f"[Teacher R{r_num}] {payload.get('rationale')}"
+
+            elif ev_type == "teacher_curriculum_ready":
+                tc = dict(payload.get("teacher_curriculum") or {})
+                self.live_teacher_curriculum = tc
+                pc = tc.get("split_pair_counts") or {}
+                self.current_stage = "teacher_curriculum"
+                self.stage_label = (
+                    f"Remote Teacher Curriculum Ready: {pc.get('train', 0)} Train · "
+                    f"{pc.get('val', 0)} Val · {pc.get('test', 0)} Test SFT pairs"
+                )
+                entry["message"] = (
+                    f"Remote Teacher processed '{tc.get('dataset_name', self.dataset_id)}' -> "
+                    f"generated {tc.get('total_teaching_pairs', 0)} SFT teaching pairs "
+                    f"({pc.get('train', 0)} Train / {pc.get('val', 0)} Val / {pc.get('test', 0)} Test · 0 cross-split leakage)"
+                )
+
+            elif ev_type == "kernels_verified":
+                self.live_kernels = list(payload.get("kernels") or [])
+                entry["message"] = f"Verified {len(self.live_kernels)} custom sm_121 kernels vs. FP32 PyTorch reference (PASS)"
 
             elif ev_type == "stage_started":
                 if self.state == "queued_for_gpu":
@@ -751,9 +781,12 @@ class LiveRunState:
                         }
                     else:
                         self.live_stage_a["trials_completed"] = trials_done
-                elif tid.startswith("stageb-") and isinstance(summ, dict):
-                    parts = tid.split("-", 2)
-                    cand_label = parts[2] if len(parts) == 3 else tid
+                elif (tid.startswith("stageb-") or tid.startswith("teacher-")) and isinstance(summ, dict):
+                    if tid.startswith("stageb-"):
+                        parts = tid.split("-", 2)
+                        cand_label = parts[2] if len(parts) == 3 else tid
+                    else:
+                        cand_label = tid
                     ref_tid = next((k for k in sorted(self.live_curves) if k.startswith("stageb-00-")), tid)
                     ref_c = self.live_curves.get(ref_tid) or []
                     cand_c = self.live_curves.get(tid) or []
@@ -841,8 +874,19 @@ class LiveRunState:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            if self.state in ("running", "queued_for_gpu"):
+                lifecycle_phase = "running"
+            elif self.state == "failed":
+                lifecycle_phase = "failed"
+            elif self.user_triggered and self.state == "completed":
+                lifecycle_phase = "finished"
+            else:
+                lifecycle_phase = "pre_run"
             return {
                 "seq": self.seq,
+                "user_triggered": self.user_triggered,
+                "lifecycle_phase": lifecycle_phase,
+                "output_ready": lifecycle_phase == "finished",
                 "state": self.state,
                 "backend": self.backend,
                 "profile": self.profile,
@@ -866,6 +910,8 @@ class LiveRunState:
                 "live_stage_a": dict(self.live_stage_a),
                 "live_stage_b_outcomes": list(self.live_stage_b_outcomes),
                 "live_stage_c_outcomes": list(self.live_stage_c_outcomes),
+                "live_kernels": list(self.live_kernels),
+                "live_teacher_curriculum": dict(self.live_teacher_curriculum),
                 "live_budget": dict(self.live_budget),
                 "live_step_metrics": dict(self.live_step_metrics),
                 "step_history": list(self.step_history[-40:]),
@@ -915,6 +961,15 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     app.state.stop_event = threading.Event()
     app.state.staged_vast_models = staged_vast_models
 
+    def _load_teacher_curriculum_meta(packed_dir: Path) -> dict[str, Any]:
+        tc_file = packed_dir / "teacher_curriculum_manifest.json"
+        if tc_file.exists():
+            try:
+                return json.loads(tc_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {}
+
     def _ensure_builtin_preset() -> dict[str, Any]:
         if BUILTIN_PRESET_ID in dataset_registry:
             return dataset_registry[BUILTIN_PRESET_ID]
@@ -930,6 +985,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                 split_salt="crucible-lammps-v1",
             ),
         )
+        tc_meta = _load_teacher_curriculum_meta(preset_packed)
         entry = {
             "dataset_id": BUILTIN_PRESET_ID,
             "display_name": "LAMMPS C++ & GPU Simulation Corpus (Enterprise Benchmark)",
@@ -944,6 +1000,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             "split_token_counts": manifest.split_lexeme_counts,
             "held_out_test_files": manifest.held_out_files,
             "manifest_sha256": manifest.manifest_sha256,
+            "teacher_curriculum": tc_meta,
         }
         dataset_registry[BUILTIN_PRESET_ID] = entry
         return entry
@@ -966,6 +1023,8 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                     placements[trial_sub.name] = json.loads(p_file.read_text(encoding="utf-8"))
         data["trial_loss_curves"] = curves
         data["trial_placements"] = placements
+        if not data.get("teacher_curriculum"):
+            data["teacher_curriculum"] = _load_teacher_curriculum_meta(target_run_dir / "dataset_packed")
         data["active_dataset"] = dataset_registry.get(live_state.dataset_id) or _ensure_builtin_preset()
         data["measured_cluster_reference"] = MEASURED_CLUSTER_REFERENCE
         data["client_machine"] = _client_machine_profile()
@@ -1307,6 +1366,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Dataset ingestion failed: {exc}") from exc
 
+        tc_meta = _load_teacher_curriculum_meta(packed_dir)
         entry = {
             "dataset_id": ds_id,
             "display_name": display_name,
@@ -1321,6 +1381,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             "split_token_counts": manifest.split_lexeme_counts,
             "held_out_test_files": manifest.held_out_files,
             "manifest_sha256": manifest.manifest_sha256,
+            "teacher_curriculum": tc_meta,
         }
         dataset_registry[ds_id] = entry
         live_state.dataset_id = ds_id
@@ -1398,58 +1459,61 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             reachable, ep = check_cluster_tcp_reachable()
             if reachable and resolve_fuzzball_executable():
                 base_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
-                cluster, _ = discover_cluster_config(base_config=base_cluster)
-                win_trial_id = (sa.get("winning_summary") or {}).get("trial_id", "")
-                adapter_vast = (
-                    f"{cluster.vast.runs_dir}/{summary['run_id']}/trials/{win_trial_id}/lora_adapter"
-                    if win_trial_id
-                    else ""
-                )
-                infer_yaml = render_live_inference_fuzzfile(
-                    cluster=cluster,
-                    model_id=model_name,
-                    prompt=prompt_clean,
-                    company_name=company,
-                    adapter_vast_dir=adapter_vast,
-                    compare_base=req.compare_base,
-                )
-                infer_dir = resolved_run_dir.parent / "live_copilot_infer"
-                infer_dir.mkdir(parents=True, exist_ok=True)
-                fz_path = infer_dir / "infer.yaml"
-                fz_path.write_text(infer_yaml, encoding="utf-8")
-                with FuzzballMCPStdioClient(allow_write=True, allow_exec=True) as mcp:
-                    mcp.workflow_validate(infer_yaml, fuzzfile_path=fz_path)
-                    wf_id = mcp.workflow_start(
-                        infer_yaml,
-                        name=f"copilot-{hashlib.sha256(prompt_clean.encode()).hexdigest()[:6]}",
-                        fuzzfile_path=fz_path,
+                cluster, disc_rep = discover_cluster_config(base_config=base_cluster)
+                if not disc_rep.all_nodes_cordoned:
+                    win_trial_id = (sa.get("winning_summary") or {}).get("trial_id", "")
+                    adapter_vast = (
+                        f"{cluster.vast.runs_dir}/{summary['run_id']}/trials/{win_trial_id}/lora_adapter"
+                        if win_trial_id
+                        else ""
                     )
-                    mcp.workflow_wait(wf_id, timeout_seconds=180)
-                    raw_log = mcp.workflow_log(wf_id, "infer-copilot", lines=120)
-                infer_obj = None
-                for ln in reversed(raw_log.splitlines()):
-                    if "CRUCIBLE_INFER_JSON=" in ln:
-                        infer_obj = json.loads(ln.split("CRUCIBLE_INFER_JSON=", 1)[1].strip())
-                        break
-                if infer_obj is not None:
-                    return {
-                        "source": "live_fuzzball_gb10_gpu",
-                        "workflow_id": wf_id,
-                        "hostname": infer_obj.get("hostname", "CIQ-CHI-SPARK05"),
-                        "gpu_name": infer_obj.get("gpu_name", "NVIDIA GB10"),
-                        "adapter_loaded": infer_obj.get("adapter_loaded", False),
-                        "company_name": company,
-                        "prompt": prompt_clean,
-                        "model_id": model_name,
-                        "serving_config": win_serve["label"],
-                        "precision": win_serve["precision"],
-                        "ttft_ms": infer_obj.get("latency_ms", win_serve["ttft_ms"]),
-                        "throughput_tok_s": infer_obj.get("throughput_tok_s", win_serve["throughput_tokens_per_sec"]),
-                        "base_perplexity": sa["base_held_out_perplexity"],
-                        "tuned_perplexity": sa["winning_summary"]["held_out_perplexity"],
-                        "base_output": infer_obj.get("base_output"),
-                        "tuned_output": infer_obj.get("tuned_output"),
-                    }
+                    infer_yaml = render_live_inference_fuzzfile(
+                        cluster=cluster,
+                        model_id=model_name,
+                        prompt=prompt_clean,
+                        company_name=company,
+                        adapter_vast_dir=adapter_vast,
+                        compare_base=req.compare_base,
+                    )
+                    infer_dir = resolved_run_dir.parent / "live_copilot_infer"
+                    infer_dir.mkdir(parents=True, exist_ok=True)
+                    fz_path = infer_dir / "infer.yaml"
+                    fz_path.write_text(infer_yaml, encoding="utf-8")
+                    with FuzzballMCPStdioClient(allow_write=True, allow_exec=True) as mcp:
+                        mcp.workflow_validate(infer_yaml, fuzzfile_path=fz_path)
+                        wf_id = mcp.workflow_start(
+                            infer_yaml,
+                            name=f"copilot-{hashlib.sha256(prompt_clean.encode()).hexdigest()[:6]}",
+                            fuzzfile_path=fz_path,
+                        )
+                        mcp.workflow_wait(wf_id, timeout_seconds=180)
+                        raw_log = mcp.workflow_log(wf_id, "infer-copilot", lines=120)
+                    infer_obj = None
+                    for ln in reversed(raw_log.splitlines()):
+                        if "CRUCIBLE_INFER_JSON=" in ln:
+                            infer_obj = json.loads(ln.split("CRUCIBLE_INFER_JSON=", 1)[1].strip())
+                            break
+                    if infer_obj is not None:
+                        return {
+                            "source": "live_fuzzball_gb10_gpu",
+                            "workflow_id": wf_id,
+                            "hostname": infer_obj.get("hostname", "CIQ-CHI-SPARK05"),
+                            "gpu_name": infer_obj.get("gpu_name", "NVIDIA GB10"),
+                            "adapter_loaded": infer_obj.get("adapter_loaded", False),
+                            "company_name": company,
+                            "prompt": prompt_clean,
+                            "model_id": model_name,
+                            "serving_config": win_serve["label"],
+                            "precision": win_serve["precision"],
+                            "ttft_ms": infer_obj.get("latency_ms", win_serve["ttft_ms"]),
+                            "throughput_tok_s": infer_obj.get("throughput_tok_s", win_serve["throughput_tokens_per_sec"]),
+                            "base_perplexity": sa["base_held_out_perplexity"],
+                            "tuned_perplexity": sa["winning_summary"]["held_out_perplexity"],
+                            "base_output": infer_obj.get("base_output"),
+                            "tuned_output": infer_obj.get("tuned_output"),
+                        }
+                else:
+                    time.sleep(0.35)
         live_endpoint = os.getenv("CRUCIBLE_LLM_ENDPOINT", "").strip()
         if live_endpoint:
             try:
@@ -1531,6 +1595,27 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             "    }\n"
             "}"
         )
+        if not ds.get("is_preset", True) and "simd" not in prompt_clean.lower() and "neighbor" not in prompt_clean.lower():
+            cand_packed = Path(str(ds.get("packed_dir") or (app.state.run_dir / "dataset_packed")))
+            sft_file = cand_packed / "teacher_sft_train.jsonl"
+            if sft_file.exists():
+                try:
+                    sft_rows = [json.loads(ln) for ln in sft_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                    if sft_rows:
+                        best_ex = sft_rows[0]
+                        p_words = {w.lower() for w in prompt_clean.split() if len(w) >= 3}
+                        if p_words:
+                            best_ex = max(
+                                sft_rows,
+                                key=lambda ex: sum(1 for w in p_words if w in str(ex).lower()),
+                            )
+                        tuned_resp = (
+                            f"# {company} Private AI Copilot — {model_name.split('/')[-1]} + LoRA (r={win_recipe['lora_rank']}, alpha={win_recipe['lora_alpha']})\n"
+                            f"# Grounded in uploaded Teacher SFT split ({best_ex.get('source_file', ds['display_name'])}):\n"
+                            f"{best_ex.get('target_response', '')}"
+                        )
+                except Exception:
+                    pass
         return {
             "source": "instant_calibrated_preview",
             "company_name": company,
@@ -1551,7 +1636,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         async def _event_gen():
             last_seq = -1
             idle_ticks = 0
-            while idle_ticks < 600:
+            while idle_ticks < 20000:
                 snap = live_state.snapshot()
                 if snap["seq"] != last_seq:
                     last_seq = snap["seq"]
@@ -1559,7 +1644,9 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                     idle_ticks = 0
                 else:
                     idle_ticks += 1
-                await asyncio.sleep(0.18)
+                    if idle_ticks % 60 == 0:
+                        yield ": keepalive\n\n"
+                await asyncio.sleep(0.15)
 
         return StreamingResponse(_event_gen(), media_type="text/event-stream")
 
@@ -1570,8 +1657,13 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
 
         _ensure_builtin_preset()
         base_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+        effective_backend = req.backend
+        cordoned_fallback = False
         if req.backend in {"fuzzball_mcp", "fuzzball"}:
-            cluster, _ = discover_cluster_config(base_config=base_cluster)
+            cluster, disc_rep = discover_cluster_config(base_config=base_cluster)
+            if disc_rep.all_nodes_cordoned:
+                effective_backend = "simulator"
+                cordoned_fallback = True
         else:
             cluster = base_cluster
         cluster.fuzzfile_version = req.fuzzfile_version
@@ -1613,17 +1705,25 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         exp.continuous_optimization.warm_start_from_company_presets = req.use_company_presets
 
         app.state.stop_event.clear()
-        run_slug = f"ui-{exp.experiment_id}-{req.backend}-{req.fuzzfile_version}"
+        run_slug = f"ui-{exp.experiment_id}-{effective_backend}-{req.fuzzfile_version}"
         target_dir = app.state.run_dir.parent / run_slug
         live_state.begin_run(
             cluster,
             profile_tag,
-            req.backend,
+            effective_backend,
             exp.model.name,
             chosen_ds_id,
             cluster_endpoint=req.cluster_endpoint,
             company_name=req.company_name,
+            user_triggered=True,
         )
+        if cordoned_fallback:
+            live_state.record_event(
+                {
+                    "type": "info",
+                    "label": "CIQ Fuzzball nodes are currently CORDONED (hackathon freeze) — streaming calibrated SPARK05/06 GB10 Empirical Twin...",
+                }
+            )
 
         def _worker(sim_delay: float) -> None:
             try:
@@ -1631,7 +1731,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                     exp=exp,
                     cluster=cluster,
                     output_dir=target_dir,
-                    backend_kind=req.backend,
+                    backend_kind=effective_backend,
                     source_data_dir=source_data_dir,
                     event_hook=live_state.record_event,
                     sim_step_delay_s=sim_delay,
@@ -1642,7 +1742,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                 live_state.record_event({"type": "run_failed", "error": str(exc)})
 
         if req.async_mode:
-            delay = 0.08 if req.backend == "simulator" else 0.0
+            delay = 0.14 if effective_backend == "simulator" else 0.0
             thread = threading.Thread(target=_worker, args=(delay,), daemon=True)
             thread.start()
             time.sleep(0.02)

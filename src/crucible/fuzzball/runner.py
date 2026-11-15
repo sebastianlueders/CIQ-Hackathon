@@ -1321,7 +1321,7 @@ class CalibratedSimulatorBackend:
                         }
                     )
                     if self.step_delay_s > 0:
-                        time.sleep(min(0.035, self.step_delay_s * 0.45))
+                        time.sleep(min(0.18, self.step_delay_s))
 
         final_val = round(loss_curve[-1] + val_gap + self._jitter(recipe.short_id(), 0.002), 5)
         held_out = round(final_val + test_gap, 5)
@@ -1418,7 +1418,7 @@ class CalibratedSimulatorBackend:
             }
         )
         if self.step_delay_s > 0:
-            time.sleep(self.step_delay_s)
+            time.sleep(min(0.35, self.step_delay_s * 2.2))
 
         prec_speed = {"BF16": 1.0, "FP8": 1.78, "NVFP4": 2.68}[cand.precision]
         kernel_mult = 1.22 if cand.use_low_prec_decode_kernel else 1.0

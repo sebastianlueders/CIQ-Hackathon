@@ -418,8 +418,8 @@ def test_validator_enforces_team3_resource_bounds_and_reserved_annotations() -> 
 
     # Validate bundled repo workflows against Team 3 hardware bounds
     assert validate_fuzzfile(repo_root() / "workflows" / "00-fetch.yaml", cluster=cluster) == [
-        "fetch-base-model",
-        "fetch-lammps-source",
+        "fetch-data",
+        "fetch-model",
     ]
     assert validate_fuzzfile(repo_root() / "workflows" / "crucible-studio.yaml", cluster=cluster) == [
         "crucible-studio"

@@ -218,8 +218,29 @@ def run_autoresearch_pipeline(
     if held_out_file.exists():
         (processed_dir / "test.jsonl").write_bytes(held_out_file.read_bytes())
 
+    teacher_manifest_file = processed_dir / "teacher_curriculum_manifest.json"
+    teacher_curriculum: dict[str, Any] = (
+        json.loads(teacher_manifest_file.read_text(encoding="utf-8"))
+        if teacher_manifest_file.exists()
+        else {}
+    )
+    _emit(
+        {
+            "type": "teacher_curriculum_ready",
+            "teacher_curriculum": teacher_curriculum,
+        }
+    )
+    if sim_step_delay_s > 0:
+        time.sleep(min(0.35, sim_step_delay_s * 2.0))
+
     # 2. Custom sm_121 Kernel Correctness & Microbenchmark Suite
     caps, kernel_results = run_kernel_suite(vocab_size=8192, hidden_size=128, num_tokens=64)
+    _emit(
+        {
+            "type": "kernels_verified",
+            "kernels": [k.to_dict() for k in kernel_results],
+        }
+    )
 
     # 3. Privacy Firewall + Pluggable Advisor Setup
     audit_log_path = output_dir / "privacy_audit.jsonl"
@@ -641,6 +662,7 @@ def run_autoresearch_pipeline(
         "backend": backend_kind,
         "model_profile": exp.model.model_dump(),
         "dataset_format_summary": format_summary,
+        "teacher_curriculum": teacher_curriculum,
         "cluster": cluster.model_dump(),
         "hardware_capabilities": caps.to_dict(),
         "dataset_manifest": asdict(manifest),
