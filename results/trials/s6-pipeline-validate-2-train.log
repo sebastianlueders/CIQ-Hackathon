@@ -1,0 +1,61 @@
+RESULT {"kind": "config", "world_size": 1, "model": "/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused", "data": "/data/tok/lammps", "out": "/runs/pipeline/train", "seq_len": 4096, "micro_batch": 1, "grad_accum": 8, "lr": 0.001, "warmup_tokens": 250000, "schedule": "cosine", "train_tokens": 500000, "lora_r": 8, "lora_alpha": 16, "lora_dropout": 0.0, "targets": ["q_proj", "k_proj", "v_proj", "o_proj"], "grad_ckpt": true, "eval_every_tokens": 2000000, "eval_set": "eval_small.bin", "seed": 0, "resume": false, "save_adapter": true, "experts_impl": "grouped_mm", "compile": true, "t": 1794694302.5285897}
+RESULT {"kind": "mem", "rss_gib": 0.6, "cgroup_gib": null, "cuda_alloc_gib": 0.0, "device_used_gib": 16.2, "t": 1794694303.5616643}
+RESULT {"kind": "mem", "rss_gib": 5.4, "cgroup_gib": null, "cuda_alloc_gib": 2.7, "device_used_gib": 22.8, "t": 1794694323.562437}
+RESULT {"kind": "mem", "rss_gib": 3.3, "cgroup_gib": null, "cuda_alloc_gib": 21.3, "device_used_gib": 39.6, "t": 1794694343.563222}
+RESULT {"kind": "mem", "rss_gib": 5.3, "cgroup_gib": null, "cuda_alloc_gib": 41.0, "device_used_gib": 61.6, "t": 1794694363.563992}
+RESULT {"kind": "loaded", "seconds": 60.1, "loader": "direct", "experts_impl": "grouped_mm", "t": 1794694379.812594}
+RESULT {"kind": "compile", "mode": "per-layer dynamic", "setup_s": 1.3, "t": 1794694381.4227803}
+RESULT {"kind": "setup", "load_s": 60.1, "trainable_params": 6684672, "resumed": false, "train_tokens_available": 18374965, "eval_tokens": 193616, "mem_gib": 56.9, "t": 1794694381.4488943}
+RESULT {"kind": "mem", "rss_gib": 2.9, "cgroup_gib": null, "cuda_alloc_gib": 56.9, "device_used_gib": 75.5, "t": 1794694383.5649207}
+RESULT {"kind": "mem", "rss_gib": 3.5, "cgroup_gib": null, "cuda_alloc_gib": 56.9, "device_used_gib": 78.4, "t": 1794694403.6492083}
+RESULT {"kind": "mem", "rss_gib": 3.6, "cgroup_gib": null, "cuda_alloc_gib": 59.5, "device_used_gib": 84.4, "t": 1794694423.6555147}
+RESULT {"kind": "mem", "rss_gib": 3.6, "cgroup_gib": null, "cuda_alloc_gib": 59.5, "device_used_gib": 84.4, "t": 1794694443.6571066}
+RESULT {"kind": "eval", "tokens": 0, "eval_loss": 1.17509, "ppl": 3.2384, "t": 1794694462.7620378}
+RESULT {"kind": "mem", "rss_gib": 3.7, "cgroup_gib": null, "cuda_alloc_gib": 56.9, "device_used_gib": 84.5, "t": 1794694463.6653717}
+RESULT {"kind": "mem", "rss_gib": 3.7, "cgroup_gib": null, "cuda_alloc_gib": 57.1, "device_used_gib": 85.3, "t": 1794694484.1250231}
+RESULT {"kind": "mem", "rss_gib": 3.8, "cgroup_gib": null, "cuda_alloc_gib": 57.7, "device_used_gib": 87.8, "t": 1794694504.1264138}
+RESULT {"kind": "train", "step": 1, "tokens": 32768, "loss": 0.87296, "lr": 0.0, "grad_norm": 0.2457, "step_s": 58.086, "tok_s": 564.1, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694520.8573797}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.7, "device_used_gib": 88.0, "t": 1794694524.1273954}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 88.0, "t": 1794694544.1283584}
+RESULT {"kind": "train", "step": 2, "tokens": 65536, "loss": 0.652, "lr": 0.000131072, "grad_norm": 0.2484, "step_s": 32.345, "tok_s": 1013.1, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694553.203271}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 88.0, "t": 1794694564.1295862}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 87.3, "t": 1794694584.1306715}
+RESULT {"kind": "train", "step": 3, "tokens": 98304, "loss": 0.67114, "lr": 0.000262144, "grad_norm": 0.1902, "step_s": 32.294, "tok_s": 1014.7, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694585.4976184}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 87.3, "t": 1794694604.1320548}
+RESULT {"kind": "train", "step": 4, "tokens": 131072, "loss": 0.70807, "lr": 0.000393216, "grad_norm": 0.1982, "step_s": 32.087, "tok_s": 1021.2, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694617.5848448}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 87.3, "t": 1794694624.1330154}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.1, "device_used_gib": 87.3, "t": 1794694644.1342967}
+RESULT {"kind": "train", "step": 5, "tokens": 163840, "loss": 0.6026, "lr": 0.000524288, "grad_norm": 0.1769, "step_s": 32.249, "tok_s": 1016.1, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694649.8340957}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.1, "device_used_gib": 87.3, "t": 1794694664.135499}
+RESULT {"kind": "train", "step": 6, "tokens": 196608, "loss": 0.92931, "lr": 0.00065536, "grad_norm": 0.1464, "step_s": 32.137, "tok_s": 1019.6, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694681.9714}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.1, "device_used_gib": 87.3, "t": 1794694684.136686}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.1, "device_used_gib": 87.3, "t": 1794694704.1377602}
+RESULT {"kind": "train", "step": 7, "tokens": 229376, "loss": 0.49908, "lr": 0.000786432, "grad_norm": 0.1316, "step_s": 32.335, "tok_s": 1013.4, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694714.3070407}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.3, "device_used_gib": 87.3, "t": 1794694724.1389368}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.3, "device_used_gib": 87.3, "t": 1794694744.1399662}
+RESULT {"kind": "train", "step": 8, "tokens": 262144, "loss": 0.60387, "lr": 0.000917504, "grad_norm": 0.1645, "step_s": 32.359, "tok_s": 1012.6, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694746.6669376}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.4, "device_used_gib": 87.3, "t": 1794694764.1412241}
+RESULT {"kind": "train", "step": 9, "tokens": 294912, "loss": 0.53913, "lr": 0.000994770227978187, "grad_norm": 0.2868, "step_s": 32.372, "tok_s": 1012.2, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694779.039592}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.4, "device_used_gib": 87.3, "t": 1794694784.14279}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 87.3, "t": 1794694804.1439865}
+RESULT {"kind": "train", "step": 10, "tokens": 327680, "loss": 0.59725, "lr": 0.000930213976670183, "grad_norm": 0.1532, "step_s": 32.263, "tok_s": 1015.6, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694811.303256}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 87.3, "t": 1794694824.1452239}
+RESULT {"kind": "train", "step": 11, "tokens": 360448, "loss": 0.59341, "lr": 0.0008020950082035226, "grad_norm": 0.0817, "step_s": 32.185, "tok_s": 1018.1, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694843.4884965}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 87.3, "t": 1794694844.1464064}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 87.3, "t": 1794694864.1476204}
+RESULT {"kind": "train", "step": 12, "tokens": 393216, "loss": 0.60988, "lr": 0.0006318317612863893, "grad_norm": 0.1006, "step_s": 31.956, "tok_s": 1025.4, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694875.4450338}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 87.3, "t": 1794694884.1494877}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.6, "device_used_gib": 87.2, "t": 1794694904.1504858}
+RESULT {"kind": "train", "step": 13, "tokens": 425984, "loss": 0.63967, "lr": 0.0004478881937698019, "grad_norm": 0.0718, "step_s": 32.24, "tok_s": 1016.4, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694907.6858978}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.6, "device_used_gib": 87.2, "t": 1794694924.1517742}
+RESULT {"kind": "train", "step": 14, "tokens": 458752, "loss": 0.64619, "lr": 0.0002810152871342581, "grad_norm": 0.0656, "step_s": 32.233, "tok_s": 1016.6, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694939.919594}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.3, "device_used_gib": 87.2, "t": 1794694944.152874}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.0, "device_used_gib": 87.2, "t": 1794694964.154038}
+RESULT {"kind": "train", "step": 15, "tokens": 491520, "loss": 0.73946, "lr": 0.00015911021512074008, "grad_norm": 0.1011, "step_s": 32.257, "tok_s": 1015.9, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794694972.1767}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.7, "device_used_gib": 87.2, "t": 1794694984.1557646}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 57.7, "device_used_gib": 87.2, "t": 1794695004.1573567}
+RESULT {"kind": "train", "step": 16, "tokens": 524288, "loss": 0.63513, "lr": 0.00010255260101522299, "grad_norm": 0.1146, "step_s": 32.362, "tok_s": 1012.6, "peak_mem_gib": 64.7, "world_size": 1, "allreduce_s": 0.0, "t": 1794695004.5387979}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 59.6, "device_used_gib": 87.2, "t": 1794695024.158843}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 59.6, "device_used_gib": 87.2, "t": 1794695044.160358}
+RESULT {"kind": "eval", "tokens": 524288, "eval_loss": 1.05729, "ppl": 2.8786, "t": 1794695058.2774434}
+RESULT {"kind": "summary", "tokens": 524288, "steps": 16, "final_eval_loss": 1.05729, "t": 1794695058.5903404}

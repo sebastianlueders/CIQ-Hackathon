@@ -1,0 +1,11 @@
+DIAG self=trial-0 fqdn=trial-0.652b8c11-3857-4b9a-ba19-b795b32c8fd6.0fb52dc2-302d-4d77-9f95-b0cb2c675697.fuzzball hostlist=trial-0 trial-1 variant=c10d
+DIAG env: MULTINODE_SSH_WRAPPER=/multinode/rsh-wrapper MULTINODE_TOTAL_SLOTS=32 MULTINODE_HOSTLIST=trial-1:16,trial-0:16 FB_JOB_KIND=multinode MULTINODE_HOSTLIST_NOSLOTS=trial-1,trial-0 MULTINODE_WRAPPER_IMPL=generic MULTINODE_NODE_IP=192.168.99.15 MULTINODE_WRAPPER_CONTAINER_ID=01b7ac1d-dcc8-54da-a679-b98cf8e239e5.0 MN_NODES=2 RANK=0 MULTINODE_WRAPPER_LISTEN_ADDR=192.168.99.15 PATH=/multinode:/usr/local/lib/python3.12/dist-packages/torch_tensorrt/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/mpi/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin:/opt/amazon/efa/bin:/opt/tensorrt/bin MULTINODE_RSH_WRAPPER=/multinode/rsh-wrapper MULTINODE_WRAPPER_SLOTS=16 MULTINODE_WRAPPER_TOTAL_HOSTS=2 
+DIAG resolve trial-0 -> 192.168.99.15 
+DIAG resolve trial-1 -> 192.168.99.14 
+DIAG ifaces: enP2p1s0f0np0 enP2p1s0f1np1 enp1s0f0np0 enp1s0f1np1 lan0 lo wlP9s9  ib=rdma_cm umad0 umad1 umad2 umad3 uverbs0 uverbs1 uverbs2 uverbs3 
+DIAG head (trial-0, 192.168.99.15) starting rank 1 on trial-1
+DIAG node_rank=0 master=trial-0 master_ip=192.168.99.15
+DIAG tcp_check rank0 accepted from ('192.168.99.14', 56996)
+DIAG launching: torch.distributed.run --nnodes 2 --rdzv-backend c10d --rdzv-endpoint 192.168.99.15:29500 --rdzv-id dp-16-job
+== worker log /tmp/rank1.log
+--> MULTINODE WRAPPER ERROR (node ip[192.168.99.15] hostname[trial-0]): application command execution error: exit status 1

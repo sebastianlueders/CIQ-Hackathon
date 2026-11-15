@@ -1,0 +1,146 @@
+[
+ {
+  "id": "s4-perf-dp2-ip",
+  "workflow": "23663b9e-e8ef-4e1a-9cbf-afbfda98fea9",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-c10d",
+  "workflow": "5f93a52b-eb1a-4b0e-a2cd-fab325e3ca6e",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-fused-ce",
+  "workflow": "1408663d-12b3-40af-88af-27fe07361ea0",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-mb2",
+  "workflow": "73ef06a3-ba62-468f-851b-5791ff55bcfd",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-nockpt",
+  "workflow": "f8a62b36-5935-4587-8534-9951c5bc4303",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-seq8192",
+  "workflow": "cc0a8c3e-c8ce-4f84-84d3-8bd5dd2f4602",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s5-serve-ft-adapter",
+  "workflow": "6e0bf8a1-cfad-4844-92f1-aff413c2f9a8",
+  "job": "run",
+  "kind": "serve"
+ },
+ {
+  "id": "s6-pipeline-validate-2-train",
+  "workflow": "7f86c8ff-ba3b-4ded-8e1c-f7466bac38cc",
+  "job": "train",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s6-pipeline-validate-2-serve",
+  "workflow": "7f86c8ff-ba3b-4ded-8e1c-f7466bac38cc",
+  "job": "serve-and-verify",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s4-dp2-network-diag",
+  "workflow": "7335a6d4-257d-4e81-9337-e061e65fd282",
+  "job": "diag",
+  "kind": "diag"
+ },
+ {
+  "id": "s4-perf-dp2-ip-2",
+  "workflow": "8216d998-0222-4d36-b4ef-317d3df856af",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-c10d-2",
+  "workflow": "652b8c11-3857-4b9a-ba19-b795b32c8fd6",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack-nockpt",
+  "workflow": "e12d3158-ee5e-41fc-94dc-2fb3f94c9501",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack",
+  "workflow": "f8b5b687-341e-4b93-8b94-50a0f4232521",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-compile-stack",
+  "workflow": "f2860506-834a-42b4-b439-a939434f48a7",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack-seq8192-mb1",
+  "workflow": "57a98aed-ed67-4589-bab2-11b1034a185e",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack-seq8192-mb2",
+  "workflow": "d6043638-ef8c-4061-b710-46baa0d28d19",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-dp2-stack-nockpt-mb1",
+  "workflow": "2d936225-4938-463b-91b7-a51275dc0593",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-train-dp2-winner-2",
+  "workflow": "011bd0ce-00a7-408f-aefe-8ce5d1f3ad42",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s6-pipeline-4m-train",
+  "workflow": "c849caec-afcb-48e8-ad1f-1b43e7c79e68",
+  "job": "train",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s6-pipeline-4m-serve",
+  "workflow": "c849caec-afcb-48e8-ad1f-1b43e7c79e68",
+  "job": "serve-and-verify",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s5-tune-moe-gb10-3",
+  "workflow": "4fdd9f40-01af-4f46-9db0-a0dfb728d3ea",
+  "job": "run",
+  "kind": "serve"
+ },
+ {
+  "id": "s4-perf-stack-1node",
+  "workflow": "d9a4ec78-1e50-4d9d-be1a-3aab0d1125e7",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-triton-grouped",
+  "workflow": "18542639-4410-46cc-8304-2ca5675a849a",
+  "job": "trial",
+  "kind": "trial"
+ }
+]

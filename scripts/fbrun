@@ -1,0 +1,12 @@
+#!/bin/bash
+# Like `fuzzball run`, but with a workflow name (fuzzball run has no --name flag).
+# Usage: scripts/fbrun NAME [fuzzball run flags...]     e.g.
+#        scripts/fbrun s1-ingest-lammps --image docker://python:3.12-slim --script x.sh
+# Prints the workflow ID. Names follow s<stage>-<what>[-<detail>].
+set -euo pipefail
+FB="$(cd "$(dirname "$0")/.." && pwd)/fuzzball"
+name="$1"; shift
+tmp=$(mktemp -t fbrun.XXXX).yaml
+"$FB" run --dry-run "$@" > "$tmp"
+"$FB" workflow start "$tmp" --name "$name" | tail -1
+rm -f "$tmp"

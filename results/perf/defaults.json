@@ -1,0 +1,41 @@
+{
+ "baseline": "s4-perf-experts-grouped",
+ "baseline_tok_s": 677.8,
+ "adopted": {
+  "compile": true,
+  "grad_ckpt": false,
+  "fused_ce": true
+ },
+ "decisions": [
+  {
+   "candidate": "compile",
+   "baseline": "s4-perf-experts-grouped",
+   "adopted": true,
+   "speedup": 1.492,
+   "mem_saved_gib": 0.0,
+   "tok_s": 1011.3,
+   "max_rel_loss_diff": 0.006,
+   "rule": "loss within 1% and (speedup >= 1.05 or not slower and frees >= 5.0 GiB)"
+  },
+  {
+   "candidate": "no_checkpointing",
+   "baseline": "s4-perf-compile",
+   "adopted": true,
+   "speedup": 1.35,
+   "mem_saved_gib": -21.0,
+   "tok_s": 1365.75,
+   "max_rel_loss_diff": 0.0016,
+   "rule": "loss within 1% and (speedup >= 1.05 or not slower and frees >= 5.0 GiB)"
+  },
+  {
+   "candidate": "fused_ce",
+   "baseline": "s4-perf-compile",
+   "adopted": true,
+   "speedup": 1.023,
+   "mem_saved_gib": 6.2,
+   "tok_s": 1034.85,
+   "max_rel_loss_diff": 0.0021,
+   "rule": "loss within 1% and (speedup >= 1.05 or not slower and frees >= 5.0 GiB)"
+  }
+ ]
+}

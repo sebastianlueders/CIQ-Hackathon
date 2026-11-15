@@ -1,0 +1,1932 @@
+{
+ "workflow": "d05ef942-1cf3-4e60-8218-2c05295b6291",
+ "name": "s6-pipeline-final-2node",
+ "started": "2026-11-15T10:58",
+ "finished": "2026-11-15T12:04",
+ "records": [
+  {
+   "kind": "config",
+   "world_size": 2,
+   "model": "/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused",
+   "data": "/data/tok/lammps",
+   "out": "/runs/pipeline/train",
+   "seq_len": 4096,
+   "micro_batch": 1,
+   "grad_accum": 8,
+   "lr": 0.001,
+   "warmup_tokens": 250000,
+   "schedule": "cosine",
+   "train_tokens": 4000000,
+   "lora_r": 8,
+   "lora_alpha": 16,
+   "lora_dropout": 0.0,
+   "targets": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj"
+   ],
+   "grad_ckpt": false,
+   "eval_every_tokens": 2000000,
+   "eval_set": "eval.bin",
+   "seed": 0,
+   "resume": false,
+   "save_adapter": true,
+   "experts_impl": "grouped_mm",
+   "compile": true,
+   "fused_ce": true,
+   "t": 1794762712.8601627
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 1.2,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 0.0,
+   "device_used_gib": 18.9,
+   "t": 1794762712.9123435
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.4,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 1.2,
+   "device_used_gib": 23.7,
+   "t": 1794762732.9131205
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 3.6,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 21.3,
+   "device_used_gib": 43.3,
+   "t": 1794762752.9146454
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.3,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 39.5,
+   "device_used_gib": 62.5,
+   "t": 1794762772.9155204
+  },
+  {
+   "kind": "loaded",
+   "seconds": 61.5,
+   "loader": "direct",
+   "experts_impl": "grouped_mm",
+   "t": 1794762792.3012342
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 3.3,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 56.9,
+   "device_used_gib": 79.2,
+   "t": 1794762792.9198296
+  },
+  {
+   "kind": "compile",
+   "mode": "per-layer dynamic",
+   "setup_s": 1.3,
+   "t": 1794762793.9628398
+  },
+  {
+   "kind": "setup",
+   "load_s": 61.5,
+   "trainable_params": 6684672,
+   "resumed": false,
+   "train_tokens_available": 18374965,
+   "eval_tokens": 903227,
+   "mem_gib": 56.9,
+   "t": 1794762793.9902806
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 3.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 57.1,
+   "device_used_gib": 82.1,
+   "t": 1794762812.9212554
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 88.5,
+   "t": 1794762832.9225328
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 88.4,
+   "t": 1794762852.9240065
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 88.4,
+   "t": 1794762872.925265
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 88.4,
+   "t": 1794762892.9264503
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 87.8,
+   "t": 1794762912.9279742
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 87.8,
+   "t": 1794762932.929316
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 87.8,
+   "t": 1794762952.930583
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 87.8,
+   "t": 1794762972.9318144
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 87.8,
+   "t": 1794762992.9329784
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 87.8,
+   "t": 1794763012.9341943
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.2,
+   "device_used_gib": 87.8,
+   "t": 1794763032.9354253
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 4.1,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.5,
+   "device_used_gib": 87.8,
+   "t": 1794763052.936717
+  },
+  {
+   "kind": "eval",
+   "tokens": 0,
+   "eval_loss": 0.73047,
+   "ppl": 2.0761,
+   "t": 1794763067.3969295
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.4,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 56.9,
+   "device_used_gib": 89.5,
+   "t": 1794763072.9451723
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.5,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 57.4,
+   "device_used_gib": 90.7,
+   "t": 1794763092.9484377
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.6,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 62.0,
+   "device_used_gib": 107.0,
+   "t": 1794763112.949435
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.6,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 57.0,
+   "device_used_gib": 107.0,
+   "t": 1794763132.950608
+  },
+  {
+   "kind": "train",
+   "step": 1,
+   "tokens": 65536,
+   "loss": 0.87242,
+   "lr": 0.0,
+   "grad_norm": 0.2008,
+   "step_s": 69.219,
+   "tok_s": 946.8,
+   "peak_mem_gib": 79.0,
+   "world_size": 2,
+   "allreduce_s": 15.6452,
+   "t": 1794763137.7279613
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 77.5,
+   "device_used_gib": 107.2,
+   "t": 1794763152.9518375
+  },
+  {
+   "kind": "train",
+   "step": 2,
+   "tokens": 131072,
+   "loss": 0.65288,
+   "lr": 0.000262144,
+   "grad_norm": 0.2132,
+   "step_s": 22.901,
+   "tok_s": 2861.7,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0676,
+   "t": 1794763160.6292117
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 78.3,
+   "device_used_gib": 106.6,
+   "t": 1794763172.9530666
+  },
+  {
+   "kind": "train",
+   "step": 3,
+   "tokens": 196608,
+   "loss": 0.66713,
+   "lr": 0.000524288,
+   "grad_norm": 0.1986,
+   "step_s": 23.017,
+   "tok_s": 2847.3,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2157,
+   "t": 1794763183.6469824
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 78.4,
+   "device_used_gib": 106.6,
+   "t": 1794763192.95438
+  },
+  {
+   "kind": "train",
+   "step": 4,
+   "tokens": 262144,
+   "loss": 0.69245,
+   "lr": 0.000786432,
+   "grad_norm": 0.1542,
+   "step_s": 23.12,
+   "tok_s": 2834.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.4783,
+   "t": 1794763206.7671795
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 68.4,
+   "device_used_gib": 106.6,
+   "t": 1794763212.9555314
+  },
+  {
+   "kind": "train",
+   "step": 5,
+   "tokens": 327680,
+   "loss": 0.57597,
+   "lr": 0.00099997671160819,
+   "grad_norm": 0.0891,
+   "step_s": 22.765,
+   "tok_s": 2878.8,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0355,
+   "t": 1794763229.5323954
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 60.3,
+   "device_used_gib": 106.6,
+   "t": 1794763232.9568167
+  },
+  {
+   "kind": "train",
+   "step": 6,
+   "tokens": 393216,
+   "loss": 0.92498,
+   "lr": 0.000999047456350699,
+   "grad_norm": 0.2168,
+   "step_s": 23.109,
+   "tok_s": 2835.9,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0365,
+   "t": 1794763252.6419454
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 63.9,
+   "device_used_gib": 106.6,
+   "t": 1794763252.9579728
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 65.3,
+   "device_used_gib": 106.6,
+   "t": 1794763272.9592822
+  },
+  {
+   "kind": "train",
+   "step": 7,
+   "tokens": 458752,
+   "loss": 0.50069,
+   "lr": 0.0009967649443018917,
+   "grad_norm": 0.1853,
+   "step_s": 23.01,
+   "tok_s": 2848.2,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.233,
+   "t": 1794763275.651993
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 62.5,
+   "device_used_gib": 106.5,
+   "t": 1794763292.960549
+  },
+  {
+   "kind": "train",
+   "step": 8,
+   "tokens": 524288,
+   "loss": 0.58489,
+   "lr": 0.0009931360540775742,
+   "grad_norm": 0.0842,
+   "step_s": 22.964,
+   "tok_s": 2853.8,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1497,
+   "t": 1794763298.616655
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 57.5,
+   "device_used_gib": 106.5,
+   "t": 1794763312.9621212
+  },
+  {
+   "kind": "train",
+   "step": 9,
+   "tokens": 589824,
+   "loss": 0.49972,
+   "lr": 0.0009881717217609417,
+   "grad_norm": 0.0683,
+   "step_s": 22.958,
+   "tok_s": 2854.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0866,
+   "t": 1794763321.5755074
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 57.5,
+   "device_used_gib": 106.5,
+   "t": 1794763332.963061
+  },
+  {
+   "kind": "train",
+   "step": 10,
+   "tokens": 655360,
+   "loss": 0.57956,
+   "lr": 0.0009818869079454165,
+   "grad_norm": 0.0503,
+   "step_s": 22.852,
+   "tok_s": 2867.8,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0383,
+   "t": 1794763344.4283032
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.8,
+   "device_used_gib": 106.5,
+   "t": 1794763352.9643154
+  },
+  {
+   "kind": "train",
+   "step": 11,
+   "tokens": 720896,
+   "loss": 0.58682,
+   "lr": 0.0009743005526491586,
+   "grad_norm": 0.0689,
+   "step_s": 22.902,
+   "tok_s": 2861.5,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1555,
+   "t": 1794763367.331285
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 61.1,
+   "device_used_gib": 106.5,
+   "t": 1794763372.9651136
+  },
+  {
+   "kind": "train",
+   "step": 12,
+   "tokens": 786432,
+   "loss": 0.60565,
+   "lr": 0.000965435518237116,
+   "grad_norm": 0.0717,
+   "step_s": 22.727,
+   "tok_s": 2883.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1697,
+   "t": 1794763390.0592256
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.3,
+   "device_used_gib": 106.5,
+   "t": 1794763392.9661932
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 57.0,
+   "device_used_gib": 106.5,
+   "t": 1794763412.9670198
+  },
+  {
+   "kind": "train",
+   "step": 13,
+   "tokens": 851968,
+   "loss": 0.63293,
+   "lr": 0.0009553185205226257,
+   "grad_norm": 0.0809,
+   "step_s": 22.967,
+   "tok_s": 2853.5,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2254,
+   "t": 1794763413.0267794
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.0,
+   "device_used_gib": 106.5,
+   "t": 1794763432.9680686
+  },
+  {
+   "kind": "train",
+   "step": 14,
+   "tokens": 917504,
+   "loss": 0.63822,
+   "lr": 0.0009439800482561999,
+   "grad_norm": 0.0509,
+   "step_s": 22.965,
+   "tok_s": 2853.7,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2076,
+   "t": 1794763435.9921925
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.4,
+   "device_used_gib": 106.5,
+   "t": 1794763452.9691
+  },
+  {
+   "kind": "train",
+   "step": 15,
+   "tokens": 983040,
+   "loss": 0.72686,
+   "lr": 0.0009314542712441268,
+   "grad_norm": 0.0827,
+   "step_s": 22.961,
+   "tok_s": 2854.2,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2252,
+   "t": 1794763458.9535866
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.8,
+   "device_used_gib": 106.5,
+   "t": 1794763472.9699867
+  },
+  {
+   "kind": "train",
+   "step": 16,
+   "tokens": 1048576,
+   "loss": 0.62174,
+   "lr": 0.0009177789373737812,
+   "grad_norm": 0.092,
+   "step_s": 22.862,
+   "tok_s": 2866.5,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0338,
+   "t": 1794763481.8165498
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.3,
+   "device_used_gib": 106.5,
+   "t": 1794763492.971662
+  },
+  {
+   "kind": "train",
+   "step": 17,
+   "tokens": 1114112,
+   "loss": 0.65082,
+   "lr": 0.0009029952588559699,
+   "grad_norm": 0.066,
+   "step_s": 22.729,
+   "tok_s": 2883.4,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0346,
+   "t": 1794763504.5455475
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.0,
+   "device_used_gib": 106.5,
+   "t": 1794763512.9730945
+  },
+  {
+   "kind": "train",
+   "step": 18,
+   "tokens": 1179648,
+   "loss": 0.48533,
+   "lr": 0.0008871477880271374,
+   "grad_norm": 0.227,
+   "step_s": 22.982,
+   "tok_s": 2851.7,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1909,
+   "t": 1794763527.5276453
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.0,
+   "device_used_gib": 106.5,
+   "t": 1794763532.9744842
+  },
+  {
+   "kind": "train",
+   "step": 19,
+   "tokens": 1245184,
+   "loss": 0.54399,
+   "lr": 0.0008702842830857126,
+   "grad_norm": 0.0655,
+   "step_s": 22.708,
+   "tok_s": 2886.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0665,
+   "t": 1794763550.2364454
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.4,
+   "device_used_gib": 106.5,
+   "t": 1794763552.975506
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.5,
+   "device_used_gib": 106.5,
+   "t": 1794763572.977094
+  },
+  {
+   "kind": "train",
+   "step": 20,
+   "tokens": 1310720,
+   "loss": 0.59931,
+   "lr": 0.0008524555641672171,
+   "grad_norm": 0.0595,
+   "step_s": 22.966,
+   "tok_s": 2853.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1106,
+   "t": 1794763573.2028558
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.9,
+   "device_used_gib": 106.5,
+   "t": 1794763592.9780867
+  },
+  {
+   "kind": "train",
+   "step": 21,
+   "tokens": 1376256,
+   "loss": 0.45282,
+   "lr": 0.0008337153601918701,
+   "grad_norm": 0.0457,
+   "step_s": 22.959,
+   "tok_s": 2854.5,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1762,
+   "t": 1794763596.1624591
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.0,
+   "device_used_gib": 106.5,
+   "t": 1794763612.9789374
+  },
+  {
+   "kind": "train",
+   "step": 22,
+   "tokens": 1441792,
+   "loss": 0.40189,
+   "lr": 0.000814120146946232,
+   "grad_norm": 0.0497,
+   "step_s": 23.339,
+   "tok_s": 2808.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.7227,
+   "t": 1794763619.502209
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 66.6,
+   "device_used_gib": 106.5,
+   "t": 1794763632.9797213
+  },
+  {
+   "kind": "train",
+   "step": 23,
+   "tokens": 1507328,
+   "loss": 0.55556,
+   "lr": 0.0007937289768868459,
+   "grad_norm": 0.067,
+   "step_s": 22.931,
+   "tok_s": 2858.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1339,
+   "t": 1794763642.433758
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 66.6,
+   "device_used_gib": 106.5,
+   "t": 1794763652.98081
+  },
+  {
+   "kind": "train",
+   "step": 24,
+   "tokens": 1572864,
+   "loss": 0.85502,
+   "lr": 0.0007726033011787846,
+   "grad_norm": 0.1323,
+   "step_s": 22.95,
+   "tok_s": 2855.7,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.113,
+   "t": 1794763665.3837934
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 69.3,
+   "device_used_gib": 106.5,
+   "t": 1794763672.9820604
+  },
+  {
+   "kind": "train",
+   "step": 25,
+   "tokens": 1638400,
+   "loss": 0.50523,
+   "lr": 0.0007508067845054101,
+   "grad_norm": 0.0596,
+   "step_s": 23.0,
+   "tok_s": 2849.4,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1601,
+   "t": 1794763688.3840306
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 71.1,
+   "device_used_gib": 106.5,
+   "t": 1794763692.9829779
+  },
+  {
+   "kind": "train",
+   "step": 26,
+   "tokens": 1703936,
+   "loss": 0.59676,
+   "lr": 0.000728405113207438,
+   "grad_norm": 0.0658,
+   "step_s": 22.905,
+   "tok_s": 2861.2,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0607,
+   "t": 1794763711.289209
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 71.6,
+   "device_used_gib": 106.5,
+   "t": 1794763712.9842591
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 70.2,
+   "device_used_gib": 106.5,
+   "t": 1794763732.985306
+  },
+  {
+   "kind": "train",
+   "step": 27,
+   "tokens": 1769472,
+   "loss": 0.56369,
+   "lr": 0.0007054657973295017,
+   "grad_norm": 0.0562,
+   "step_s": 22.8,
+   "tok_s": 2874.4,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0374,
+   "t": 1794763734.0899196
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 69.8,
+   "device_used_gib": 106.5,
+   "t": 1794763752.9863803
+  },
+  {
+   "kind": "train",
+   "step": 28,
+   "tokens": 1835008,
+   "loss": 0.67844,
+   "lr": 0.0006820579671707737,
+   "grad_norm": 0.0485,
+   "step_s": 23.009,
+   "tok_s": 2848.3,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2707,
+   "t": 1794763757.0992708
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 71.6,
+   "device_used_gib": 106.5,
+   "t": 1794763772.9872117
+  },
+  {
+   "kind": "train",
+   "step": 29,
+   "tokens": 1900544,
+   "loss": 0.52585,
+   "lr": 0.0006582521649527587,
+   "grad_norm": 0.0662,
+   "step_s": 22.819,
+   "tok_s": 2872.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0565,
+   "t": 1794763779.9188578
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 72.0,
+   "device_used_gib": 106.5,
+   "t": 1794763792.9882064
+  },
+  {
+   "kind": "train",
+   "step": 30,
+   "tokens": 1966080,
+   "loss": 0.74858,
+   "lr": 0.0006341201322320983,
+   "grad_norm": 0.075,
+   "step_s": 23.031,
+   "tok_s": 2845.5,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2941,
+   "t": 1794763802.9506657
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 73.8,
+   "device_used_gib": 106.5,
+   "t": 1794763812.9891438
+  },
+  {
+   "kind": "train",
+   "step": 31,
+   "tokens": 2031616,
+   "loss": 0.6297,
+   "lr": 0.0006097345936990349,
+   "grad_norm": 0.0547,
+   "step_s": 22.855,
+   "tok_s": 2867.5,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0373,
+   "t": 1794763825.8059402
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763832.990341
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763852.991135
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763872.9926586
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763892.9939337
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763912.9951334
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763932.9962952
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763952.9976945
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794763972.9990005
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.4,
+   "device_used_gib": 108.8,
+   "t": 1794763993.0002444
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764013.0015945
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764033.0032341
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.7,
+   "t": 1794764053.004385
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.7,
+   "t": 1794764073.0057046
+  },
+  {
+   "kind": "eval",
+   "tokens": 2031616,
+   "eval_loss": 0.60025,
+   "ppl": 1.8226,
+   "t": 1794764075.2041044
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 72.0,
+   "device_used_gib": 108.7,
+   "t": 1794764093.0069065
+  },
+  {
+   "kind": "train",
+   "step": 32,
+   "tokens": 2097152,
+   "loss": 0.5579,
+   "lr": 0.0005851690380130929,
+   "grad_norm": 0.0493,
+   "step_s": 22.838,
+   "tok_s": 2869.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0962,
+   "t": 1794764098.050023
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 72.5,
+   "device_used_gib": 108.7,
+   "t": 1794764113.008234
+  },
+  {
+   "kind": "train",
+   "step": 33,
+   "tokens": 2162688,
+   "loss": 0.661,
+   "lr": 0.0005604974963364449,
+   "grad_norm": 0.0676,
+   "step_s": 22.947,
+   "tok_s": 2856.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1099,
+   "t": 1794764120.9970453
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 70.6,
+   "device_used_gib": 108.7,
+   "t": 1794764133.0097675
+  },
+  {
+   "kind": "train",
+   "step": 34,
+   "tokens": 2228224,
+   "loss": 0.56968,
+   "lr": 0.0005357943192323866,
+   "grad_norm": 0.0694,
+   "step_s": 22.885,
+   "tok_s": 2863.8,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0377,
+   "t": 1794764143.8820484
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 69.7,
+   "device_used_gib": 108.7,
+   "t": 1794764153.0114245
+  },
+  {
+   "kind": "train",
+   "step": 35,
+   "tokens": 2293760,
+   "loss": 0.52177,
+   "lr": 0.0005111339526012577,
+   "grad_norm": 0.0552,
+   "step_s": 22.913,
+   "tok_s": 2860.3,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1482,
+   "t": 1794764166.7950735
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 68.2,
+   "device_used_gib": 108.7,
+   "t": 1794764173.012897
+  },
+  {
+   "kind": "train",
+   "step": 36,
+   "tokens": 2359296,
+   "loss": 0.56262,
+   "lr": 0.000486590713329053,
+   "grad_norm": 0.0535,
+   "step_s": 22.876,
+   "tok_s": 2864.9,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0375,
+   "t": 1794764189.6713574
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 67.5,
+   "device_used_gib": 108.7,
+   "t": 1794764193.0141766
+  },
+  {
+   "kind": "train",
+   "step": 37,
+   "tokens": 2424832,
+   "loss": 0.52511,
+   "lr": 0.00046223856532483443,
+   "grad_norm": 0.0672,
+   "step_s": 22.827,
+   "tok_s": 2871.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0381,
+   "t": 1794764212.49885
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 68.3,
+   "device_used_gib": 108.7,
+   "t": 1794764213.0153525
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 71.2,
+   "device_used_gib": 108.7,
+   "t": 1794764233.016482
+  },
+  {
+   "kind": "train",
+   "step": 38,
+   "tokens": 2490368,
+   "loss": 0.84685,
+   "lr": 0.00043815089662187933,
+   "grad_norm": 0.0489,
+   "step_s": 23.009,
+   "tok_s": 2848.2,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.3249,
+   "t": 1794764235.5086508
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 66.1,
+   "device_used_gib": 108.7,
+   "t": 1794764253.0178459
+  },
+  {
+   "kind": "train",
+   "step": 39,
+   "tokens": 2555904,
+   "loss": 0.66838,
+   "lr": 0.00041440029821429857,
+   "grad_norm": 0.0558,
+   "step_s": 22.866,
+   "tok_s": 2866.1,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0389,
+   "t": 1794764258.375176
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 67.5,
+   "device_used_gib": 108.7,
+   "t": 1794764273.0190785
+  },
+  {
+   "kind": "train",
+   "step": 40,
+   "tokens": 2621440,
+   "loss": 0.87214,
+   "lr": 0.0003910583452956229,
+   "grad_norm": 0.0606,
+   "step_s": 23.308,
+   "tok_s": 2811.8,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.6174,
+   "t": 1794764281.6834319
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.0,
+   "device_used_gib": 108.7,
+   "t": 1794764293.0201638
+  },
+  {
+   "kind": "train",
+   "step": 41,
+   "tokens": 2686976,
+   "loss": 0.59845,
+   "lr": 0.00036819538155862485,
+   "grad_norm": 0.0705,
+   "step_s": 22.928,
+   "tok_s": 2858.4,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0998,
+   "t": 1794764304.6117678
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.9,
+   "device_used_gib": 108.7,
+   "t": 1794764313.0217483
+  },
+  {
+   "kind": "train",
+   "step": 42,
+   "tokens": 2752512,
+   "loss": 0.61052,
+   "lr": 0.0003458803072064101,
+   "grad_norm": 0.0505,
+   "step_s": 22.841,
+   "tok_s": 2869.2,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0534,
+   "t": 1794764327.4535222
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 5.9,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 58.9,
+   "device_used_gib": 108.7,
+   "t": 1794764333.0236394
+  },
+  {
+   "kind": "train",
+   "step": 43,
+   "tokens": 2818048,
+   "loss": 0.49774,
+   "lr": 0.000324180371313634,
+   "grad_norm": 0.0468,
+   "step_s": 23.218,
+   "tok_s": 2822.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0367,
+   "t": 1794764350.672425
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 63.4,
+   "device_used_gib": 108.7,
+   "t": 1794764353.0251744
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 63.5,
+   "device_used_gib": 108.7,
+   "t": 1794764373.0263686
+  },
+  {
+   "kind": "train",
+   "step": 44,
+   "tokens": 2883584,
+   "loss": 0.62531,
+   "lr": 0.0003031609691635849,
+   "grad_norm": 0.0548,
+   "step_s": 23.035,
+   "tok_s": 2845.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1545,
+   "t": 1794764373.7081943
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 65.2,
+   "device_used_gib": 108.7,
+   "t": 1794764393.027353
+  },
+  {
+   "kind": "train",
+   "step": 45,
+   "tokens": 2949120,
+   "loss": 0.49101,
+   "lr": 0.00028288544517188506,
+   "grad_norm": 0.0496,
+   "step_s": 22.82,
+   "tok_s": 2871.9,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0352,
+   "t": 1794764396.528283
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 64.8,
+   "device_used_gib": 108.7,
+   "t": 1794764413.0289636
+  },
+  {
+   "kind": "train",
+   "step": 46,
+   "tokens": 3014656,
+   "loss": 0.76223,
+   "lr": 0.00026341490199071737,
+   "grad_norm": 0.0632,
+   "step_s": 22.964,
+   "tok_s": 2853.8,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.185,
+   "t": 1794764419.493081
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 65.2,
+   "device_used_gib": 108.7,
+   "t": 1794764433.030755
+  },
+  {
+   "kind": "train",
+   "step": 47,
+   "tokens": 3080192,
+   "loss": 0.51287,
+   "lr": 0.00024480801636887084,
+   "grad_norm": 0.0638,
+   "step_s": 22.816,
+   "tok_s": 2872.3,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0374,
+   "t": 1794764442.3098147
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 64.3,
+   "device_used_gib": 108.7,
+   "t": 1794764453.0326884
+  },
+  {
+   "kind": "train",
+   "step": 48,
+   "tokens": 3145728,
+   "loss": 0.49472,
+   "lr": 0.0002271208623225257,
+   "grad_norm": 0.0542,
+   "step_s": 22.77,
+   "tok_s": 2878.2,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0365,
+   "t": 1794764465.079803
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 63.9,
+   "device_used_gib": 108.8,
+   "t": 1794764473.033827
+  },
+  {
+   "kind": "train",
+   "step": 49,
+   "tokens": 3211264,
+   "loss": 0.6065,
+   "lr": 0.00021040674214967681,
+   "grad_norm": 0.0569,
+   "step_s": 22.941,
+   "tok_s": 2856.7,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.235,
+   "t": 1794764488.0210564
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 64.8,
+   "device_used_gib": 108.8,
+   "t": 1794764493.0352976
+  },
+  {
+   "kind": "train",
+   "step": 50,
+   "tokens": 3276800,
+   "loss": 0.53673,
+   "lr": 0.0001947160257974529,
+   "grad_norm": 0.0481,
+   "step_s": 22.84,
+   "tok_s": 2869.4,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0352,
+   "t": 1794764510.8614438
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 65.7,
+   "device_used_gib": 108.7,
+   "t": 1794764513.0364823
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 65.7,
+   "device_used_gib": 108.8,
+   "t": 1794764533.037949
+  },
+  {
+   "kind": "train",
+   "step": 51,
+   "tokens": 3342336,
+   "loss": 0.41713,
+   "lr": 0.0001800959990664171,
+   "grad_norm": 0.0513,
+   "step_s": 22.908,
+   "tok_s": 2860.8,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0347,
+   "t": 1794764533.770096
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 64.4,
+   "device_used_gib": 108.8,
+   "t": 1794764553.0388832
+  },
+  {
+   "kind": "train",
+   "step": 52,
+   "tokens": 3407872,
+   "loss": 0.59743,
+   "lr": 0.00016659072110930087,
+   "grad_norm": 0.0535,
+   "step_s": 22.772,
+   "tok_s": 2877.9,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0367,
+   "t": 1794764556.5428488
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 63.4,
+   "device_used_gib": 108.8,
+   "t": 1794764573.0397754
+  },
+  {
+   "kind": "train",
+   "step": 53,
+   "tokens": 3473408,
+   "loss": 0.53373,
+   "lr": 0.00015424089165361752,
+   "grad_norm": 0.0524,
+   "step_s": 22.955,
+   "tok_s": 2854.9,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2615,
+   "t": 1794764579.4987586
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 65.7,
+   "device_used_gib": 108.8,
+   "t": 1794764593.04124
+  },
+  {
+   "kind": "train",
+   "step": 54,
+   "tokens": 3538944,
+   "loss": 0.77477,
+   "lr": 0.00014308372834829526,
+   "grad_norm": 0.1417,
+   "step_s": 22.849,
+   "tok_s": 2868.2,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0572,
+   "t": 1794764602.3485665
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 63.8,
+   "device_used_gib": 108.8,
+   "t": 1794764613.0424168
+  },
+  {
+   "kind": "train",
+   "step": 55,
+   "tokens": 3604480,
+   "loss": 0.47454,
+   "lr": 0.00013315285460395842,
+   "grad_norm": 0.0555,
+   "step_s": 22.91,
+   "tok_s": 2860.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2468,
+   "t": 1794764625.2588267
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 66.1,
+   "device_used_gib": 108.8,
+   "t": 1794764633.0434296
+  },
+  {
+   "kind": "train",
+   "step": 56,
+   "tokens": 3670016,
+   "loss": 0.8124,
+   "lr": 0.00012447819826486543,
+   "grad_norm": 0.0604,
+   "step_s": 22.872,
+   "tok_s": 2865.4,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.167,
+   "t": 1794764648.131145
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 67.0,
+   "device_used_gib": 108.8,
+   "t": 1794764653.0447218
+  },
+  {
+   "kind": "train",
+   "step": 57,
+   "tokens": 3735552,
+   "loss": 0.70675,
+   "lr": 0.00011708590141786507,
+   "grad_norm": 0.053,
+   "step_s": 23.347,
+   "tok_s": 2807.1,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.5496,
+   "t": 1794764671.4783611
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 73.4,
+   "device_used_gib": 108.8,
+   "t": 1794764673.0479276
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 71.6,
+   "device_used_gib": 108.8,
+   "t": 1794764693.0489697
+  },
+  {
+   "kind": "train",
+   "step": 58,
+   "tokens": 3801088,
+   "loss": 0.57817,
+   "lr": 0.0001109982416101747,
+   "grad_norm": 0.0487,
+   "step_s": 22.933,
+   "tok_s": 2857.7,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.2034,
+   "t": 1794764694.4117792
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 72.5,
+   "device_used_gib": 108.8,
+   "t": 1794764713.0503454
+  },
+  {
+   "kind": "train",
+   "step": 59,
+   "tokens": 3866624,
+   "loss": 0.54126,
+   "lr": 0.00010623356471339751,
+   "grad_norm": 0.0637,
+   "step_s": 22.865,
+   "tok_s": 2866.3,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.1354,
+   "t": 1794764717.2767634
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 73.4,
+   "device_used_gib": 108.8,
+   "t": 1794764733.052622
+  },
+  {
+   "kind": "train",
+   "step": 60,
+   "tokens": 3932160,
+   "loss": 0.40985,
+   "lr": 0.00010280622963610284,
+   "grad_norm": 0.0552,
+   "step_s": 22.816,
+   "tok_s": 2872.3,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0362,
+   "t": 1794764740.0936556
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 72.9,
+   "device_used_gib": 108.8,
+   "t": 1794764753.0541646
+  },
+  {
+   "kind": "train",
+   "step": 61,
+   "tokens": 3997696,
+   "loss": 0.63131,
+   "lr": 0.00010072656505158304,
+   "grad_norm": 0.0554,
+   "step_s": 22.934,
+   "tok_s": 2857.6,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.223,
+   "t": 1794764763.027853
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 74.7,
+   "device_used_gib": 108.8,
+   "t": 1794764773.0551884
+  },
+  {
+   "kind": "train",
+   "step": 62,
+   "tokens": 4063232,
+   "loss": 0.49653,
+   "lr": 0.00010000083827119441,
+   "grad_norm": 0.072,
+   "step_s": 23.256,
+   "tok_s": 2818.0,
+   "peak_mem_gib": 79.1,
+   "world_size": 2,
+   "allreduce_s": 0.0348,
+   "t": 1794764786.2843106
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764793.0696695
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.3,
+   "device_used_gib": 108.8,
+   "t": 1794764813.0716488
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764833.073205
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764853.0744836
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764873.0756354
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764893.076655
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764913.078177
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764933.0793502
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764953.0806427
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764973.0851667
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794764993.0861874
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794765013.087701
+  },
+  {
+   "kind": "mem",
+   "rss_gib": 6.0,
+   "cgroup_gib": null,
+   "cuda_alloc_gib": 59.6,
+   "device_used_gib": 108.8,
+   "t": 1794765033.0893831
+  },
+  {
+   "kind": "eval",
+   "tokens": 4063232,
+   "eval_loss": 0.58919,
+   "ppl": 1.8025,
+   "t": 1794765035.3480995
+  },
+  {
+   "kind": "summary",
+   "tokens": 4063232,
+   "steps": 62,
+   "final_eval_loss": 0.58919,
+   "t": 1794765035.6227002
+  },
+  {
+   "kind": "serve",
+   "config": "final",
+   "ok": true,
+   "args": [
+    "--quantization",
+    "fp8",
+    "--enable-lora",
+    "--max-lora-rank",
+    "16",
+    "--lora-modules",
+    "ft=/runs/pipeline/train/adapter"
+   ],
+   "startup_s": 670.2,
+   "eval_loss": 1.14532,
+   "ppl": 3.1434,
+   "quality_tokens": 24552,
+   "speed": [
+    {
+     "concurrency": 1,
+     "requests": 3,
+     "out_tok_s": 44.4,
+     "latency_p50_s": 5.74,
+     "latency_p95_s": 5.74,
+     "per_request_tok_s": 44.6
+    },
+    {
+     "concurrency": 16,
+     "requests": 48,
+     "out_tok_s": 192.3,
+     "latency_p50_s": 21.39,
+     "latency_p95_s": 22.4,
+     "per_request_tok_s": 12.0
+    }
+   ]
+  }
+ ]
+}

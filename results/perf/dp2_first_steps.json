@@ -1,0 +1,64 @@
+{
+ "workflow": "8216d998-0222-4d36-b4ef-317d3df856af",
+ "trial": "s4-perf-dp2-ip-2",
+ "note": "partial: first steps captured before leaving; collect again in the morning",
+ "nccl": "NET/Socket over lan0 + enp1s0f0np0 (10.10.11.x)",
+ "records": [
+  {
+   "kind": "train",
+   "step": 1,
+   "tokens": 65536,
+   "loss": 0.87308,
+   "lr": 0.0,
+   "grad_norm": 0.2595,
+   "step_s": 74.042,
+   "tok_s": 885.1,
+   "peak_mem_gib": 64.7,
+   "world_size": 2,
+   "allreduce_s": 0.0532,
+   "t": 1794696087.8541515
+  },
+  {
+   "kind": "train",
+   "step": 2,
+   "tokens": 131072,
+   "loss": 0.65195,
+   "lr": 0.0002,
+   "grad_norm": 0.2834,
+   "step_s": 32.67,
+   "tok_s": 2006.0,
+   "peak_mem_gib": 64.9,
+   "world_size": 2,
+   "allreduce_s": 0.0533,
+   "t": 1794696120.5245123
+  },
+  {
+   "kind": "train",
+   "step": 3,
+   "tokens": 196608,
+   "loss": 0.66289,
+   "lr": 0.0002,
+   "grad_norm": 0.2488,
+   "step_s": 32.876,
+   "tok_s": 1993.4,
+   "peak_mem_gib": 64.9,
+   "world_size": 2,
+   "allreduce_s": 0.2931,
+   "t": 1794696153.4014533
+  },
+  {
+   "kind": "train",
+   "step": 4,
+   "tokens": 262144,
+   "loss": 0.6953,
+   "lr": 0.0002,
+   "grad_norm": 0.1811,
+   "step_s": 32.466,
+   "tok_s": 2018.6,
+   "peak_mem_gib": 64.9,
+   "world_size": 2,
+   "allreduce_s": 0.0935,
+   "t": 1794696185.8677077
+  }
+ ]
+}

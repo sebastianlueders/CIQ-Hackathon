@@ -1,0 +1,18 @@
+{
+ "id": "s4-perf-dp2-stack-nockpt-mb1",
+ "nodes": 2,
+ "config": {
+  "experts_impl": "grouped_mm",
+  "compile": true,
+  "fused_ce": true,
+  "grad_ckpt": false,
+  "micro_batch": 1,
+  "grad_accum": 8,
+  "seq_len": 4096,
+  "dp_launch": "ip",
+  "train_tokens": 655360,
+  "warmup_tokens": 65536,
+  "skip_eval": true,
+  "save_adapter": false
+ }
+}

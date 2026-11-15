@@ -1,0 +1,27 @@
+{
+ "id": "s4-train-dp2-winner-2",
+ "nodes": 2,
+ "config": {
+  "dp_launch": "ip",
+  "experts_impl": "grouped_mm",
+  "compile": true,
+  "lr": 0.001,
+  "lora_r": 8,
+  "lora_alpha": 16,
+  "targets": [
+   "q_proj",
+   "k_proj",
+   "v_proj",
+   "o_proj"
+  ],
+  "seq_len": 4096,
+  "micro_batch": 1,
+  "grad_accum": 8,
+  "warmup_tokens": 250000,
+  "schedule": "cosine",
+  "train_tokens": 4000000,
+  "eval_every_tokens": 1000000,
+  "eval_set": "eval_small.bin",
+  "save_adapter": true
+ }
+}
