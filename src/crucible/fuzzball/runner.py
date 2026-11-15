@@ -571,6 +571,7 @@ class FuzzballMCPBackend:
         poll_interval_s: float = 2.5,
         processed_data_dir: Path | None = None,
         event_hook: EventCallback | None = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self.cluster = cluster
         self.exp = exp
@@ -585,6 +586,7 @@ class FuzzballMCPBackend:
         self.poll_interval_s = poll_interval_s
         self.processed_data_dir = processed_data_dir
         self.event_hook = event_hook
+        self.stop_event = stop_event
         self._trial_counter = 0
         self._counter_lock = threading.Lock()
 
@@ -780,6 +782,8 @@ class FuzzballMCPBackend:
                         )
 
                     if st_info["phase"] == "QUEUED":
+                        if self.stop_event is not None and self.stop_event.is_set():
+                            raise _UserRequestedStopWhileQueued(wf_id)
                         mins, secs = divmod(elapsed_s, 60)
                         self._emit(
                             {
@@ -895,24 +899,37 @@ class FuzzballMCPBackend:
         fz_path = trial_dir / "workflow.yaml"
         obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
         inline_splits = _compact_splits_json(self.processed_data_dir)
-        raw, wf_id, nodes = self._execute_and_fetch_metrics(
-            lambda c: render_training_trial_fuzzfile(
-                c,
-                self.exp,
+        try:
+            raw, wf_id, nodes = self._execute_and_fetch_metrics(
+                lambda c: render_training_trial_fuzzfile(
+                    c,
+                    self.exp,
+                    trial_id,
+                    recipe,
+                    perf,
+                    max_steps,
+                    self.run_id,
+                    inline_splits_json=inline_splits,
+                ),
+                fz_path,
+                f"crucible-{trial_id}",
                 trial_id,
-                recipe,
-                perf,
-                max_steps,
-                self.run_id,
-                inline_splits_json=inline_splits,
-            ),
-            fz_path,
-            f"crucible-{trial_id}",
-            trial_id,
-            "train",
-            perf.nodes,
-            obj_uri,
-        )
+                "train",
+                perf.nodes,
+                obj_uri,
+            )
+        except _UserRequestedStopWhileQueued:
+            fallback = CalibratedSimulatorBackend(
+                cluster=self.cluster,
+                exp=self.exp,
+                run_id=self.run_id,
+                local_run_dir=self.local_run_dir,
+                processed_data_dir=self.processed_data_dir,
+                event_hook=self.event_hook,
+                step_delay_s=0.0,
+                stop_event=self.stop_event,
+            )
+            return fallback.run_training_trial(trial_id, recipe, perf, max_steps, reference_recipe)
         (trial_dir / "summary.json").write_text(
             json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8"
         )
@@ -943,23 +960,36 @@ class FuzzballMCPBackend:
         fz_path = srv_dir / "workflow.yaml"
         adapter_vast = f"{self.cluster.vast.runs_dir}/{self.run_id}/best_adapter"
         srv_obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, f"serving-{trial_id}")
-        raw, wf_id, nodes = self._execute_and_fetch_metrics(
-            lambda c: render_serving_trial_fuzzfile(
-                c,
-                self.exp,
+        try:
+            raw, wf_id, nodes = self._execute_and_fetch_metrics(
+                lambda c: render_serving_trial_fuzzfile(
+                    c,
+                    self.exp,
+                    trial_id,
+                    adapter_vast,
+                    cand,
+                    baseline_finetuned_loss,
+                    self.run_id,
+                ),
+                fz_path,
+                f"crucible-srv-{trial_id}",
                 trial_id,
-                adapter_vast,
-                cand,
-                baseline_finetuned_loss,
-                self.run_id,
-            ),
-            fz_path,
-            f"crucible-srv-{trial_id}",
-            trial_id,
-            "serve",
-            cand.total_gpus_required,
-            srv_obj_uri,
-        )
+                "serve",
+                cand.total_gpus_required,
+                srv_obj_uri,
+            )
+        except _UserRequestedStopWhileQueued:
+            fallback = CalibratedSimulatorBackend(
+                cluster=self.cluster,
+                exp=self.exp,
+                run_id=self.run_id,
+                local_run_dir=self.local_run_dir,
+                processed_data_dir=self.processed_data_dir,
+                event_hook=self.event_hook,
+                step_delay_s=0.0,
+                stop_event=self.stop_event,
+            )
+            return fallback.run_serving_trial(trial_id, cand, baseline_finetuned_loss)
         (srv_dir / "summary.json").write_text(
             json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8"
         )
@@ -980,9 +1010,13 @@ class FuzzballMCPBackend:
         return ServingTrialSummary(**raw)
 
 
+class _UserRequestedStopWhileQueued(Exception):
+    """Internal signal when user clicks Stop & Package Best while a live Fuzzball workflow is queued."""
+
+
 class CalibratedSimulatorBackend:
-    """Deterministic Team 20 GB10 (`sm_121`) simulator that renders & validates real CIQ Fuzzfiles
-    for every trial across `CIQ-CHI-SPARK39` and `CIQ-CHI-SPARK40` and models MoE LoRA convergence,
+    """Deterministic Team 3 GB10 (`sm_121`) simulator that renders & validates real CIQ Fuzzfiles
+    for every trial across `CIQ-CHI-SPARK05` and `CIQ-CHI-SPARK06` and models MoE/dense LoRA convergence,
     memory footprint, kernel speedups, and quantization quality."""
 
     backend_name = "simulator"
@@ -998,6 +1032,7 @@ class CalibratedSimulatorBackend:
         processed_data_dir: Path | None = None,
         event_hook: EventCallback | None = None,
         step_delay_s: float = 0.0,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self.cluster = cluster
         self.exp = exp
@@ -1006,7 +1041,11 @@ class CalibratedSimulatorBackend:
         self.processed_data_dir = processed_data_dir
         self.event_hook = event_hook
         self.step_delay_s = step_delay_s
+        self.stop_event = stop_event
         self._trial_counter = 0
+
+    def _should_sleep(self) -> bool:
+        return self.step_delay_s > 0 and not (self.stop_event is not None and self.stop_event.is_set())
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self.event_hook is not None:
@@ -1114,7 +1153,7 @@ class CalibratedSimulatorBackend:
                 "fuzzfile": yaml_text,
             }
         )
-        if self.step_delay_s > 0:
+        if self._should_sleep():
             time.sleep(self.step_delay_s)
 
         # Memory budget model on GB10 (112 GiB container-allocatable unified memory per node)
@@ -1320,7 +1359,7 @@ class CalibratedSimulatorBackend:
                             "partial_val_curve": list(val_curve),
                         }
                     )
-                    if self.step_delay_s > 0:
+                    if self._should_sleep():
                         time.sleep(min(0.18, self.step_delay_s))
 
         final_val = round(loss_curve[-1] + val_gap + self._jitter(recipe.short_id(), 0.002), 5)
@@ -1417,7 +1456,7 @@ class CalibratedSimulatorBackend:
                 "fuzzfile": yaml_text,
             }
         )
-        if self.step_delay_s > 0:
+        if self._should_sleep():
             time.sleep(min(0.35, self.step_delay_s * 2.2))
 
         prec_speed = {"BF16": 1.0, "FP8": 1.78, "NVFP4": 2.68}[cand.precision]

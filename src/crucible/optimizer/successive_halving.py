@@ -129,11 +129,14 @@ def run_stage_a_recipe_search(
             )
 
         survivor_indices = [item[0] for item in rung_results[:keep_n]]
+        stop_ev = getattr(backend, "stop_event", None)
+        if stop_ev is not None and stop_ev.is_set() and getattr(backend, "backend_name", "") in {"fuzzball_mcp", "fuzzball"}:
+            break
 
     win_idx = survivor_indices[0]
     win_recipe = cfg.candidates[win_idx]
-    final_entries = [e for e in rung_history if e.rung_index == len(cfg.rung_steps) - 1 and e.promoted]
-    win_summary = summaries_by_trial[final_entries[0].trial_id]
+    promoted_entries = [e for e in rung_history if e.promoted]
+    win_summary = summaries_by_trial[promoted_entries[-1].trial_id]
     base_loss = win_summary.initial_val_loss
 
     return StageAResult(

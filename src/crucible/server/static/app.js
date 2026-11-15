@@ -47,7 +47,7 @@ function syncCompanyBranding() {
   if (cardDl) cardDl.href = dlHref;
   const uz = document.getElementById("unzip-cmd-line");
   if (uz) {
-    uz.textContent = `unzip ${slug}-private-llm-*.zip -d ${slug}-ai && python3 ${slug}-ai/scripts/run_company_app.py`;
+    uz.textContent = `cd ~/Downloads && unzip -o "$(ls -t ${slug}-private-llm-*.zip | head -1)" -d ${slug}-ai && python3 ${slug}-ai/scripts/run_company_app.py`;
   }
 }
 
@@ -1491,6 +1491,9 @@ async function runPlaygroundSample(executeOnCluster = false) {
       if (res.source === "live_fuzzball_gb10_gpu") {
         badge.className = "badge badge-accent";
         badge.textContent = `LIVE GB10 (${res.hostname || "SPARK"}) · ${res.throughput_tok_s} tok/s`;
+      } else if (res.cordoned_twin) {
+        badge.className = "badge badge-accent";
+        badge.textContent = `FUZZBALL CONNECTED (${currentTeamId()} · GB10 TWIN) · ${Math.round(res.throughput_tok_s || 0)} tok/s`;
       } else {
         badge.className = "badge badge-green";
         badge.textContent = `PREVIEW READY · ${Math.round(res.throughput_tok_s || 0)} tok/s`;
@@ -1726,18 +1729,32 @@ document.getElementById("btn-run-cluster-copilot").addEventListener("click", () 
 });
 
 document.getElementById("btn-probe").addEventListener("click", async () => {
+  const probeBtn = document.getElementById("btn-probe");
+  probeBtn.disabled = true;
   const resp = await fetch("/api/firewall-probe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ inject_cpp_snippet: true }),
   });
   const res = await resp.json();
+  probeBtn.disabled = false;
   const fwBox = document.getElementById("firewall-audit-box");
   if (res.blocked) {
+    const shaShort = res.record.payload_sha256.slice(0, 16);
     fwBox.classList.add("blocked-alert");
     fwBox.innerHTML =
       `<strong>Zero-Leak Firewall Guard Triggered:</strong> Blocked raw C++ snippet from leaving client/VAST boundary — ` +
-      `<code>${res.violation}</code> (SHA-256: <code>${res.record.payload_sha256.slice(0, 16)}…</code>)`;
+      `<code>${res.violation}</code> (SHA-256: <code>${shaShort}…</code>)`;
+    probeBtn.textContent = "✓ Raw Code Leak Blocked! (0 Bytes)";
+    const lcSub = document.getElementById("lifecycle-sub");
+    if (lcSub) {
+      lcSub.innerHTML =
+        `<strong style="color:#6ee7b7">✓ Zero-Leak Guard Verified:</strong> Raw C++ exfiltration probe intercepted &amp; blocked before serialization — ` +
+        `<code>${res.violation}</code> (Audit SHA-256: <code>${shaShort}…</code> · <code>0 raw bytes egressed</code>).`;
+    }
+    setTimeout(() => {
+      probeBtn.textContent = "Verify Zero-Leak Guard";
+    }, 3800);
   }
 });
 

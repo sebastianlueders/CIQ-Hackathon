@@ -69,6 +69,9 @@ def run_stage_b_training_perf_search(
     ref_curve: list[float] | None = None
 
     for idx, cand in enumerate(cfg.candidates):
+        stop_ev = getattr(backend, "stop_event", None)
+        if idx >= 1 and stop_ev is not None and stop_ev.is_set() and getattr(backend, "backend_name", "") in {"fuzzball_mcp", "fuzzball"}:
+            break
         trial_id = f"stageb-{idx:02d}-{cand.label}"
         summary: TrainingTrialSummary = backend.run_training_trial(
             trial_id=trial_id,
@@ -157,6 +160,9 @@ def run_stage_c_inference_perf_search(
 
     outcomes: list[ServingTrialSummary] = []
     for idx, cand in enumerate(cfg.candidates):
+        stop_ev = getattr(backend, "stop_event", None)
+        if idx >= 1 and stop_ev is not None and stop_ev.is_set() and getattr(backend, "backend_name", "") in {"fuzzball_mcp", "fuzzball"}:
+            break
         trial_id = f"stagec-{idx:02d}-{cand.label}"
         summ = backend.run_serving_trial(
             trial_id=trial_id,
