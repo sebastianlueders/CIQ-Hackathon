@@ -124,6 +124,16 @@ if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; the
     export CRUCIBLE_VAST_VOLUME="runs"
   fi
   echo "[crucible] LIVE CLUSTER CONNECTED -> team='${TEAM_ID}', backend='${BACKEND}', volume='${CRUCIBLE_VAST_VOLUME}'"
+  # Pre-stage Qwen/Qwen2.5-Coder-1.5B-Instruct (3.1 GB BF16, 0 GPUs used) in background onto VAST for fast live-demo baseline!
+  ACTIVE_WFS="$(fuzzball workflow list 2>/dev/null || true)"
+  if ! echo "$ACTIVE_WFS" | grep -q "crucible-stage-qwen2.5-1.5b"; then
+    STAGE_YAML="$("${VENV_BIN}/python" -c 'from crucible.config import ClusterConfig; from crucible.fuzzball.discovery import discover_cluster_config; from crucible.fuzzball.renderer import render_model_staging_fuzzfile; c,_=discover_cluster_config(); print(render_model_staging_fuzzfile(c, "Qwen/Qwen2.5-Coder-1.5B-Instruct", "Qwen/Qwen2.5-Coder-1.5B-Instruct"))')"
+    STAGE_TMP="${REPO_ROOT}/runs/stage-qwen25-1.5b.yaml"
+    mkdir -p "${REPO_ROOT}/runs"
+    printf "%s\n" "$STAGE_YAML" > "$STAGE_TMP"
+    echo "[crucible] Pre-loading fast live-demo baseline model (Qwen/Qwen2.5-Coder-1.5B-Instruct, 0 GPUs used) onto VAST..."
+    fuzzball workflow start "$STAGE_TMP" --name crucible-stage-qwen2.5-1.5b >/dev/null 2>&1 || true
+  fi
 else
   export CRUCIBLE_VAST_VOLUME="runs"
   echo "[crucible] Cluster Wi-Fi not currently connected -> starting Client Studio in GB10 Empirical Twin mode (team='${TEAM_ID}', auto-switches to live Fuzzball MCP when on cluster Wi-Fi)."

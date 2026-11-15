@@ -93,8 +93,11 @@
           <div class="category-tabs" id="model-category-tabs"></div>
           <div class="model-catalog-grid" id="model-chips" role="listbox" aria-label="Tunable Open-Weight Models"></div>
 
-          <div class="model-spec-line" id="model-spec-line">
-            Inferred: MoE (128 experts, top-8) &middot; 30.5B total (3.3B active, ~58.6 GB BF16 / 17.1 GB NVFP4) &middot; 151,936 vocab &middot; 1-node GB10 fit
+          <div class="model-readiness-bar" id="model-readiness-bar">
+            <div id="model-spec-line" class="model-spec-text">
+              Inferred: MoE (128 experts, top-8) &middot; 30.5B total (3.3B active) &middot; Pre-Loaded on VAST &middot; Preset Opt Ready
+            </div>
+            <button id="btn-stage-model" type="button" class="btn btn-outline btn-sm hidden">Load onto VAST Volume</button>
           </div>
         </div>
 
@@ -123,13 +126,13 @@
           </div>
         </div>
 
-        <!-- 3. LAUNCH REMOTE TUNING & GENERATE LOCAL LLM -->
+        <!-- 3. CONTINUOUS REMOTE-TEACHER BUDGET & LAUNCH -->
         <div class="builder-col builder-col-launch">
           <div>
-            <div class="step-kicker">3. DISPATCH TO FUZZBALL &amp; GENERATE LOCAL LLM</div>
-            <div class="launch-fields" style="margin-top:8px;">
+            <div class="step-kicker">3. CONTINUOUS TEACHER &amp; COST / TIME BUDGET</div>
+            <div class="launch-fields" style="margin-top:7px;">
               <label class="field-row">
-                <span>Fuzzball Server Execution Mode</span>
+                <span>Execution Mode</span>
                 <select id="backend-select" aria-label="Execution Backend">
                   <option value="simulator" selected>Fuzzball GB10 Empirical Twin (Live Dual-GPU Stream)</option>
                   <option value="fuzzball_mcp">CIQ Fuzzball 4.2 MCP Server &middot; Live Hardware</option>
@@ -137,21 +140,38 @@
                   <option value="local_torch">Local PyTorch Micro-Trainer (Client Machine)</option>
                 </select>
               </label>
+
+              <div class="budget-inputs-grid">
+                <label class="field-row">
+                  <span>Time Budget (min)</span>
+                  <input id="time-budget-input" class="team-text" type="number" min="1" max="120" step="1" value="8" aria-label="Time Budget Minutes" />
+                </label>
+                <label class="field-row">
+                  <span>Cost Cap ($ USD)</span>
+                  <input id="cost-budget-input" class="team-text" type="number" min="0.5" max="200" step="0.5" value="5.00" aria-label="Cost Budget USD" />
+                </label>
+              </div>
+
+              <label class="check-row">
+                <input id="chk-continuous" type="checkbox" checked />
+                <span>Continuous Remote-Teacher Loop (Intelligence + Speed)</span>
+              </label>
+              <label class="check-row">
+                <input id="chk-company-presets" type="checkbox" checked />
+                <span>Warm-Start from Company <code>sm_121</code> Presets (Saves $$$)</span>
+              </label>
             </div>
           </div>
 
-          <div class="measured-callout">
-            <div class="callout-title">Calibrated to Live GB10 Cluster Measurements</div>
-            <div class="callout-row"><span>1-Node &rarr; 2-Node DDP:</span> <strong>356 &rarr; 1,011 &rarr; 2,006 tok/s (5.6&times;)</strong></div>
-            <div class="callout-row"><span>Triton 152k Fused CE:</span> <strong>2.35&times; faster &middot; 6.96 &rarr; 0.34 GiB</strong></div>
-            <div class="callout-row"><span>NCCL RoCE Grad Sync:</span> <strong>53ms / step (99.2% 2-GPU scaling)</strong></div>
+          <div class="measured-callout" id="preset-savings-box">
+            <div class="callout-title" id="preset-callout-title">Company GB10 Preset Warm-Start Active</div>
+            <div class="callout-row"><span>Preset Savings:</span> <strong id="preset-savings-val">Saves $2.40 (skips cold kernel probes)</strong></div>
+            <div class="callout-row"><span>Live Budget Meter:</span> <strong id="live-budget-meter">$0.00 / $5.00 &middot; 0.0 / 8.0m</strong></div>
           </div>
 
-          <div>
+          <div class="launch-btn-row">
             <button id="btn-run" class="btn btn-primary btn-hero">Tune on Fuzzball &amp; Generate Local LLM</button>
-            <div class="queue-note" style="margin-top:6px;">
-              Streams real-time loss, grad norm, MoE router entropy, and dual-GPU NCCL comms directly to this client window.
-            </div>
+            <button id="btn-stop-run" type="button" class="btn btn-stop hidden">Stop &amp; Package Best</button>
           </div>
         </div>
       </div>
@@ -365,8 +385,8 @@
           <span class="rt-val" id="rt-entropy">—</span>
         </div>
         <div class="rt-kpi">
-          <span class="rt-label">Fused CE Mem Saved</span>
-          <span class="rt-val" id="rt-memsave">—</span>
+          <span class="rt-label">Teacher &amp; $ Spent</span>
+          <span class="rt-val" id="rt-memsave">R0 &middot; $0.00</span>
         </div>
         <div class="rt-kpi">
           <span class="rt-label">Cluster Throughput</span>

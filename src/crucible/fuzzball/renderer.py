@@ -630,3 +630,54 @@ def render_final_turnkey_fuzzfile(
 
 """
     return comment_header + yaml.safe_dump(doc, sort_keys=False)
+
+
+def render_model_staging_fuzzfile(
+    cluster: ClusterConfig,
+    model_id: str,
+    weights_subpath: str,
+) -> str:
+    """Render a zero-GPU Fuzzball v4 workflow that downloads `model_id` from HuggingFace onto VAST `/vast/models/`."""
+    clean_repo = model_id.strip()
+    dest_dir = f"{cluster.vast.models_dir}/{weights_subpath}"
+    job_spec: dict[str, Any] = {
+        "image": {"uri": cluster.images.fetch},
+        "mounts": _mounts_section(cluster),
+        "env": [
+            "HF_XET_HIGH_PERFORMANCE=1",
+            "HOME=/tmp/home",
+            "PYTHONUNBUFFERED=1",
+        ],
+        "resource": _cpu_helper_resource_block(cluster, cores=8, mem_gib=16),
+        "policy": {"timeout": {"execute": "4h"}, "retry": {"attempts": 2}},
+        "script": "\n".join(
+            [
+                "#!/bin/bash",
+                "set -euo pipefail",
+                f'DEST="{dest_dir}"',
+                'mkdir -p "$DEST" "$HOME"',
+                'if [ -f "$DEST/config.json" ]; then',
+                '  echo "CRUCIBLE_STAGE_DONE=already_cached dest=$DEST"',
+                "  exit 0",
+                "fi",
+                'pip install --quiet --no-cache-dir "huggingface_hub[hf_xet]>=0.34"',
+                f'hf download "{clean_repo}" --local-dir "$DEST"',
+                'rm -rf "$DEST/.cache"',
+                'du -sh "$DEST"',
+                'echo "CRUCIBLE_STAGE_DONE=downloaded dest=$DEST"',
+            ]
+        )
+        + "\n",
+    }
+    doc: dict[str, Any] = {
+        "version": cluster.fuzzfile_version,
+        **_workflow_annotations_section(cluster),
+        "volumes": _volume_section(cluster),
+        "jobs": {"stage-model-vast": job_spec},
+    }
+    header = (
+        f"# Crucible On-Demand VAST Model Staging Workflow\n"
+        f"# Model: {clean_repo} -> {dest_dir} (0 GPUs consumed)\n\n"
+    )
+    return header + yaml.safe_dump(doc, sort_keys=False)
+

@@ -73,7 +73,13 @@ class AdvisorTrialObservation(BaseModel):
 class AdvisorStageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stage: Literal["stage_a_recipe", "stage_b_training_perf", "stage_c_inference_perf", "stage_d_summary"]
+    stage: Literal[
+        "stage_a_recipe",
+        "stage_b_training_perf",
+        "stage_c_inference_perf",
+        "stage_d_summary",
+        "continuous_teacher_loop",
+    ]
     model_id: str = Field(max_length=64)
     cluster_sm_arch: str = Field(max_length=32)
     cluster_nodes: int = Field(ge=1, le=256)

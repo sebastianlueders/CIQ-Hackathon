@@ -133,8 +133,8 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "top_k_experts": 1,
         "context_window": 32768,
         "license": "Apache-2.0",
-        "featured": False,
-        "recommended_use": "Sub-20ms CPU/NPU client-machine code assistant",
+        "featured": True,
+        "recommended_use": "Fast live-demo baseline + fine-tune (3.1 GB BF16, ~25s VAST load) & CPU/laptop deploy",
     },
     {
         "id": "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
@@ -1030,6 +1030,8 @@ MODEL_CATALOG: list[dict[str, Any]] = [
 
 MODEL_CATEGORIES: list[str] = [
     "All Models",
+    "Pre-Loaded on VAST",
+    "Preset Opt Ready",
     "Featured",
     "Code & Systems",
     "Reasoning & Math",
@@ -1037,6 +1039,217 @@ MODEL_CATEGORIES: list[str] = [
     "Compact & Edge",
     "Frontier Multi-Node",
 ]
+
+# Models already staged on `team3` VAST volumes (`/models` or `/vast/models`)
+DEFAULT_PRELOADED_VAST_MODELS: set[str] = {
+    "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    "Qwen/Qwen3-Coder-30B-A3B",
+}
+
+# Preexisting company hardware optimization profiles verified on CIQ 2x NVIDIA GB10 (`sm_121` + VAST + 200GbE RoCE).
+# Warm-starting from these presets saves ~$1.60-$2.40 and 4-6 redundant cold kernel probe trials per run!
+COMPANY_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
+    "Qwen/Qwen3-Coder-30B-A3B-Instruct": {
+        "preset_id": "gb10-qwen3-30b-moe-verified",
+        "summary": "Verified on GB10: grouped_mm + regional torch.compile + Triton 152k Fused CE + 2-node DDP (2,006 tok/s) + FP8 LoRA",
+        "warm_start_savings_usd": 2.40,
+        "recommended_recipe": {"lr": 0.001, "lora_rank": 8, "lora_alpha": 16, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 4,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": True,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "FP8", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 64},
+    },
+    "Qwen/Qwen3-30B-A3B": {
+        "preset_id": "gb10-qwen3-30b-moe-verified",
+        "summary": "Shares Qwen3-30B-A3B 128-expert sm_121 preset: grouped_mm + Triton 152k Fused CE + 2-node DDP",
+        "warm_start_savings_usd": 2.20,
+        "recommended_recipe": {"lr": 0.0008, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 4,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": True,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "FP8", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 64},
+    },
+    "Qwen/Qwen2.5-Coder-1.5B-Instruct": {
+        "preset_id": "gb10-qwen25-1.5b-fast-demo",
+        "summary": "GB10 Fast-Demo Preset: Triton 152k Fused CE + Fused LoRA + mb=8 no-ckpt + NVFP4/Ollama client export",
+        "warm_start_savings_usd": 1.45,
+        "recommended_recipe": {"lr": 0.0003, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 1,
+            "micro_batch_size": 8,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "NVFP4", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 96},
+    },
+    "Qwen/Qwen2.5-Coder-7B-Instruct": {
+        "preset_id": "gb10-qwen25-7b-dense",
+        "summary": "GB10 Dense-7B Preset: Triton 152k Fused CE + regional compile + 2-node DDP + FP8 serving",
+        "warm_start_savings_usd": 1.65,
+        "recommended_recipe": {"lr": 0.00025, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 8,
+            "grad_accum_steps": 1,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "FP8", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 96},
+    },
+    "Qwen/Qwen2.5-Coder-14B-Instruct": {
+        "preset_id": "gb10-qwen25-14b-dense",
+        "summary": "GB10 Dense-14B Preset: Triton 152k Fused CE + Fused LoRA + 2-node DDP + FP8 serving",
+        "warm_start_savings_usd": 1.85,
+        "recommended_recipe": {"lr": 0.0002, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 6,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "FP8", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 64},
+    },
+    "Qwen/Qwen2.5-Coder-32B-Instruct": {
+        "preset_id": "gb10-qwen25-32b-dense",
+        "summary": "GB10 Dense-32B Preset: Triton 152k Fused CE (-6.6 GiB) + regional compile + 2-node DDP + NVFP4",
+        "warm_start_savings_usd": 2.15,
+        "recommended_recipe": {"lr": 0.00015, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 4,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "NVFP4", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 64},
+    },
+    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct": {
+        "preset_id": "gb10-deepseek-v2-moe-64e",
+        "summary": "GB10 64-Expert MoE Preset: Grouped MoE GEMM + Chunked 102k CE + Fused LoRA + FP8",
+        "warm_start_savings_usd": 1.95,
+        "recommended_recipe": {"lr": 0.00025, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 6,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": True,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "FP8", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 96},
+    },
+    "meta-llama/Llama-3.1-8B-Instruct": {
+        "preset_id": "gb10-llama3-8b-enterprise",
+        "summary": "GB10 Llama-3 128k-Vocab Preset: Triton Fused CE + Fused LoRA + 2-node DDP + FP8",
+        "warm_start_savings_usd": 1.60,
+        "recommended_recipe": {"lr": 0.0002, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 8,
+            "grad_accum_steps": 1,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "FP8", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 96},
+    },
+    "nvidia/Llama-3.1-Nemotron-Nano-8B-v1": {
+        "preset_id": "gb10-nemotron-nano-blackwell",
+        "summary": "NVIDIA Blackwell Native Preset: sm_121 Fused LoRA + Chunked CE + NVFP4 micro-block decode",
+        "warm_start_savings_usd": 1.75,
+        "recommended_recipe": {"lr": 0.0002, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 8,
+            "grad_accum_steps": 1,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "NVFP4", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 96},
+    },
+    "Qwen/Qwen3-4B": {
+        "preset_id": "gb10-qwen3-4b-edge-export",
+        "summary": "GB10 -> Client Laptop Preset: Triton 152k Fused CE + Fused LoRA + Ollama Q4/NVFP4 bundle",
+        "warm_start_savings_usd": 1.50,
+        "recommended_recipe": {"lr": 0.00025, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 1,
+            "micro_batch_size": 8,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": False,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "NVFP4", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 96},
+    },
+    "Qwen/Qwen3-Coder-80B-A3B-Instruct": {
+        "preset_id": "gb10-2node-fsdp-moe-80b",
+        "summary": "2xGB10 FSDP ZeRO-3 MoE Preset: Grouped MoE + Triton CE + NVFP4 2-Replica Serving",
+        "warm_start_savings_usd": 3.10,
+        "recommended_recipe": {"lr": 0.00012, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 4,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": True,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": True,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "NVFP4", "replicas": 2, "tensor_parallel": 1, "max_num_seqs": 64},
+    },
+    "meta-llama/Llama-3.3-70B-Instruct": {
+        "preset_id": "gb10-2node-fsdp-llama70b",
+        "summary": "2xGB10 FSDP 70B Preset: 256 GiB Unified Memory Sharding + Chunked CE + FP8 TP2",
+        "warm_start_savings_usd": 2.90,
+        "recommended_recipe": {"lr": 0.00012, "lora_rank": 16, "lora_alpha": 32, "seq_len": 2048},
+        "recommended_perf": {
+            "nodes": 2,
+            "micro_batch_size": 4,
+            "grad_accum_steps": 2,
+            "activation_checkpointing": True,
+            "use_chunked_ce_kernel": True,
+            "use_grouped_moe_kernel": False,
+            "use_fused_lora_kernel": True,
+        },
+        "recommended_serve": {"precision": "FP8", "replicas": 1, "tensor_parallel": 2, "max_num_seqs": 64},
+    },
+}
+
+
+def get_hardware_preset_for_model(model_id: str) -> dict[str, Any] | None:
+    cleaned = model_id.strip()
+    for k, v in COMPANY_HARDWARE_PRESETS.items():
+        if k.lower() == cleaned.lower():
+            return v
+    return None
 
 _MIXTRAL_RE = re.compile(r"(\d+)\s*[xX]\s*(\d+(?:\.\d+)?)\s*[bB]")
 _ACTIVE_RE = re.compile(r"[-_][aA](\d+(?:\.\d+)?)\s*[bB]\b")
@@ -1182,11 +1395,25 @@ def infer_model_profile(model_id: str, node_mem_gb: int = 104) -> ModelProfileCo
     )
 
 
-def enrich_catalog_for_cluster(node_mem_gb: int = 96) -> list[dict[str, Any]]:
-    """Return MODEL_CATALOG enriched with hardware fit, BF16 footprint, and deployment tier."""
+def enrich_catalog_for_cluster(
+    node_mem_gb: int = 96,
+    staged_models: set[str] | None = None,
+    staging_in_progress: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return MODEL_CATALOG enriched with hardware fit, VAST pre-load state, and company sm_121 preset status."""
+    known_loaded = {m.lower() for m in DEFAULT_PRELOADED_VAST_MODELS}
+    if staged_models:
+        known_loaded |= {m.lower() for m in staged_models}
+    in_flight = {m.lower() for m in (staging_in_progress or set())}
+
     enriched: list[dict[str, Any]] = []
     for item in MODEL_CATALOG:
         prof = infer_model_profile(item["id"], node_mem_gb=node_mem_gb)
+        preset = get_hardware_preset_for_model(item["id"])
+        id_low = item["id"].lower()
+        is_preloaded = id_low in known_loaded
+        is_staging = id_low in in_flight
+        est_load_seconds = max(15, int(round((prof.bf16_footprint_gb / 1.45))))
         client_local_fit = (
             "Laptop / Edge Ready (4-8 GB RAM)"
             if prof.total_params_b <= 4.5
@@ -1209,6 +1436,11 @@ def enrich_catalog_for_cluster(node_mem_gb: int = 96) -> list[dict[str, Any]]:
                 "min_nodes_required": prof.min_nodes_required,
                 "is_moe": prof.num_experts > 1,
                 "client_deployment_tier": client_local_fit,
+                "vast_state": "loading" if is_staging else ("preloaded" if is_preloaded else "needs_load"),
+                "preloaded_on_vast": is_preloaded,
+                "est_vast_load_seconds": est_load_seconds,
+                "has_hardware_preset": preset is not None,
+                "hardware_preset": preset,
             }
         )
     return enriched

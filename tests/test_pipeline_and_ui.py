@@ -269,6 +269,48 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     probe = client.post("/api/firewall-probe", json={"inject_cpp_snippet": True}).json()
     assert probe["blocked"] is True
 
+    # 5. Verify model readiness badges (Pre-Loaded vs Needs Load vs Preset Opt) + on-demand VAST staging + Continuous Teacher budget
+    m_before = client.get("/api/models?probe_model=Qwen/Qwen2.5-Coder-1.5B-Instruct").json()
+    assert m_before["preloaded_count"] >= 1
+    assert m_before["preset_count"] >= 10
+    assert m_before["inferred"]["has_hardware_preset"] is True
+    assert m_before["inferred"]["vast_state"] == "needs_load"
+
+    stage_res = client.post(
+        "/api/models/stage",
+        json={"model_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct", "backend": "simulator", "async_mode": False},
+    )
+    assert stage_res.status_code == 200, stage_res.text
+    stage_json = stage_res.json()
+    assert stage_json["staged"] is True
+    assert Path(stage_json["fuzzfile_path"]).exists()
+
+    m_after = client.get("/api/models?probe_model=Qwen/Qwen2.5-Coder-1.5B-Instruct").json()
+    assert m_after["inferred"]["vast_state"] == "preloaded"
+    assert m_after["inferred"]["preloaded_on_vast"] is True
+
+    cont_run = client.post(
+        "/api/run",
+        json={
+            "model_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+            "dataset_id": uploaded_ds["dataset_id"],
+            "backend": "simulator",
+            "continuous_mode": True,
+            "time_budget_minutes": 5.0,
+            "cost_budget_usd": 3.50,
+            "use_company_presets": True,
+            "async_mode": False,
+        },
+    )
+    assert cont_run.status_code == 200, cont_run.text
+    cont_payload = cont_run.json()
+    cont_meta = cont_payload["continuous_optimization"]
+    assert cont_meta["enabled"] is True
+    assert cont_meta["rounds_completed"] >= 1
+    assert cont_meta["preset_savings_usd"] == 1.45
+    assert cont_meta["spent_usd"] <= cont_meta["cost_budget_usd"] + 0.5
+    assert any(e["stage"].startswith("teacher_round_") for e in cont_payload["advisor_explanations"])
+
 
 def test_zero_torch_import_across_control_plane(tmp_path: Path) -> None:
     """Guarantees thin control-plane laptops without PyTorch run CLI, discovery, and simulator cleanly."""

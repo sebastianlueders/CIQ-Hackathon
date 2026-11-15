@@ -29,29 +29,52 @@ function currentClusterEndpoint() {
 async function refreshModelSpec(modelId) {
   try {
     const info = await fetchJson(`/api/models?probe_model=${encodeURIComponent(modelId)}`);
+    if (Array.isArray(info.catalog)) {
+      fullCatalog = info.catalog;
+    }
     const m = info.inferred;
     if (!m) return;
     const kind =
       m.num_experts > 1 ? `MoE (${m.num_experts} experts, top-${m.top_k_experts})` : "Dense Transformer";
-    const kernels =
-      m.num_experts > 1
-        ? "Triton 152k Fused CE + Grouped MoE GEMM + Fused LoRA + NVFP4"
-        : "Triton Fused CE + Regional torch.compile + Fused LoRA + NVFP4";
-    const nodeFit =
-      m.min_nodes_required >= 2
-        ? "Requires 2× GB10 Nodes (FSDP + TP2)"
-        : m.total_params_b <= 4.5
-        ? "1× GB10 Tune → Runs Directly on Client Laptop (4–8 GB)"
-        : "1× GB10 Node Fit (2-Node DDP 1.98× Speedup Available)";
-    document.getElementById("model-spec-line").innerHTML =
-      `<strong>${m.name}</strong> &middot; ${kind} &middot; <strong>${m.total_params_b}B</strong> total ` +
-      `(<strong>${m.active_params_b}B</strong> active) &middot; BF16 <code>${m.bf16_footprint_gb} GB</code> / ` +
-      `FP8 <code>${m.fp8_footprint_gb} GB</code> / NVFP4 <code>${m.nvfp4_footprint_gb} GB</code> &middot; ` +
-      `${m.vocab_size.toLocaleString()} vocab &middot; <span style="color:#a3e635">${nodeFit}</span> &middot; ${kernels}`;
+    const vastPill =
+      m.vast_state === "preloaded"
+        ? `<span class="tag-pill tag-pill-green">Pre-Loaded on VAST</span>`
+        : m.vast_state === "loading"
+        ? `<span class="tag-pill tag-pill-amber">Loading to VAST…</span>`
+        : `<span class="tag-pill tag-pill-amber">Needs VAST Load (~${m.est_vast_load_seconds}s)</span>`;
+    const presetPill = m.has_hardware_preset
+      ? `<span class="tag-pill tag-pill-cyan">Preset Opt Ready (${m.hardware_preset.preset_id})</span>`
+      : `<span class="tag-pill tag-pill-muted">Full Discovery Sweep (No Preset)</span>`;
 
-    document.querySelectorAll("#model-chips .model-card").forEach((c) => {
-      c.classList.toggle("model-card-active", c.dataset.modelId.toLowerCase() === modelId.toLowerCase());
-    });
+    document.getElementById("model-spec-line").innerHTML =
+      `<strong>${m.name}</strong> &middot; ${vastPill} ${presetPill}<br/>` +
+      `${kind} &middot; <strong>${m.total_params_b}B</strong> (${m.active_params_b}B active) &middot; ` +
+      `BF16 <code>${m.bf16_footprint_gb} GB</code> / FP8 <code>${m.fp8_footprint_gb} GB</code> / NVFP4 <code>${m.nvfp4_footprint_gb} GB</code>`;
+
+    const stageBtn = document.getElementById("btn-stage-model");
+    if (stageBtn) {
+      if (m.vast_state === "preloaded") {
+        stageBtn.classList.add("hidden");
+      } else {
+        stageBtn.classList.remove("hidden");
+        stageBtn.disabled = m.vast_state === "loading";
+        stageBtn.textContent = m.vast_state === "loading" ? "Loading to VAST…" : `Load onto VAST (~${m.est_vast_load_seconds}s)`;
+      }
+    }
+
+    const pTitle = document.getElementById("preset-callout-title");
+    const pVal = document.getElementById("preset-savings-val");
+    if (pTitle && pVal) {
+      if (m.has_hardware_preset && document.getElementById("chk-company-presets").checked) {
+        pTitle.textContent = `Company GB10 Preset: ${m.hardware_preset.preset_id}`;
+        pVal.textContent = `Saves $${Number(m.hardware_preset.warm_start_savings_usd).toFixed(2)} (warm-starts sm_121 kernels)`;
+      } else {
+        pTitle.textContent = "Cold Hardware Sweep (No Preset Applied)";
+        pVal.textContent = "$0.00 saved — runs full Stage B kernel discovery";
+      }
+    }
+
+    renderCatalogCards();
   } catch (_) {}
 }
 
@@ -59,9 +82,11 @@ function renderCatalogCards() {
   const query = (document.getElementById("catalog-filter-input").value || "").trim().toLowerCase();
   const currentId = currentModelId().toLowerCase();
   const filtered = fullCatalog.filter((m) => {
-    const catOk =
-      activeCategory === "All Models" ||
-      (activeCategory === "Featured" ? Boolean(m.featured) : m.category === activeCategory);
+    let catOk = true;
+    if (activeCategory === "Featured") catOk = Boolean(m.featured);
+    else if (activeCategory === "Pre-Loaded on VAST") catOk = Boolean(m.preloaded_on_vast);
+    else if (activeCategory === "Preset Opt Ready") catOk = Boolean(m.has_hardware_preset);
+    else if (activeCategory !== "All Models") catOk = m.category === activeCategory;
     if (!catOk) return false;
     if (!query) return true;
     const hay = `${m.id} ${m.label} ${m.provider} ${m.family} ${m.category} ${m.license} ${m.recommended_use}`.toLowerCase();
@@ -79,12 +104,22 @@ function renderCatalogCards() {
       const isAct = m.id.toLowerCase() === currentId;
       const archBadge = m.is_moe ? `MoE ${m.active_params_b}B/${m.total_params_b}B` : `${m.total_params_b}B Dense`;
       const nodeBadge = m.min_nodes_required >= 2 ? "2×GB10" : m.total_params_b <= 4.5 ? "LaptopFit" : "1×GB10";
+      const loadBadge =
+        m.vast_state === "preloaded"
+          ? `<span class="mc-status mc-preloaded">Pre-Loaded</span>`
+          : m.vast_state === "loading"
+          ? `<span class="mc-status mc-needs-load">Loading…</span>`
+          : `<span class="mc-status mc-needs-load">Needs Load</span>`;
+      const optBadge = m.has_hardware_preset
+        ? `<span class="mc-status mc-preset">Preset Opt</span>`
+        : `<span class="mc-status mc-nopreset">Auto-Sweep</span>`;
       return `
         <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" data-model-id="${m.id}" title="${m.id} — ${m.recommended_use}">
           <div class="mc-top">
             <span class="mc-label">${m.label}</span>
             <span class="mc-node ${m.min_nodes_required >= 2 ? "mc-node-2" : ""}">${nodeBadge}</span>
           </div>
+          <div class="mc-badges-row">${loadBadge}${optBadge}</div>
           <div class="mc-meta">${m.provider} &middot; ${archBadge} &middot; ${m.license}</div>
         </button>
       `;
@@ -373,6 +408,19 @@ function renderDualGpuFabric(snap) {
 
 function renderRealtimeAnalysis(snap) {
   const m = snap.live_step_metrics || {};
+  const b = snap.live_budget || {};
+  if (b && b.cost_budget_usd != null) {
+    const spent = Number(b.spent_usd || 0);
+    const cap = Number(b.cost_budget_usd || 5.0);
+    const elMin = (Number(b.elapsed_s || 0) / 60.0).toFixed(1);
+    const capMin = (Number(b.time_budget_s || 480.0) / 60.0).toFixed(1);
+    const meterEl = document.getElementById("live-budget-meter");
+    if (meterEl) {
+      meterEl.textContent = `$${spent.toFixed(2)} / $${cap.toFixed(2)} · ${elMin} / ${capMin}m`;
+    }
+    const rRound = Number(b.teacher_round || 0);
+    document.getElementById("rt-memsave").textContent = `R${rRound} · $${spent.toFixed(2)}`;
+  }
   if (m && m.trial_id) {
     document.getElementById("rt-step").textContent = `${m.trial_id.slice(0, 18)} [${m.step}/${m.max_steps || m.step}]`;
     const vTxt = m.val_loss != null ? Number(m.val_loss).toFixed(4) : "—";
@@ -381,8 +429,6 @@ function renderRealtimeAnalysis(snap) {
     document.getElementById("rt-lr").textContent = m.lr != null ? Number(m.lr).toExponential(2) : "—";
     document.getElementById("rt-grad").textContent = m.grad_norm != null ? Number(m.grad_norm).toFixed(3) : "—";
     document.getElementById("rt-entropy").textContent = m.router_entropy != null ? Number(m.router_entropy).toFixed(3) : "1.000";
-    document.getElementById("rt-memsave").textContent =
-      m.logit_mem_saved_gb > 0 ? `-${Number(m.logit_mem_saved_gb).toFixed(2)} GiB` : "Baseline";
     document.getElementById("rt-toks").textContent = `${Math.round(Number(m.tokens_per_sec || 0)).toLocaleString()} tok/s`;
   }
 
@@ -442,6 +488,11 @@ function renderLiveTelemetry(snap) {
 
   renderDualGpuFabric(snap);
   renderRealtimeAnalysis(snap);
+
+  const stopBtn = document.getElementById("btn-stop-run");
+  if (stopBtn) {
+    stopBtn.classList.toggle("hidden", !(st === "running" || st === "queued_for_gpu"));
+  }
 
   if (st === "running" || st === "queued_for_gpu") {
     const activeTid = (snap.live_step_metrics && snap.live_step_metrics.trial_id) || "";
@@ -886,6 +937,41 @@ document.getElementById("backend-select").addEventListener("change", () => {
   userPickedBackend = true;
 });
 
+document.getElementById("chk-company-presets").addEventListener("change", () => {
+  refreshModelSpec(currentModelId());
+});
+
+document.getElementById("btn-stage-model").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-stage-model");
+  const modelId = currentModelId();
+  btn.disabled = true;
+  btn.textContent = "Loading onto VAST…";
+  try {
+    await fetchJson("/api/models/stage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: modelId, backend: "auto", async_mode: false }),
+    });
+    await refreshModelSpec(modelId);
+  } catch (_) {
+    btn.disabled = false;
+    btn.textContent = "Load onto VAST Volume";
+  }
+});
+
+document.getElementById("btn-stop-run").addEventListener("click", async () => {
+  const stopBtn = document.getElementById("btn-stop-run");
+  stopBtn.disabled = true;
+  stopBtn.textContent = "Stopping & Packaging…";
+  try {
+    await fetchJson("/api/run/stop", { method: "POST" });
+  } catch (_) {}
+  setTimeout(() => {
+    stopBtn.disabled = false;
+    stopBtn.textContent = "Stop & Package Best";
+  }, 1200);
+});
+
 document.getElementById("btn-run").addEventListener("click", async () => {
   const btn = document.getElementById("btn-run");
   const modelId = currentModelId();
@@ -901,8 +987,13 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   const backend = document.getElementById("backend-select").value;
   const teamId = currentTeamId();
   const clusterEp = currentClusterEndpoint();
+  const continuousMode = document.getElementById("chk-continuous").checked;
+  const usePresets = document.getElementById("chk-company-presets").checked;
+  const timeBudgetMin = Math.max(0.5, Number(document.getElementById("time-budget-input").value || 8));
+  const costBudgetUsd = Math.max(0.5, Number(document.getElementById("cost-budget-input").value || 5));
+
   btn.disabled = true;
-  btn.textContent = `Tuning on Fuzzball (${backend})…`;
+  btn.textContent = `Tuning (${backend})…`;
   const resp = await fetch("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -913,6 +1004,10 @@ document.getElementById("btn-run").addEventListener("click", async () => {
       fuzzfile_version: "v4",
       definition_id: teamId,
       cluster_endpoint: clusterEp,
+      continuous_mode: continuousMode,
+      time_budget_minutes: timeBudgetMin,
+      cost_budget_usd: costBudgetUsd,
+      use_company_presets: usePresets,
       async_mode: true,
     }),
   });

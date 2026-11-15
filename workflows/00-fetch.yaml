@@ -39,9 +39,18 @@ jobs:
       DEST="/vast/models/Qwen3-Coder-30B-A3B"
       mkdir -p "$DEST" "$HOME"
       pip install --quiet --no-cache-dir "huggingface_hub[hf_xet]>=0.34"
-      hf download Qwen/Qwen3-Coder-30B-A3B --local-dir "$DEST"
-      rm -rf "$DEST/.cache"
-      du -sh "$DEST"
+      if [ ! -f "$DEST/config.json" ]; then
+        hf download Qwen/Qwen3-Coder-30B-A3B --local-dir "$DEST"
+        rm -rf "$DEST/.cache"
+      fi
+      # Also stage compact 1.5B live-demo model (~3.1 GB BF16, ~20s download) for fast real-weight baseline + fine-tuning demos
+      DEMO_DEST="/vast/models/Qwen/Qwen2.5-Coder-1.5B-Instruct"
+      mkdir -p "$DEMO_DEST"
+      if [ ! -f "$DEMO_DEST/config.json" ]; then
+        hf download Qwen/Qwen2.5-Coder-1.5B-Instruct --local-dir "$DEMO_DEST"
+        rm -rf "$DEMO_DEST/.cache"
+      fi
+      du -sh "$DEST" "$DEMO_DEST"
 
   fetch-lammps-source:
     image:

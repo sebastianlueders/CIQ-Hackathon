@@ -28,12 +28,20 @@ from crucible.build_bundle import build_artifact_texts, create_build_bundle_zip_
 from crucible.config import ClusterConfig, DatasetSplitConfig, ExperimentConfig, repo_root
 from crucible.data.custom_ingest import ingest_universal_dataset, stage_uploaded_files
 from crucible.firewall import DataIsolationViolation, PrivacySchemaFirewall
-from crucible.fuzzball.discovery import discover_cluster_config
+from crucible.fuzzball.discovery import (
+    check_cluster_tcp_reachable,
+    discover_cluster_config,
+    resolve_fuzzball_executable,
+)
+from crucible.fuzzball.mcp_client import FuzzballMCPStdioClient
+from crucible.fuzzball.renderer import render_model_staging_fuzzfile
 from crucible.fuzzball.validator import FuzzfileValidationError, validate_fuzzfile
 from crucible.model_catalog import (
+    DEFAULT_PRELOADED_VAST_MODELS,
     MODEL_CATEGORIES,
     build_dynamic_experiment_config,
     enrich_catalog_for_cluster,
+    get_hardware_preset_for_model,
     infer_model_profile,
 )
 from crucible.optimizer.pipeline import run_autoresearch_pipeline
@@ -108,6 +116,16 @@ class TriggerRunRequest(BaseModel):
     fuzzfile_version: Literal["v4", "v1"] = "v4"
     definition_id: str = "team3"
     cluster_endpoint: str | None = None
+    continuous_mode: bool = True
+    time_budget_minutes: float = Field(default=8.0, ge=0.1, le=240.0)
+    cost_budget_usd: float = Field(default=5.0, ge=0.1, le=500.0)
+    use_company_presets: bool = True
+    async_mode: bool = False
+
+
+class StageModelRequest(BaseModel):
+    model_id: str
+    backend: Literal["auto", "simulator", "fuzzball_mcp", "fuzzball"] = "auto"
     async_mode: bool = False
 
 
@@ -157,6 +175,17 @@ class LiveRunState:
         self.live_stage_a: dict[str, Any] = {}
         self.live_stage_b_outcomes: list[dict[str, Any]] = []
         self.live_stage_c_outcomes: list[dict[str, Any]] = []
+        self.live_budget: dict[str, Any] = {
+            "continuous_enabled": True,
+            "spent_usd": 0.0,
+            "cost_budget_usd": 5.0,
+            "preset_savings_usd": 0.0,
+            "elapsed_s": 0.0,
+            "time_budget_s": 480.0,
+            "teacher_round": 0,
+            "max_teacher_rounds": 8,
+            "active_preset_id": None,
+        }
         self.live_step_metrics: dict[str, Any] = {}
         self.step_history: list[dict[str, Any]] = []
         self.live_firewall: list[dict[str, Any]] = []
@@ -244,6 +273,17 @@ class LiveRunState:
             self.live_stage_a = {}
             self.live_stage_b_outcomes = []
             self.live_stage_c_outcomes = []
+            self.live_budget = {
+                "continuous_enabled": True,
+                "spent_usd": 0.0,
+                "cost_budget_usd": 5.0,
+                "preset_savings_usd": 0.0,
+                "elapsed_s": 0.0,
+                "time_budget_s": 480.0,
+                "teacher_round": 0,
+                "max_teacher_rounds": 8,
+                "active_preset_id": None,
+            }
             self.live_step_metrics = {}
             self.step_history = []
             self.live_firewall = []
@@ -410,7 +450,44 @@ class LiveRunState:
             ev_type = str(payload.get("type", "info"))
             entry: dict[str, Any] = {"seq": self.seq, "time_utc": now, "type": ev_type}
 
-            if ev_type == "stage_started":
+            if ev_type == "run_started":
+                hw_p = payload.get("hardware_preset") or {}
+                self.live_budget.update(
+                    {
+                        "continuous_enabled": bool(payload.get("continuous_enabled", True)),
+                        "spent_usd": 0.0,
+                        "cost_budget_usd": float(payload.get("cost_budget_usd") or 5.0),
+                        "preset_savings_usd": float(payload.get("preset_savings_usd") or 0.0),
+                        "elapsed_s": 0.0,
+                        "time_budget_s": float(payload.get("time_budget_minutes") or 8.0) * 60.0,
+                        "teacher_round": 0,
+                        "active_preset_id": hw_p.get("preset_id"),
+                    }
+                )
+                entry["message"] = (
+                    f"Run initialized (Budget: ${self.live_budget['cost_budget_usd']:.2f} / "
+                    f"{self.live_budget['time_budget_s'] / 60.0:.1f}m"
+                    + (f" · Warm-start saved ${self.live_budget['preset_savings_usd']:.2f}" if self.live_budget["preset_savings_usd"] > 0 else "")
+                    + ")"
+                )
+
+            elif ev_type == "teacher_round_started":
+                r_num = int(payload.get("round") or 1)
+                self.live_budget.update(
+                    {
+                        "teacher_round": r_num,
+                        "max_teacher_rounds": int(payload.get("max_rounds") or 8),
+                        "spent_usd": float(payload.get("spent_usd") or self.live_budget["spent_usd"]),
+                        "elapsed_s": float(payload.get("elapsed_s") or self.live_budget["elapsed_s"]),
+                    }
+                )
+                self.stage_label = (
+                    f"Remote Teacher Round {r_num}: Testing {payload.get('candidate_label')} "
+                    f"(${self.live_budget['spent_usd']:.2f} / ${self.live_budget['cost_budget_usd']:.2f})"
+                )
+                entry["message"] = f"[Teacher R{r_num}] {payload.get('rationale')}"
+
+            elif ev_type == "stage_started":
                 if self.state == "queued_for_gpu":
                     self.state = "running"
                 self.current_stage = str(payload.get("stage", ""))
@@ -660,8 +737,13 @@ class LiveRunState:
                     )
                 elif tid.startswith("stagec-") and isinstance(summ, dict) and summ.get("label"):
                     self.live_stage_c_outcomes.append(summ)
+                if payload.get("spent_usd") is not None:
+                    self.live_budget["spent_usd"] = float(payload["spent_usd"])
+                if payload.get("elapsed_s") is not None:
+                    self.live_budget["elapsed_s"] = float(payload["elapsed_s"])
                 entry["message"] = (
-                    f"Completed {tid} ({w_size}x GB10) · {float(tok_s):,.0f} tok/s · Held-Out PPL {float(ppl):.3f}"
+                    f"Completed {tid} ({w_size}x GB10) · {float(tok_s):,.0f} tok/s · Held-Out PPL {float(ppl):.3f} "
+                    f"(${self.live_budget['spent_usd']:.2f} spent)"
                 )
 
             elif ev_type == "firewall_audit":
@@ -737,6 +819,7 @@ class LiveRunState:
                 "live_stage_a": dict(self.live_stage_a),
                 "live_stage_b_outcomes": list(self.live_stage_b_outcomes),
                 "live_stage_c_outcomes": list(self.live_stage_c_outcomes),
+                "live_budget": dict(self.live_budget),
                 "live_step_metrics": dict(self.live_step_metrics),
                 "step_history": list(self.step_history[-40:]),
                 "live_firewall": list(self.live_firewall),
@@ -754,6 +837,20 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     default_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
     live_state = LiveRunState(default_cluster)
     dataset_registry: dict[str, dict[str, Any]] = {}
+    staged_registry_file = resolved_run_dir.parent / "vast_staged_models.json"
+    staged_vast_models: set[str] = set(DEFAULT_PRELOADED_VAST_MODELS)
+    staging_in_progress: set[str] = set()
+    if staged_registry_file.exists():
+        try:
+            staged_vast_models |= set(json.loads(staged_registry_file.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+
+    def _save_staged_models() -> None:
+        staged_registry_file.parent.mkdir(parents=True, exist_ok=True)
+        staged_registry_file.write_text(
+            json.dumps(sorted(staged_vast_models), indent=2), encoding="utf-8"
+        )
 
     app = FastAPI(
         title="Crucible Enterprise Client — Fuzzball Local LLM Forge",
@@ -768,6 +865,8 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     app.state.dataset_registry = dataset_registry
     app.state.live = live_state
     app.state.active_cluster = default_cluster
+    app.state.stop_event = threading.Event()
+    app.state.staged_vast_models = staged_vast_models
 
     def _ensure_builtin_preset() -> dict[str, Any]:
         if BUILTIN_PRESET_ID in dataset_registry:
@@ -958,11 +1057,19 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         q: str | None = None,
     ) -> dict[str, Any]:
         node_mem = app.state.active_cluster.nodes.memory_gb_per_node
-        catalog = enrich_catalog_for_cluster(node_mem_gb=node_mem)
+        catalog = enrich_catalog_for_cluster(
+            node_mem_gb=node_mem,
+            staged_models=staged_vast_models,
+            staging_in_progress=staging_in_progress,
+        )
         filtered = catalog
         if category and category not in {"All Models", "all"}:
             if category == "Featured":
                 filtered = [m for m in filtered if m.get("featured")]
+            elif category == "Pre-Loaded on VAST":
+                filtered = [m for m in filtered if m.get("preloaded_on_vast")]
+            elif category == "Preset Opt Ready":
+                filtered = [m for m in filtered if m.get("has_hardware_preset")]
             else:
                 filtered = [m for m in filtered if m.get("category", "").lower() == category.lower()]
         if q and q.strip():
@@ -979,17 +1086,120 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         inferred = None
         if probe_model:
             prof = infer_model_profile(probe_model, node_mem_gb=node_mem)
+            hw_p = get_hardware_preset_for_model(probe_model)
+            p_low = probe_model.strip().lower()
+            is_pre = any(x.lower() == p_low for x in staged_vast_models)
+            is_stg = any(x.lower() == p_low for x in staging_in_progress)
             inferred = {
                 **prof.model_dump(),
                 "fp8_footprint_gb": round(prof.total_params_b * 1.02, 1),
                 "nvfp4_footprint_gb": round(prof.total_params_b * 0.56, 1),
+                "vast_state": "loading" if is_stg else ("preloaded" if is_pre else "needs_load"),
+                "preloaded_on_vast": is_pre,
+                "est_vast_load_seconds": max(15, int(round(prof.bf16_footprint_gb / 1.45))),
+                "has_hardware_preset": hw_p is not None,
+                "hardware_preset": hw_p,
             }
         return {
             "total_count": len(catalog),
+            "preloaded_count": sum(1 for m in catalog if m.get("preloaded_on_vast")),
+            "preset_count": sum(1 for m in catalog if m.get("has_hardware_preset")),
             "categories": MODEL_CATEGORIES,
             "catalog": filtered,
             "inferred": inferred,
         }
+
+    @app.post("/api/models/stage")
+    def api_stage_model_to_vast(req: StageModelRequest) -> dict[str, Any]:
+        """Stage any HuggingFace model onto the Fuzzball VAST volume (0 GPUs used) so real weights run."""
+        model_id = req.model_id.strip()
+        if not model_id:
+            raise HTTPException(status_code=400, detail="model_id is required")
+        base_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+        cluster, rep = discover_cluster_config(base_config=base_cluster)
+        prof = infer_model_profile(model_id, node_mem_gb=cluster.nodes.memory_gb_per_node)
+        stage_yaml = render_model_staging_fuzzfile(
+            cluster=cluster,
+            model_id=model_id,
+            weights_subpath=prof.weights_subpath,
+        )
+        validate_fuzzfile(stage_yaml, cluster=cluster)
+        stage_dir = resolved_run_dir.parent / "vast_staging"
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        safe_slug = prof.weights_subpath.replace("/", "-")[:40]
+        fz_file = stage_dir / f"stage-{safe_slug}.yaml"
+        fz_file.write_text(stage_yaml, encoding="utf-8")
+
+        chosen_backend = req.backend
+        if chosen_backend == "auto":
+            reachable, _ = check_cluster_tcp_reachable()
+            if reachable and resolve_fuzzball_executable():
+                chosen_backend = "fuzzball_mcp"
+            else:
+                chosen_backend = "simulator"
+
+        staging_in_progress.add(model_id)
+        live_state.record_event(
+            {
+                "type": "info",
+                "label": f"Staging '{model_id}' ({prof.bf16_footprint_gb} GB BF16) onto VAST /vast/models/{prof.weights_subpath} ({chosen_backend})...",
+            }
+        )
+
+        def _do_stage() -> dict[str, Any]:
+            wf_id = f"sim-stage-{hashlib.sha256(model_id.encode()).hexdigest()[:10]}"
+            try:
+                if chosen_backend == "fuzzball_mcp":
+                    with FuzzballMCPStdioClient(allow_write=True, allow_exec=True) as mcp:
+                        mcp.workflow_validate(stage_yaml, fuzzfile_path=fz_file)
+                        wf_id = mcp.workflow_start(
+                            stage_yaml,
+                            name=f"crucible-stage-{safe_slug}",
+                            fuzzfile_path=fz_file,
+                        )
+                        mcp.workflow_wait(wf_id, timeout_seconds=3600)
+                elif chosen_backend == "fuzzball":
+                    import subprocess
+
+                    fb_bin = resolve_fuzzball_executable() or "fuzzball"
+                    proc = subprocess.run(
+                        [fb_bin, "workflow", "start", str(fz_file), "-n", f"crucible-stage-{safe_slug}"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    wf_id = proc.stdout.strip().splitlines()[-1].strip()
+                else:
+                    time.sleep(0.15 if req.async_mode else 0.0)
+
+                staged_vast_models.add(model_id)
+                _save_staged_models()
+                live_state.record_event(
+                    {
+                        "type": "info",
+                        "label": f"VAST Pre-Load Complete: '{model_id}' ready at /vast/models/{prof.weights_subpath} (workflow {wf_id[:10]}…)",
+                    }
+                )
+                return {
+                    "staged": True,
+                    "model_id": model_id,
+                    "vast_path": f"{cluster.vast.models_dir}/{prof.weights_subpath}",
+                    "workflow_id": wf_id,
+                    "backend_used": chosen_backend,
+                    "fuzzfile_path": str(fz_file),
+                }
+            finally:
+                staging_in_progress.discard(model_id)
+
+        if req.async_mode:
+            threading.Thread(target=_do_stage, daemon=True).start()
+            return {
+                "staging_started": True,
+                "model_id": model_id,
+                "backend_used": chosen_backend,
+                "vast_path": f"{cluster.vast.models_dir}/{prof.weights_subpath}",
+            }
+        return _do_stage()
 
     @app.get("/api/datasets")
     def api_datasets() -> dict[str, Any]:
@@ -1288,6 +1498,12 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             exp.dataset.chunk_seq_len = min(exp.dataset.chunk_seq_len, 256)
             exp.dataset.chunk_overlap = min(exp.dataset.chunk_overlap, 32)
 
+        exp.continuous_optimization.enabled = req.continuous_mode
+        exp.continuous_optimization.time_budget_minutes = req.time_budget_minutes
+        exp.continuous_optimization.cost_budget_usd = req.cost_budget_usd
+        exp.continuous_optimization.warm_start_from_company_presets = req.use_company_presets
+
+        app.state.stop_event.clear()
         run_slug = f"ui-{exp.experiment_id}-{req.backend}-{req.fuzzfile_version}"
         target_dir = app.state.run_dir.parent / run_slug
         live_state.begin_run(
@@ -1309,6 +1525,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                     source_data_dir=source_data_dir,
                     event_hook=live_state.record_event,
                     sim_step_delay_s=sim_delay,
+                    stop_event=app.state.stop_event,
                 )
                 app.state.run_dir = target_dir
             except Exception as exc:
@@ -1326,6 +1543,18 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         if snap["state"] == "failed":
             raise HTTPException(status_code=400, detail=snap["error"] or "Run failed")
         return _collect_summary_payload(target_dir)
+
+    @app.post("/api/run/stop")
+    def stop_active_run() -> dict[str, Any]:
+        """Signal the Continuous Remote-Teacher loop to finish the current trial and package the best build."""
+        app.state.stop_event.set()
+        live_state.record_event(
+            {
+                "type": "info",
+                "label": "Stop requested — wrapping up current trial and packaging best Local LLM build...",
+            }
+        )
+        return {"stopping": True, "live_status": live_state.snapshot()}
 
     @app.post("/api/firewall-probe")
     def probe_firewall(req: FirewallProbeRequest) -> dict[str, object]:
