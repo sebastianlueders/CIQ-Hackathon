@@ -64,7 +64,7 @@ def render(t: Trial) -> dict:
                            "/runs": {"volume": "runs"}, "/envs": {"volume": "envs"}},
                 "policy": {"timeout": {"execute": t.timeout},
                            # GPU nodes power down 7 PM-9 AM: re-run a job whose node disappears.
-                           **({"retry": {"attempts": 2}} if os.environ.get("TRIAL_RETRY") else {})},
+                           **({"restart": "on-node-fault"} if os.environ.get("TRIAL_RETRY") else {})},
                 "resource": {"cpu": {"cores": ENV["cores"]}, "memory": {"size": ENV["memory"]},
                              "devices": {"nvidia.com/gpu": 1}},
                 "script": launch_script(t),
@@ -92,7 +92,8 @@ def launch_script(t: Trial) -> str:
         return f"#!/bin/bash\nmkdir -p /tmp/home\nexec {py} /opt/train.py --config /opt/trial.json\n"
     # Same script on every node (src/runner/multinode_launch.sh): diagnostics, TCP check, then torchrun.
     variant = t.config.get("dp_launch", "ip")
-    return (f"#!/bin/bash\nexport MN_NODES={t.nodes} MN_VARIANT={variant} PY={py} "
+    timeout = 1800 if t.config.get("skip_eval") else 0  # perf probes only; real training runs have no timeout
+    return (f"#!/bin/bash\nexport MN_NODES={t.nodes} MN_VARIANT={variant} MN_TIMEOUT={timeout} PY={py} "
             f"TRAIN_ARGS='/opt/train.py --config /opt/trial.json'\nexec bash /opt/multinode_launch.sh\n")
 
 

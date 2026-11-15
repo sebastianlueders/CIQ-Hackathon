@@ -148,7 +148,8 @@ def main():
     dist = None
     if world > 1:
         import torch.distributed as dist
-        dist.init_process_group("nccl"); torch.cuda.set_device(0)
+        import datetime  # rank 0 evaluates alone (full eval ~6 min) while others wait at a barrier
+        dist.init_process_group("nccl", timeout=datetime.timedelta(minutes=60)); torch.cuda.set_device(0)
     os.makedirs(cfg["out"], exist_ok=True)
     fh = open(os.path.join(cfg["out"], "metrics.jsonl") if rank == 0 else os.devnull, "a")
     if rank == 0: log(fh, kind="config", world_size=world, **cfg)
