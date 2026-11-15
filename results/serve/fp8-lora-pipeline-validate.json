@@ -1,0 +1,39 @@
+{
+ "kind": "serve",
+ "config": "final",
+ "ok": true,
+ "args": [
+  "--quantization",
+  "fp8",
+  "--enable-lora",
+  "--max-lora-rank",
+  "16",
+  "--lora-modules",
+  "ft=/runs/pipeline/train/adapter"
+ ],
+ "startup_s": 680.2,
+ "eval_loss": 1.19347,
+ "ppl": 3.2985,
+ "quality_tokens": 24552,
+ "speed": [
+  {
+   "concurrency": 1,
+   "requests": 3,
+   "out_tok_s": 44.5,
+   "latency_p50_s": 5.71,
+   "latency_p95_s": 5.71,
+   "per_request_tok_s": 44.8
+  },
+  {
+   "concurrency": 16,
+   "requests": 48,
+   "out_tok_s": 190.3,
+   "latency_p50_s": 21.27,
+   "latency_p95_s": 22.71,
+   "per_request_tok_s": 12.0
+  }
+ ],
+ "workflow": "7f86c8ff-ba3b-4ded-8e1c-f7466bac38cc",
+ "model": "base + LoRA adapter from s6-pipeline-validate-2 (500k tokens)",
+ "engine": "vLLM 0.33.0"
+}

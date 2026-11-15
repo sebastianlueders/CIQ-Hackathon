@@ -1,0 +1,369 @@
+DIAG self=trial-0 fqdn=trial-0.011bd0ce-00a7-408f-aefe-8ce5d1f3ad42.0fb52dc2-302d-4d77-9f95-b0cb2c675697.fuzzball hostlist=trial-0 trial-1 variant=ip
+DIAG env: MULTINODE_SSH_WRAPPER=/multinode/rsh-wrapper MULTINODE_TOTAL_SLOTS=32 MULTINODE_HOSTLIST=trial-1:16,trial-0:16 FB_JOB_KIND=multinode MULTINODE_HOSTLIST_NOSLOTS=trial-1,trial-0 MULTINODE_WRAPPER_IMPL=generic MULTINODE_NODE_IP=192.168.99.15 MULTINODE_WRAPPER_CONTAINER_ID=7d650563-095b-5a19-aacd-a0c33848ca85.0 MN_NODES=2 RANK=0 MULTINODE_WRAPPER_LISTEN_ADDR=192.168.99.15 PATH=/multinode:/usr/local/lib/python3.12/dist-packages/torch_tensorrt/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/mpi/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin:/opt/amazon/efa/bin:/opt/tensorrt/bin MULTINODE_RSH_WRAPPER=/multinode/rsh-wrapper MULTINODE_WRAPPER_SLOTS=16 MULTINODE_WRAPPER_TOTAL_HOSTS=2 
+DIAG resolve trial-0 -> 192.168.99.15 
+DIAG resolve trial-1 -> 192.168.99.14 
+DIAG ifaces: enP2p1s0f0np0 enP2p1s0f1np1 enp1s0f0np0 enp1s0f1np1 lan0 lo wlP9s9  ib=rdma_cm umad0 umad1 umad2 umad3 uverbs0 uverbs1 uverbs2 uverbs3 
+DIAG head (trial-0, 192.168.99.15) starting rank 1 on trial-1
+DIAG node_rank=0 master=trial-0 master_ip=192.168.99.15
+DIAG tcp_check rank0 accepted from ('192.168.99.14', 40908)
+DIAG launching: torch.distributed.run --nnodes 2 --node-rank 0 --master-addr 192.168.99.15 --master-port 29500
+trial-0:139:139 [0] NCCL INFO ENV/Plugin: Could not find: libnccl-env.so
+trial-0:139:139 [0] NCCL INFO Bootstrap: Using lan0:192.168.99.15<0>
+trial-0:139:158 [0] NCCL INFO Socket handshake magic 0x564ab9f2fc4b9d6c (built-in default)
+trial-0:139:139 [0] NCCL INFO cudaDriverVersion 13040
+trial-0:139:139 [0] NCCL INFO NCCL version 2.32.3+cuda13.4
+trial-0:139:139 [0] NCCL INFO NCCL git version unknown unknown
+trial-0:139:139 [0] NCCL INFO Comm config Blocking set to 1
+trial-0:139:139 [0] NCCL INFO Comm config Comm name set to 0
+trial-0:139:139 [0] NCCL INFO NET/Plugin: Loaded net plugin SPCX (v12)
+trial-0:139:139 [0] NCCL INFO NET/Plugin: Loaded collnet plugin SPCX (v12)
+trial-0:139:139 [0] NCCL INFO Successfully loaded external network plugin /opt/hpcx/nccl_spectrum-x_plugin/lib/libnccl-net.so
+trial-0:139:139 [0] NCCL INFO NCCL_IB_DISABLE set by environment to 1.
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] plugin/net.cc:229 (ncclNetPluginInit) NCCL ATTN Failed to initialize NET plugin SPCX
+trial-0:139:139 [0] NCCL INFO NCCL_IB_DISABLE set by environment to 1.
+trial-0:139:139 [0] NCCL INFO transport/net_ib/init.cc:681 (ncclIbInit) -> 3
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] plugin/net.cc:229 (ncclNetPluginInit) NCCL ATTN Failed to initialize NET plugin IB
+trial-0:139:139 [0] NCCL INFO NET/Socket : Using [0]lan0:192.168.99.15<0> [1]enp1s0f0np0:10.10.11.106<0>
+trial-0:139:139 [0] NCCL INFO Initialized NET plugin Socket
+trial-0:139:139 [0] NCCL INFO Assigned NET plugin Socket to comm
+trial-0:139:139 [0] NCCL INFO RMA/Plugin: Could not find: libnccl-rma.so
+trial-0:139:139 [0] NCCL INFO RMA/Plugin: Loaded rma plugin SPCX_RMA (v14)
+trial-0:139:139 [0] NCCL INFO RMA/Plugin: Successfully loaded external plugin /opt/hpcx/nccl_spectrum-x_plugin/lib/libnccl-net.so
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] gin_plugin.cc:141 NCCL WARN gin_plugin.cc:141 Call to ncclNetPlugin_v12.init(ctx, commId, NULL, logFunction, NULL) failed: 3
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] gin_plugin.cc:889 NCCL WARN gin_plugin.cc:889 Call to ginCommonInit(ctx, commId, logFunction) failed: 3
+trial-0:139:139 [0] NCCL INFO RMA/Plugin: Failed to initialize plugin libnccl-net.so
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] misc/ibvwrap.cc:190 (wrap_ibv_alloc_pd) NCCL WARN lib wrapper not initialized.
+trial-0:139:139 [0] NCCL INFO transport/net_ib/gdr.cc:55 (ibDmaBufSupportInitOnce) -> 3
+trial-0:139:139 [0] NCCL INFO RMA/Plugin: Failed to initialize plugin 
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] transport/rma_socket.cc:32 (ncclRmaSocketProxyInit) NCCL WARN RMA/Socket : rma_socket requires GDRCopy; and GDR Copy is not available
+trial-0:139:139 [0] NCCL INFO RMA/Plugin: Failed to initialize plugin 
+trial-0:139:139 [0] NCCL INFO RMA/Plugin: Failed to initialize any plugin
+trial-0:139:139 [0] NCCL INFO GIN/Plugin: Could not find: libnccl-gin.so
+trial-0:139:139 [0] NCCL INFO GIN/Plugin: Loaded gin plugin SPCX_GIN (v14)
+trial-0:139:139 [0] NCCL INFO GIN/Plugin: Successfully loaded external plugin /opt/hpcx/nccl_spectrum-x_plugin/lib/libnccl-net.so
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] gin_plugin.cc:141 NCCL WARN gin_plugin.cc:141 Call to ncclNetPlugin_v12.init(ctx, commId, NULL, logFunction, NULL) failed: 3
+
+[2026-11-15 14:36:25] trial-0:139:139 [0] gin_plugin.cc:726 NCCL WARN gin_plugin.cc:726 Call to ginCommonInit(ctx, commId, logFunction) failed: 3
+trial-0:139:139 [0] NCCL INFO GIN/Plugin: Failed to initialize any GIN plugin
+trial-0:139:139 [0] NCCL INFO Using network Socket
+trial-0:139:139 [0] NCCL INFO Loaded NVML from libnvidia-ml.so.1
+trial-0:139:139 [0] NCCL INFO [Rank 0] ncclCommInitRankConfig comm 0x44232430 rank 0 nranks 2 cudaDev 0 nvmlDev 0 busId f01000 commId 0x76e0c9c7cbb26f2f - Init START
+trial-0:139:139 [0] NCCL INFO RAS client listening socket at ::1<28028>
+trial-0:139:139 [0] NCCL INFO Bootstrap timings total 0.137476 (create 0.000043, send 0.000149, recv 0.132391, ring 0.000579, delay 0.000001)
+trial-0:139:139 [0] NCCL INFO ncclTopoGetCpuAffinity: Affinity for GPU 0 is empty, ignoring. (GPU affinity =  ; CPU affinity = 0-15).
+trial-0:139:139 [0] NCCL INFO Rank 0: 2 Net devices
+trial-0:139:139 [0] NCCL INFO Rank 0: 0 CollNet devices
+trial-0:139:139 [0] NCCL INFO Local Net device counts across ranks: min 2 max 2
+trial-0:139:139 [0] NCCL INFO Local CollNet device counts across ranks: min 0 max 0
+trial-0:139:139 [0] NCCL INFO comm 0x44232430 rank 0 nRanks 2 nNodes 2 localRanks 1 localRank 0 MNNVL 0
+trial-0:139:139 [0] NCCL INFO Channel 00/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 01/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 02/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 03/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 04/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 05/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 06/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 07/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 08/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 09/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 10/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 11/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 12/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 13/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 14/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 15/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 16/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 17/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 18/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 19/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 20/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 21/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 22/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 23/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 24/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 25/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 26/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 27/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 28/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 29/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 30/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 31/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 32/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 33/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 34/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 35/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 36/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 37/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 38/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 39/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 40/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 41/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 42/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 43/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 44/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 45/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 46/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 47/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 48/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 49/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 50/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 51/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 52/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 53/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 54/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 55/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 56/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 57/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 58/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 59/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 60/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 61/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 62/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Channel 63/64 : 0 1
+trial-0:139:139 [0] NCCL INFO Trees [0] 1/-1/-1->0->-1 [1] 1/-1/-1->0->-1 [2] 1/-1/-1->0->-1 [3] 1/-1/-1->0->-1 [4] 1/-1/-1->0->-1 [5] 1/-1/-1->0->-1 [6] 1/-1/-1->0->-1 [7] 1/-1/-1->0->-1 [8] 1/-1/-1->0->-1 [9] 1/-1/-1->0->-1 [10] 1/-1/-1->0->-1 [11] 1/-1/-1->0->-1 [12] 1/-1/-1->0->-1 [13] 1/-1/-1->0->-1 [14] 1/-1/-1->0->-1 [15] 1/-1/-1->0->-1 [16] 1/-1/-1->0->-1 [17] 1/-1/-1->0->-1 [18] 1/-1/-1->0->-1 [19] 1/-1/-1->0->-1 [20] 1/-1/-1->0->-1 [21] 1/-1/-1->0->-1 [22] 1/-1/-1->0->-1 [23] 1/-1/-1->0->-1 [24] 1/-1/-1->0->-1 [25] 1/-1/-1->0->-1 [26] 1/-1/-1->0->-1 [27] 1/-1/-1->0->-1 [28] 1/-1/-1->0->-1 [29] 1/-1/-1->0->-1 [30] 1/-1/-1->0->-1 [31] 1/-1/-1->0->-1 [32] -1/-1/-1->0->1 [33] -1/-1/-1->0->1 [34] -1/-1/-1->0->1 [35] -1/-1/-1->0->1 [36] -1/-1/-1->0->1 [37] -1/-1/-1->0->1 [38] -1/-1/-1->0->1 [39] -1/-1/-1->0->1 [40] -1/-1/-1->0->1 [41] -1/-1/-1->0->1 [42] -1/-1/-1->0->1 [43] -1/-1/-1->0->1 [44] -1/-1/-1->0->1 [45] -1/-1/-1->0->1 [46] -1/-1/-1->0->1 [47] -1/-1/-1->0->1 [48] -1/-1/-1->0->1 [49] -1/-1/-1->0->1 [50] -1/-1/-1->0->1 [51] -1/-1/
+trial-0:139:139 [0] NCCL INFO P2P Chunksize set to 262144
+trial-0:139:139 [0] NCCL INFO Tuning P2P operations with maxP2pPeers = 2
+trial-0:139:139 [0] NCCL INFO PROFILER/Plugin: Could not find: libnccl-profiler.so
+trial-0:139:139 [0] NCCL INFO Check P2P Type isAllDirectP2p 1 directMode 0 isAllCudaP2p 1
+trial-0:139:162 [0] NCCL INFO [Proxy Service] Device 0 CPU core 0
+trial-0:139:162 [0] NCCL INFO proxy listening socket at 192.168.99.15<47093>
+trial-0:139:163 [0] NCCL INFO [Proxy Service UDS] Device 0 CPU core 2
+trial-0:139:139 [0] NCCL INFO TUNER/Plugin: Could not find: libnccl-tuner.so
+trial-0:139:139 [0] NCCL INFO TUNER/Plugin: Using SPCX (v6)
+trial-0:139:139 [0] NCCL INFO threadThresholds 8/8/64 | 16/8/64 | 512 | 512
+trial-0:139:139 [0] NCCL INFO 64 coll channels, 64 collnet channels, 0 nvls channels, 64 p2p channels, 1 p2p channels per peer
+trial-0:139:139 [0] NCCL INFO symmetricSupport 0, cuMemEnable 1, globalGinSupport 0, cuMemGdrSupport 0, contiguousRanksPerHost 1, crossNicSupport 1
+trial-0:139:139 [0] NCCL INFO CC Off, workFifoBytes 1048576
+trial-0:139:139 [0] NCCL INFO ncclCommInitRankConfig comm 0x44232430 rank 0 nranks 2 cudaDev 0 nvmlDev 0 busId f01000 commId 0x76e0c9c7cbb26f2f - Init COMPLETE
+trial-0:139:139 [0] NCCL INFO Init timings - ncclCommInitRankConfig: rank 0 nranks 2 total 2.70 (kernels 2.39, alloc 0.10, bootstrap 0.14, allgathers 0.00, topo 0.01, graphs 0.00, connections 0.04, rest 0.01)
+RESULT {"kind": "config", "world_size": 2, "model": "/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused", "data": "/data/tok/lammps", "out": "/runs/trials/s4-train-dp2-winner-2", "seq_len": 4096, "micro_batch": 1, "grad_accum": 8, "lr": 0.001, "warmup_tokens": 250000, "schedule": "cosine", "train_tokens": 4000000, "lora_r": 8, "lora_alpha": 16, "lora_dropout": 0.0, "targets": ["q_proj", "k_proj", "v_proj", "o_proj"], "grad_ckpt": true, "eval_every_tokens": 1000000, "eval_set": "eval_small.bin", "seed": 0, "resume": false, "save_adapter": true, "dp_launch": "ip", "experts_impl": "grouped_mm", "compile": true, "t": 1794753385.6277044}
+RESULT {"kind": "mem", "rss_gib": 1.2, "cgroup_gib": null, "cuda_alloc_gib": 0.0, "device_used_gib": 16.4, "t": 1794753385.7680373}
+RESULT {"kind": "mem", "rss_gib": 1.4, "cgroup_gib": null, "cuda_alloc_gib": 0.0, "device_used_gib": 17.0, "t": 1794753405.7687585}
+RESULT {"kind": "mem", "rss_gib": 5.7, "cgroup_gib": null, "cuda_alloc_gib": 9.3, "device_used_gib": 31.0, "t": 1794753425.769666}
+RESULT {"kind": "mem", "rss_gib": 3.6, "cgroup_gib": null, "cuda_alloc_gib": 28.2, "device_used_gib": 48.0, "t": 1794753445.7705278}
+RESULT {"kind": "mem", "rss_gib": 5.0, "cgroup_gib": null, "cuda_alloc_gib": 46.8, "device_used_gib": 68.3, "t": 1794753465.7721875}
+RESULT {"kind": "loaded", "seconds": 61.7, "loader": "direct", "experts_impl": "grouped_mm", "t": 1794753476.7888982}
+RESULT {"kind": "compile", "mode": "per-layer dynamic", "setup_s": 1.9, "t": 1794753479.2523508}
+RESULT {"kind": "setup", "load_s": 61.7, "trainable_params": 6684672, "resumed": false, "train_tokens_available": 18374965, "eval_tokens": 193616, "mem_gib": 56.9, "t": 1794753479.2740662}
+RESULT {"kind": "mem", "rss_gib": 3.5, "cgroup_gib": null, "cuda_alloc_gib": 56.9, "device_used_gib": 77.8, "t": 1794753485.7731147}
+RESULT {"kind": "mem", "rss_gib": 3.8, "cgroup_gib": null, "cuda_alloc_gib": 57.1, "device_used_gib": 79.9, "t": 1794753505.7740602}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 59.5, "device_used_gib": 86.5, "t": 1794753525.7751975}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 59.5, "device_used_gib": 86.5, "t": 1794753545.7765806}
+RESULT {"kind": "mem", "rss_gib": 4.1, "cgroup_gib": null, "cuda_alloc_gib": 59.2, "device_used_gib": 86.5, "t": 1794753565.7857811}
+RESULT {"kind": "eval", "tokens": 0, "eval_loss": 1.17529, "ppl": 3.2391, "t": 1794753570.5641234}
+trial-0:139:324 [0] NCCL INFO [Proxy Progress] Device 0 CPU core 3
+trial-0:139:139 [0] NCCL INFO Channel 00/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 01/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 02/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 03/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 04/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 05/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 06/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 07/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 08/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 09/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 10/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 11/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 12/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 13/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 14/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 15/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 16/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 17/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 18/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 19/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 20/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 21/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 22/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 23/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 24/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 25/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 26/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 27/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 28/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 29/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 30/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 31/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 32/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 33/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 34/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 35/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 36/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 37/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 38/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 39/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 40/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 41/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 42/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 43/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 44/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 45/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 46/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 47/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 48/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 49/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 50/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 51/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 52/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 53/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 54/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 55/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 56/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 57/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 58/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 59/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 60/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 61/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 62/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 63/0 : 1[0] -> 0[0] [receive] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 02/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 03/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 04/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 05/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 06/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 07/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 08/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 09/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 10/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 11/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 12/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 13/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 14/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 15/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 16/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 17/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 18/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 19/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 20/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 21/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 22/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 23/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 24/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 25/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 26/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 27/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 28/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 29/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 30/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 31/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 32/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 33/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 34/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 35/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 36/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 37/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 38/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 39/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 40/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 41/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 42/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 43/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 44/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 45/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 46/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 47/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 48/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 49/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 50/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 51/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 52/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 53/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 54/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 55/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 56/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 57/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 58/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 59/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 60/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 61/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 62/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Channel 63/0 : 0[0] -> 1[0] [send] via NET/Socket/1
+trial-0:139:139 [0] NCCL INFO Connected all rings, use ring PXN 0 GDR 0
+RESULT {"kind": "mem", "rss_gib": 5.5, "cgroup_gib": null, "cuda_alloc_gib": 56.9, "device_used_gib": 88.4, "t": 1794753585.787421}
+RESULT {"kind": "mem", "rss_gib": 5.6, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 91.2, "t": 1794753605.7884257}
+RESULT {"kind": "mem", "rss_gib": 5.6, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 91.2, "t": 1794753625.7897136}
+RESULT {"kind": "mem", "rss_gib": 5.6, "cgroup_gib": null, "cuda_alloc_gib": 57.0, "device_used_gib": 91.1, "t": 1794753645.7913334}
+RESULT {"kind": "train", "step": 1, "tokens": 65536, "loss": 0.87272, "lr": 0.0, "grad_norm": 0.201, "step_s": 74.67, "tok_s": 877.7, "peak_mem_gib": 64.7, "world_size": 2, "allreduce_s": 15.7877, "t": 1794753646.5571043}
+RESULT {"kind": "mem", "rss_gib": 5.8, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 91.5, "t": 1794753665.7924488}
+RESULT {"kind": "train", "step": 2, "tokens": 131072, "loss": 0.65231, "lr": 0.000262144, "grad_norm": 0.2143, "step_s": 31.976, "tok_s": 2049.6, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0341, "t": 1794753678.5331347}
+RESULT {"kind": "mem", "rss_gib": 5.8, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 90.8, "t": 1794753685.7943156}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 90.7, "t": 1794753705.7955375}
+RESULT {"kind": "train", "step": 3, "tokens": 196608, "loss": 0.66783, "lr": 0.000524288, "grad_norm": 0.2003, "step_s": 31.989, "tok_s": 2048.7, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0327, "t": 1794753710.5221827}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.7, "t": 1794753725.7968085}
+RESULT {"kind": "train", "step": 4, "tokens": 262144, "loss": 0.69201, "lr": 0.000786432, "grad_norm": 0.148, "step_s": 31.758, "tok_s": 2063.6, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.032, "t": 1794753742.2802908}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 90.7, "t": 1794753745.7981396}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.7, "t": 1794753765.7990675}
+RESULT {"kind": "train", "step": 5, "tokens": 327680, "loss": 0.5752, "lr": 0.00099997671160819, "grad_norm": 0.0858, "step_s": 31.943, "tok_s": 2051.7, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0345, "t": 1794753774.223705}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.6, "t": 1794753785.800664}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.6, "t": 1794753805.801858}
+RESULT {"kind": "train", "step": 6, "tokens": 393216, "loss": 0.92478, "lr": 0.000999047456350699, "grad_norm": 0.2137, "step_s": 31.887, "tok_s": 2055.3, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.1157, "t": 1794753806.1111434}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.6, "t": 1794753825.8029447}
+RESULT {"kind": "train", "step": 7, "tokens": 458752, "loss": 0.5008, "lr": 0.0009967649443018917, "grad_norm": 0.1851, "step_s": 32.031, "tok_s": 2046.0, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0311, "t": 1794753838.142603}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.6, "t": 1794753845.804232}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.6, "t": 1794753865.8053923}
+RESULT {"kind": "train", "step": 8, "tokens": 524288, "loss": 0.58464, "lr": 0.0009931360540775742, "grad_norm": 0.0833, "step_s": 32.085, "tok_s": 2042.6, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0343, "t": 1794753870.2277286}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.6, "t": 1794753885.8066337}
+RESULT {"kind": "train", "step": 9, "tokens": 589824, "loss": 0.50009, "lr": 0.0009881717217609417, "grad_norm": 0.0692, "step_s": 32.098, "tok_s": 2041.7, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0347, "t": 1794753902.3265254}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.6, "t": 1794753905.8081856}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.7, "device_used_gib": 90.5, "t": 1794753925.8094418}
+RESULT {"kind": "train", "step": 10, "tokens": 655360, "loss": 0.58031, "lr": 0.0009818869079454165, "grad_norm": 0.0661, "step_s": 31.993, "tok_s": 2048.4, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0335, "t": 1794753934.3200347}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.5, "t": 1794753945.810406}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.5, "device_used_gib": 90.5, "t": 1794753965.81176}
+RESULT {"kind": "train", "step": 11, "tokens": 720896, "loss": 0.58727, "lr": 0.0009743005526491586, "grad_norm": 0.0684, "step_s": 31.91, "tok_s": 2053.8, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0325, "t": 1794753966.2304564}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.5, "t": 1794753985.81274}
+RESULT {"kind": "train", "step": 12, "tokens": 786432, "loss": 0.60614, "lr": 0.000965435518237116, "grad_norm": 0.0726, "step_s": 31.625, "tok_s": 2072.3, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.036, "t": 1794753997.855654}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.4, "device_used_gib": 90.5, "t": 1794754005.8140786}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.4, "device_used_gib": 90.5, "t": 1794754025.815464}
+RESULT {"kind": "train", "step": 13, "tokens": 851968, "loss": 0.63326, "lr": 0.0009553185205226257, "grad_norm": 0.0723, "step_s": 31.947, "tok_s": 2051.4, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0341, "t": 1794754029.802959}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.4, "device_used_gib": 90.5, "t": 1794754045.816937}
+RESULT {"kind": "train", "step": 14, "tokens": 917504, "loss": 0.63801, "lr": 0.0009439800482561999, "grad_norm": 0.0517, "step_s": 31.93, "tok_s": 2052.5, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.036, "t": 1794754061.733389}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.4, "device_used_gib": 90.5, "t": 1794754065.8183208}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.3, "device_used_gib": 90.5, "t": 1794754085.8198311}
+RESULT {"kind": "train", "step": 15, "tokens": 983040, "loss": 0.72844, "lr": 0.0009314542712441268, "grad_norm": 0.0802, "step_s": 31.942, "tok_s": 2051.7, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0336, "t": 1794754093.6754043}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.5, "device_used_gib": 90.5, "t": 1794754105.8209422}
+RESULT {"kind": "train", "step": 16, "tokens": 1048576, "loss": 0.6212, "lr": 0.0009177789373737812, "grad_norm": 0.0778, "step_s": 31.965, "tok_s": 2050.2, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0317, "t": 1794754125.64124}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.3, "device_used_gib": 90.4, "t": 1794754125.8219962}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 59.6, "device_used_gib": 90.4, "t": 1794754145.8231087}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 59.6, "device_used_gib": 90.4, "t": 1794754165.8242686}
+RESULT {"kind": "eval", "tokens": 1048576, "eval_loss": 1.04432, "ppl": 2.8415, "t": 1794754179.5701573}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.2, "device_used_gib": 90.4, "t": 1794754185.8253405}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.2, "device_used_gib": 90.4, "t": 1794754205.826454}
+RESULT {"kind": "train", "step": 17, "tokens": 1114112, "loss": 0.65088, "lr": 0.0009029952588559699, "grad_norm": 0.0998, "step_s": 31.804, "tok_s": 2060.6, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0321, "t": 1794754211.3832164}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 90.4, "t": 1794754225.8274605}
+RESULT {"kind": "train", "step": 18, "tokens": 1179648, "loss": 0.48559, "lr": 0.0008871477880271374, "grad_norm": 0.0948, "step_s": 31.98, "tok_s": 2049.3, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0339, "t": 1794754243.3637955}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.1, "device_used_gib": 90.4, "t": 1794754245.8287983}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 90.3, "t": 1794754265.829931}
+RESULT {"kind": "train", "step": 19, "tokens": 1245184, "loss": 0.54385, "lr": 0.0008702842830857126, "grad_norm": 0.0735, "step_s": 31.665, "tok_s": 2069.7, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0343, "t": 1794754275.0291479}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 90.3, "t": 1794754285.8318534}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 90.3, "t": 1794754305.8335652}
+RESULT {"kind": "train", "step": 20, "tokens": 1310720, "loss": 0.60013, "lr": 0.0008524555641672171, "grad_norm": 0.0675, "step_s": 32.008, "tok_s": 2047.5, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0334, "t": 1794754307.0375316}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.1, "device_used_gib": 90.3, "t": 1794754325.834731}
+RESULT {"kind": "train", "step": 21, "tokens": 1376256, "loss": 0.45215, "lr": 0.0008337153601918701, "grad_norm": 0.0488, "step_s": 31.852, "tok_s": 2057.5, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0341, "t": 1794754338.8894897}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 90.3, "t": 1794754345.8357272}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 58.0, "device_used_gib": 90.3, "t": 1794754365.8368537}
+RESULT {"kind": "train", "step": 22, "tokens": 1441792, "loss": 0.40253, "lr": 0.000814120146946232, "grad_norm": 0.0533, "step_s": 31.797, "tok_s": 2061.1, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0842, "t": 1794754370.6869333}
+RESULT {"kind": "mem", "rss_gib": 5.9, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 90.3, "t": 1794754385.838173}
+RESULT {"kind": "train", "step": 23, "tokens": 1507328, "loss": 0.55677, "lr": 0.0007937289768868459, "grad_norm": 0.0764, "step_s": 31.835, "tok_s": 2058.6, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0349, "t": 1794754402.522343}
+RESULT {"kind": "mem", "rss_gib": 6.0, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.3, "t": 1794754405.8396664}
+RESULT {"kind": "mem", "rss_gib": 6.0, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.3, "t": 1794754425.8415437}
+RESULT {"kind": "train", "step": 24, "tokens": 1572864, "loss": 0.85584, "lr": 0.0007726033011787846, "grad_norm": 0.0516, "step_s": 31.729, "tok_s": 2065.5, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.2563, "t": 1794754434.252257}
+RESULT {"kind": "mem", "rss_gib": 6.0, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.2, "t": 1794754445.8431952}
+RESULT {"kind": "mem", "rss_gib": 6.0, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.2, "t": 1794754465.8448343}
+RESULT {"kind": "train", "step": 25, "tokens": 1638400, "loss": 0.50492, "lr": 0.0007508067845054101, "grad_norm": 0.05, "step_s": 31.93, "tok_s": 2052.5, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0339, "t": 1794754466.1824853}
+RESULT {"kind": "mem", "rss_gib": 6.0, "cgroup_gib": null, "cuda_alloc_gib": 57.8, "device_used_gib": 90.2, "t": 1794754485.8461738}
+RESULT {"kind": "train", "step": 26, "tokens": 1703936, "loss": 0.59764, "lr": 0.000728405113207438, "grad_norm": 0.0629, "step_s": 31.998, "tok_s": 2048.1, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0327, "t": 1794754498.18128}
+RESULT {"kind": "mem", "rss_gib": 6.0, "cgroup_gib": null, "cuda_alloc_gib": 57.9, "device_used_gib": 90.2, "t": 1794754505.847324}
+RESULT {"kind": "mem", "rss_gib": 6.0, "cgroup_gib": null, "cuda_alloc_gib": 57.7, "device_used_gib": 90.1, "t": 1794754525.8484755}
+RESULT {"kind": "train", "step": 27, "tokens": 1769472, "loss": 0.56461, "lr": 0.0007054657973295017, "grad_norm": 0.0543, "step_s": 31.869, "tok_s": 2056.4, "peak_mem_gib": 64.8, "world_size": 2, "allreduce_s": 0.0357, "t": 1794754530.0506017}
+DIAG TIMEOUT after 1200 s (rendezvous or collective hung)
+== worker log /tmp/rank1.log
+--> MULTINODE WRAPPER ERROR (node ip[192.168.99.15] hostname[trial-0]): application command execution error: exit status 124

@@ -1,0 +1,29 @@
+# read Fuzzball's generic multinode helper
+{
+ "version": "v4",
+ "jobs": {
+  "diag": {
+   "image": {
+    "uri": "docker://python:3.12-slim"
+   },
+   "multinode": {
+    "nodes": 2,
+    "implementation": "generic"
+   },
+   "resource": {
+    "cpu": {
+     "cores": 1
+    },
+    "memory": {
+     "size": "1GiB"
+    }
+   },
+   "policy": {
+    "timeout": {
+     "execute": "10m"
+    }
+   },
+   "script": "#!/bin/bash\necho \"=== generic-helper\"; cat /multinode/generic-helper\necho \"=== env\"; env | grep -iE \"multinode|^FB_|OMPI|PMI|SLOT\" | sort\necho \"=== wrapper help\"; timeout 20 /multinode/rsh-wrapper --help 2>&1 | strings | head -30\necho \"=== try with -x\"; timeout 30 /multinode/rsh-wrapper diag-1 /bin/hostname; echo \"rc=$?\"\n"
+  }
+ }
+}

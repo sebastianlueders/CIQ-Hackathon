@@ -1,0 +1,1 @@
+{"kind": "fuse_experts", "workflow": "a71ea2d5-3332-4cf9-8c6f-91153e020ec1", "src": "/models/Qwen/Qwen3-Coder-30B-A3B-Instruct", "dst": "/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused", "tensors": 531, "gib": 56.9, "seconds": 347, "spot_check": "fused == original for (0,5) and (47,127)"}

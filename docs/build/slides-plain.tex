@@ -1,0 +1,33 @@
+% Minimal white Beamer look: black text, no color, no navigation icons.
+\usefonttheme{professionalfonts}
+\setbeamertemplate{navigation symbols}{}
+\setbeamercolor{normal text}{fg=black,bg=white}
+\setbeamercolor{structure}{fg=black}
+\setbeamercolor{frametitle}{fg=black,bg=white}
+\setbeamercolor{title}{fg=black}
+\setbeamercolor{subtitle}{fg=black}
+\setbeamercolor{item}{fg=black}
+\setbeamercolor{enumerate item}{fg=black}
+\setbeamerfont{frametitle}{series=\bfseries,size=\LARGE}
+\setbeamerfont{title}{series=\bfseries,size=\Huge}
+\setbeamerfont{subtitle}{size=\large}
+\setbeamerfont{author}{size=\normalsize}
+\setbeamerfont{date}{size=\normalsize}
+\setbeamertemplate{itemize items}[circle]
+\setbeamertemplate{itemize subitem}{--}
+\setbeamertemplate{enumerate items}[default]
+\setbeamertemplate{frametitle}{\vspace{18pt}\insertframetitle\par\vspace{16pt}}
+\setbeamertemplate{footline}{\hfill{\footnotesize\insertframenumber}\hspace{12pt}\vspace{8pt}}
+\setbeamertemplate{title page}{%
+  \vfill
+  {\usebeamerfont{title}\inserttitle\par}\vspace{10pt}
+  {\usebeamerfont{subtitle}\insertsubtitle\par}\vspace{28pt}
+  {\usebeamerfont{author}\insertauthor\par}\vspace{4pt}
+  {\usebeamerfont{date}\insertdate\par}
+  \vfill}
+\setlength{\leftmargini}{1.4em}
+\usepackage{etoolbox}
+\AtBeginDocument{\large}
+\setbeamertemplate{itemize/enumerate body begin}{\large}
+\setbeamertemplate{itemize/enumerate subbody begin}{\normalsize}
+\addtobeamertemplate{itemize item}{}{\vspace{4pt}}

@@ -1,0 +1,8 @@
+DIAG self=diag-0 fqdn=diag-0.7335a6d4-257d-4e81-9337-e061e65fd282.0fb52dc2-302d-4d77-9f95-b0cb2c675697.fuzzball hostlist=diag-0 diag-1 variant=diag
+DIAG env: MULTINODE_SSH_WRAPPER=/multinode/rsh-wrapper MULTINODE_TOTAL_SLOTS=2 FB_API_HOST=api.fb-hack.civilfritz.net:443 MULTINODE_HOSTLIST=diag-1:1,diag-0:1 FB_JOB_KIND=multinode FB_GROUP_ID=0fb52dc2-302d-4d77-9f95-b0cb2c675697 FB_ACCOUNT_ID=0fb52dc2-302d-4d77-9f95-b0cb2c675697 MULTINODE_HOSTLIST_NOSLOTS=diag-1,diag-0 MULTINODE_WRAPPER_IMPL=generic FB_JOB_IMAGE=docker://python:3.12-slim FB_JOB_NAME=diag MULTINODE_NODE_IP=192.168.99.15 FB_OPENAPI_URL=https://api.fb-hack.civilfritz.net:443 MULTINODE_WRAPPER_CONTAINER_ID=eb0d784e-3a07-51ba-81d2-b9ff51e83840.0 FB_TOKEN=<redacted> FB_WORKFLOW_ID=7335a6d4-257d-4e81-9337-e061e65fd282 MN_NODES=2 RANK=0 MULTINODE_WRAPPER_LISTEN_ADDR=192.168.99.15 PATH=/multinode:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin MULTINODE_RSH_WRAPPER=/multinode/rsh-wrapper FB_JOB_ID=eb0d784e-3a07-51ba-81d2-b9ff51e83840 MULTINODE_WRAPPER_SLOTS=1 MULTINODE_WRAPPER_TOTAL_HOSTS=2 
+DIAG resolve diag-0 -> 192.168.99.15 
+DIAG resolve diag-1 -> 192.168.99.14 
+DIAG ifaces: enP2p1s0f0np0 enP2p1s0f1np1 enp1s0f0np0 enp1s0f1np1 lan0 lo wlP9s9  ib=rdma_cm umad0 umad1 umad2 umad3 uverbs0 uverbs1 uverbs2 uverbs3 
+DIAG node_rank=0 master=diag-0 master_ip=192.168.99.15
+DIAG tcp_check error timed out
+DIAG done (diagnostics only)

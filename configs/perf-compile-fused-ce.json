@@ -1,0 +1,15 @@
+{
+ "id": "s4-perf-compile-fused-ce",
+ "config": {
+  "experts_impl": "grouped_mm",
+  "compile": true,
+  "train_tokens": 262144,
+  "warmup_tokens": 32768,
+  "skip_eval": true,
+  "save_adapter": false,
+  "seq_len": 4096,
+  "micro_batch": 1,
+  "grad_accum": 8,
+  "fused_ce": true
+ }
+}
