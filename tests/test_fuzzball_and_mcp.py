@@ -778,3 +778,121 @@ def test_live_mid_run_curve_equivalence_stage_waterfall_and_nvidia_smi_streaming
     assert snap["nodes"][0]["power_w"] == 118
 
 
+def test_fuzzball_mcp_backend_streams_progressive_steps_over_polling_ticks(tmp_path: Path) -> None:
+    """Proves end-to-end that FuzzballMCPBackend polls workflow_describe (QUEUED -> RUNNING -> FINISHED)
+    and workflow_log, streaming progressive CRUCIBLE_STEP_JSON events into LiveRunState BEFORE completion."""
+    from crucible.server.app import LiveRunState
+
+    mcp_script = tmp_path / "progressive_fuzzball_mcp.py"
+    state_file = tmp_path / "poll_tick.txt"
+    mcp_script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env python3
+            import json, pathlib, sys
+
+            STATE_FILE = pathlib.Path({str(state_file)!r})
+            TOOLS = [
+                {{"name": "workflow_validate", "inputSchema": {{"type": "object", "properties": {{"fuzzfile": {{"type": "string"}}}}}}}},
+                {{"name": "workflow_start", "inputSchema": {{"type": "object", "properties": {{"fuzzfile": {{"type": "string"}}, "name": {{"type": "string"}}}}}}}},
+                {{"name": "workflow_describe", "inputSchema": {{"type": "object", "properties": {{"workflow": {{"type": "string"}}}}}}}},
+                {{"name": "workflow_log", "inputSchema": {{"type": "object", "properties": {{"workflow": {{"type": "string"}}, "name": {{"type": "string"}}, "lines": {{"type": "integer"}}}}}}}},
+            ]
+
+            for raw in sys.stdin:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                msg = json.loads(raw)
+                req_id = msg.get("id")
+                method = msg.get("method")
+                if req_id is None:
+                    continue
+                if method == "initialize":
+                    res = {{"protocolVersion": "2024-11-05", "serverInfo": {{"name": "fuzzball-mcp", "version": "4.3.1"}}}}
+                elif method == "tools/list":
+                    res = {{"tools": TOOLS}}
+                elif method == "tools/call":
+                    tname = (msg.get("params") or {{}}).get("name")
+                    tick = int(STATE_FILE.read_text()) if STATE_FILE.exists() else 0
+                    if tname == "workflow_validate":
+                        payload = {{"valid": True, "errors": [], "warnings": []}}
+                    elif tname == "workflow_start":
+                        STATE_FILE.write_text("0")
+                        payload = {{"workflowId": "aaaaaaaa-bbbb-4ccc-addd-eeeeeeeeeeee"}}
+                    elif tname == "workflow_describe":
+                        tick += 1
+                        STATE_FILE.write_text(str(tick))
+                        if tick <= 2:
+                            payload = {{"id": "wf", "status": "started", "stages": [{{"name": "train-p01", "kind": "job", "status": "pending"}}]}}
+                        elif tick in (3, 4, 5):
+                            payload = {{"id": "wf", "status": "started", "node": "CIQ-CHI-SPARK39", "stages": [{{"name": "train-p01", "kind": "job", "status": "started"}}]}}
+                        else:
+                            payload = {{"id": "wf", "status": "finished", "node": "CIQ-CHI-SPARK39", "stages": [{{"name": "train-p01", "kind": "job", "status": "finished", "exitCode": 0}}]}}
+                    elif tname == "workflow_log":
+                        lines = []
+                        if tick >= 3:
+                            lines.append("CRUCIBLE_STEP_JSON=" + json.dumps({{"step": 0, "max_steps": 10, "train_loss": 1.92, "val_loss": 1.92, "tokens_per_sec": 0.0, "partial_curve": [1.92]}}))
+                        if tick >= 4:
+                            lines.append("CRUCIBLE_STEP_JSON=" + json.dumps({{"step": 5, "max_steps": 10, "train_loss": 1.55, "val_loss": 1.57, "tokens_per_sec": 1340.0, "partial_curve": [1.92, 1.55], "gpu_util_pct": 88.0}}))
+                        if tick >= 5:
+                            lines.append("CRUCIBLE_STEP_JSON=" + json.dumps({{"step": 10, "max_steps": 10, "train_loss": 1.28, "val_loss": 1.31, "tokens_per_sec": 1410.0, "partial_curve": [1.92, 1.55, 1.28], "gpu_util_pct": 93.0}}))
+                        if tick >= 6:
+                            lines.append("CRUCIBLE_SUMMARY_JSON=" + json.dumps({{
+                                "trial_id": "p01", "status": "completed", "steps_completed": 10,
+                                "initial_val_loss": 1.92, "final_train_loss": 1.28, "final_val_loss": 1.31,
+                                "held_out_eval_loss": 1.32, "held_out_perplexity": 3.74, "mean_tokens_per_sec": 1410.0,
+                                "hardware_utilization_pct": 82.0, "peak_mem_gb": 61.2, "wall_time_s": 12.0,
+                                "loss_curve": [1.92, 1.55, 1.28], "world_size": 1,
+                                "kernels_enabled": {{"chunked_cross_entropy": True, "grouped_moe_gemm": True, "fused_lora_linear": True}},
+                            }}))
+                        res = {{"content": [{{"type": "text", "text": "\\n".join(lines)}}]}}
+                        sys.stdout.write(json.dumps({{"jsonrpc": "2.0", "id": req_id, "result": res}}) + "\\n")
+                        sys.stdout.flush()
+                        continue
+                    res = {{"content": [{{"type": "text", "text": json.dumps(payload)}}]}}
+                else:
+                    res = {{}}
+                sys.stdout.write(json.dumps({{"jsonrpc": "2.0", "id": req_id, "result": res}}) + "\\n")
+                sys.stdout.flush()
+            """
+        ),
+        encoding="utf-8",
+    )
+    mcp_script.chmod(0o755)
+
+    cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+    exp = ExperimentConfig.load(repo_root() / "configs" / "demo_lammps_30b.yaml")
+    live = LiveRunState(cluster)
+    live.begin_run(cluster, "custom", "fuzzball_mcp", exp.model.name, "builtin-lammps-cpp-bench")
+
+    observed_events: list[dict] = []
+
+    def _hook(ev: dict) -> None:
+        observed_events.append(ev)
+        live.record_event(ev)
+
+    backend = FuzzballMCPBackend(
+        cluster=cluster,
+        exp=exp,
+        run_id="prog-run",
+        local_run_dir=tmp_path / "prog_out",
+        mcp_command=[sys.executable, str(mcp_script)],
+        poll_interval_s=0.02,
+        event_hook=_hook,
+    )
+    summary = backend.run_training_trial(
+        trial_id="p01",
+        recipe=exp.stage_a_recipe.candidates[0],
+        perf=exp.stage_b_training_perf.candidates[0],
+        max_steps=10,
+    )
+    assert summary.status == "completed"
+    ev_types = [e["type"] for e in observed_events]
+    assert "trial_queued" in ev_types
+    assert "trial_running" in ev_types
+    step_events = [e for e in observed_events if e["type"] == "trial_step"]
+    assert [s["step"] for s in step_events] == [0, 5, 10]
+    assert live.snapshot()["live_curves"]["p01"] == [1.92, 1.55, 1.28]
+
+

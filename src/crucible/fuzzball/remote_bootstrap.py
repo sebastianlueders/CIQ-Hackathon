@@ -150,12 +150,35 @@ def _try_full_hf_trainer(args) -> bool:
             model.train()
             return sum(vals) / max(1, len(vals))
 
-        # True untuned baseline evaluation BEFORE any optimizer steps!
+        # True untuned baseline evaluation BEFORE any optimizer steps — flush immediately so UI shows Step 0 baseline!
         init_val = round(_eval_split(va_seqs), 5)
+        if rank == 0:
+            mem_gb0 = round(torch.cuda.max_memory_allocated(device) / float(1024**3), 2) if torch.cuda.is_available() else 0.5
+            print(
+                "CRUCIBLE_STEP_JSON="
+                + json.dumps(
+                    {
+                        "step": 0,
+                        "max_steps": min(int(args.max_steps), 32),
+                        "train_loss": init_val,
+                        "val_loss": init_val,
+                        "perplexity": round(math.exp(min(init_val, 12.0)), 4),
+                        "lr": 0.0,
+                        "grad_norm": 0.0,
+                        "peak_mem_gb": mem_gb0,
+                        "world_size": world_size,
+                        "tokens_per_sec": 0.0,
+                        "partial_curve": [init_val],
+                        "partial_val_curve": [init_val],
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
         params = [p for p in model.parameters() if p.requires_grad]
         opt = torch.optim.AdamW(params, lr=float(recipe["lr"]))
         run_steps = min(int(args.max_steps), 32)
-        curve, v_curve, rates = [], [], []
+        curve, v_curve, rates = [init_val], [init_val], []
         t0 = time.perf_counter()
         for st in range(1, run_steps + 1):
             st0 = time.perf_counter()
@@ -173,9 +196,12 @@ def _try_full_hf_trainer(args) -> bool:
             rates.append(tok_s)
             l_val = round(float(loss.detach().item()), 5)
             curve.append(l_val)
-            if rank == 0 and (st == 1 or st == run_steps or st % 4 == 0):
-                cur_v = round(_eval_split(va_seqs[:4]), 5)
-                v_curve.append(cur_v)
+            if rank == 0:
+                if st == 1 or st == run_steps or st % 4 == 0:
+                    cur_v = round(_eval_split(va_seqs[:4]), 5)
+                    v_curve.append(cur_v)
+                else:
+                    cur_v = v_curve[-1]
                 mem_gb = round(torch.cuda.max_memory_allocated(device) / float(1024**3), 2) if torch.cuda.is_available() else 0.5
                 print(
                     "CRUCIBLE_STEP_JSON="
@@ -185,6 +211,7 @@ def _try_full_hf_trainer(args) -> bool:
                             "max_steps": run_steps,
                             "train_loss": l_val,
                             "val_loss": cur_v,
+                            "perplexity": round(math.exp(min(cur_v, 12.0)), 4),
                             "lr": float(recipe["lr"]),
                             "grad_norm": round(gn, 4),
                             "peak_mem_gb": mem_gb,
@@ -453,7 +480,7 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
         cur_tok_s = tokens / dt
         if step > 1:
             measured_tok_rates.append(cur_tok_s)
-        if rank == 0 and (step == 1 or step == bench_steps or step % 3 == 0):
+        if rank == 0 and (step <= 5 or step == bench_steps or step % 2 == 0):
             with torch.no_grad():
                 val_loss_t, _ = _forward_loss(_sample_batch("val", step))
                 _ = float(val_loss_t.item())

@@ -46,8 +46,13 @@ async function refreshModelSpec(modelId) {
       ? `<span class="tag-pill tag-pill-cyan">Preset Opt Ready (${m.hardware_preset.preset_id})</span>`
       : `<span class="tag-pill tag-pill-muted">Full Discovery Sweep (No Preset)</span>`;
 
+    const minReqText =
+      m.min_nodes_required >= 2
+        ? `<span class="tag-pill tag-pill-violet">Min Req: 2 GPUs (FSDP/TP2 — exceeds 1-GPU VRAM)</span>`
+        : `<span class="tag-pill tag-pill-muted">Min Req: 1 GPU (Scales to 2 GPUs on Cluster)</span>`;
+
     document.getElementById("model-spec-line").innerHTML =
-      `<strong>${m.name}</strong> &middot; ${vastPill} ${presetPill}<br/>` +
+      `<strong>${m.name}</strong> &middot; ${minReqText} ${vastPill} ${presetPill}<br/>` +
       `${kind} &middot; <strong>${m.total_params_b}B</strong> (${m.active_params_b}B active) &middot; ` +
       `BF16 <code>${m.bf16_footprint_gb} GB</code> / FP8 <code>${m.fp8_footprint_gb} GB</code> / NVFP4 <code>${m.nvfp4_footprint_gb} GB</code>`;
 
@@ -103,7 +108,11 @@ function renderCatalogCards() {
     .map((m) => {
       const isAct = m.id.toLowerCase() === currentId;
       const archBadge = m.is_moe ? `MoE ${m.active_params_b}B/${m.total_params_b}B` : `${m.total_params_b}B Dense`;
-      const nodeBadge = m.min_nodes_required >= 2 ? "2×GB10" : m.total_params_b <= 4.5 ? "LaptopFit" : "1×GB10";
+      const nodeBadge = m.min_nodes_required >= 2 ? "Min: 2 GPUs" : "Min: 1 GPU";
+      const nodeTip =
+        m.min_nodes_required >= 2
+          ? "Hardware Requirement: Minimum 2x GB10 GPUs required to fit BF16 weights"
+          : "Hardware Requirement: Fits on 1 GPU minimum (Crucible still scales across all 2 cluster GPUs for speed)";
       const loadBadge =
         m.vast_state === "preloaded"
           ? `<span class="mc-status mc-preloaded">Pre-Loaded</span>`
@@ -114,10 +123,10 @@ function renderCatalogCards() {
         ? `<span class="mc-status mc-preset">Preset Opt</span>`
         : `<span class="mc-status mc-nopreset">Auto-Sweep</span>`;
       return `
-        <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" data-model-id="${m.id}" title="${m.id} — ${m.recommended_use}">
+        <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" data-model-id="${m.id}" title="${m.id} — ${m.recommended_use} (${nodeTip})">
           <div class="mc-top">
             <span class="mc-label">${m.label}</span>
-            <span class="mc-node ${m.min_nodes_required >= 2 ? "mc-node-2" : ""}">${nodeBadge}</span>
+            <span class="mc-node ${m.min_nodes_required >= 2 ? "mc-node-2" : ""}" title="${nodeTip}">${nodeBadge}</span>
           </div>
           <div class="mc-badges-row">${loadBadge}${optBadge}</div>
           <div class="mc-meta">${m.provider} &middot; ${archBadge} &middot; ${m.license}</div>

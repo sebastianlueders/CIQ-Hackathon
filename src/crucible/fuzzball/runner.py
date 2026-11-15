@@ -403,16 +403,29 @@ class FuzzballCLIBackend:
                         }
                     )
                 log_p = subprocess.run(
-                    [self.fuzzball_bin, "workflow", "log", wf_uuid, st_info["job_name"] or job_name, "-n", "30"],
+                    [self.fuzzball_bin, "workflow", "log", wf_uuid, st_info["job_name"] or job_name, "-n", "250"],
                     check=False,
                     capture_output=True,
                     text=True,
                 )
+                new_steps_emitted = 0
                 if log_p.returncode == 0 and log_p.stdout:
                     steps = _parse_steps_from_logs(log_p.stdout)
                     for step_rec in steps[seen_steps:]:
                         self._emit({"type": "trial_step", "trial_id": trial_id, **step_rec})
+                        new_steps_emitted += 1
                     seen_steps = len(steps)
+                if new_steps_emitted == 0:
+                    self._emit(
+                        {
+                            "type": "trial_heartbeat",
+                            "trial_id": trial_id,
+                            "workflow_id": wf_uuid,
+                            "elapsed_s": elapsed_s,
+                            "seen_steps": seen_steps,
+                            "nodes_assigned": placed_nodes,
+                        }
+                    )
             last_phase = st_info["phase"]
             time.sleep(self.poll_interval_s)
 
@@ -783,15 +796,28 @@ class FuzzballMCPBackend:
                                     "message": f"RUNNING ON GPU — {trial_id} executing on {', '.join(nodes)}",
                                 }
                             )
+                        new_steps_emitted = 0
                         if "workflow_log" in mcp.advertised_tools:
                             try:
-                                cur_log = mcp.workflow_log(wf_id, resolved_job)
+                                cur_log = mcp.workflow_log(wf_id, resolved_job, lines=250)
                                 steps = _parse_steps_from_logs(cur_log)
                                 for step_rec in steps[seen_steps:]:
                                     self._emit({"type": "trial_step", "trial_id": trial_id, **step_rec})
+                                    new_steps_emitted += 1
                                 seen_steps = len(steps)
                             except Exception:
                                 pass
+                        if new_steps_emitted == 0:
+                            self._emit(
+                                {
+                                    "type": "trial_heartbeat",
+                                    "trial_id": trial_id,
+                                    "workflow_id": wf_id,
+                                    "elapsed_s": elapsed_s,
+                                    "seen_steps": seen_steps,
+                                    "nodes_assigned": nodes,
+                                }
+                            )
                     last_phase = st_info["phase"]
                     time.sleep(self.poll_interval_s)
             else:

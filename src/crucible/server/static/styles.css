@@ -505,6 +505,11 @@ select {
   color: #bae6fd;
 }
 
+.tag-pill-violet {
+  background: rgba(167, 139, 250, 0.2);
+  color: #ddd6fe;
+}
+
 .tag-pill-muted {
   background: rgba(143, 161, 189, 0.15);
   color: #cbd7eb;

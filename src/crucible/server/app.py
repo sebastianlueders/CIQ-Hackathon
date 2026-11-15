@@ -550,6 +550,25 @@ class LiveRunState:
                         self.node_slots[hname]["state"] = "RUNNING"
                 entry["message"] = msg
 
+            elif ev_type == "trial_heartbeat":
+                self.state = "running"
+                tid_hb = str(payload.get("trial_id") or "")
+                el_hb = int(payload.get("elapsed_s") or 0)
+                seen_hb = int(payload.get("seen_steps") or 0)
+                nodes_hb = list(payload.get("nodes_assigned") or [])
+                self.live_budget["elapsed_s"] = max(float(self.live_budget.get("elapsed_s") or 0.0), float(el_hb))
+                if seen_hb == 0:
+                    self.stage_label = (
+                        f"RUNNING ON GPU ({', '.join(nodes_hb)}) — Loading VAST weights & evaluating Step 0 baseline for {tid_hb} ({el_hb}s)..."
+                    )
+                for hname in nodes_hb:
+                    if hname in self.node_slots:
+                        slot = self.node_slots[hname]
+                        slot["state"] = "RUNNING"
+                        slot["mem_bw_gbs"] = 164.0 if seen_hb == 0 else slot["mem_bw_gbs"]
+                # Do not spam event feed on every 2.5s heartbeat; bump seq so SSE pushes live elapsed timer & GPU state
+                return
+
             elif ev_type == "trial_step":
                 if self.state == "queued_for_gpu":
                     self.state = "running"

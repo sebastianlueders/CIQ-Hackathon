@@ -410,15 +410,38 @@ def run_hf_peft_training(
         return sum(losses) / max(1, len(losses))
 
     init_val = _eval_seqs(val_seqs)
-    loss_curve: list[float] = []
-    val_curve: list[float] = []
+    loss_curve: list[float] = [round(init_val, 5)]
+    val_curve: list[float] = [round(init_val, 5)]
     tok_rates: list[float] = []
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     adapter_mb = round(sum(p.numel() * p.element_size() for p in trainable_params) / float(1024**2), 2)
     warmup_steps = max(2, int(max_steps * recipe.warmup_ratio))
-    eval_every = max(1, max_steps // 6)
-    emit_every = max(1, max_steps // 12)
+    eval_every = max(1, min(8, max_steps // 6))
+    emit_every = 1 if max_steps <= 60 else 2
     t0 = time.perf_counter()
+    if rank == 0:
+        mem0 = round(torch.cuda.max_memory_allocated(device) / float(1024**3), 2) if torch.cuda.is_available() else 0.0
+        print(
+            "CRUCIBLE_STEP_JSON="
+            + json.dumps(
+                {
+                    "step": 0,
+                    "max_steps": max_steps,
+                    "train_loss": round(init_val, 5),
+                    "val_loss": round(init_val, 5),
+                    "perplexity": round(math.exp(min(init_val, 12.0)), 4),
+                    "lr": 0.0,
+                    "grad_norm": 0.0,
+                    "peak_mem_gb": mem0,
+                    "world_size": world_size,
+                    "tokens_per_sec": 0.0,
+                    "partial_curve": list(loss_curve),
+                    "partial_val_curve": list(val_curve),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
     m_fh = metrics_path.open("w", encoding="utf-8") if rank == 0 else None
     try:
