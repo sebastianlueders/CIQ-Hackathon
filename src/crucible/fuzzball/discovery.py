@@ -75,6 +75,8 @@ def _extract_volume_provisioner(raw_vol: dict[str, Any]) -> str | None:
         "provisionerId",
         "provisioner_name",
         "provisionerName",
+        "storageProvisionerName",
+        "storage_provisioner_name",
         "storage_class",
         "storageClass",
     ):
@@ -501,17 +503,15 @@ def apply_mcp_discovery_payload(
                 prov_matched = [v for v in parsed_vols if v["provisioner"]]
 
             if prov_matched:
-                preferred = [
-                    v
-                    for v in prov_matched
-                    if v["raw"].get("selected")
-                    or v["name"].lower() in ("runs", "crucible-vast", "vast")
-                    or any(
-                        tok == v["name"].lower()
-                        for tok in ("runs", "vast", "crucible", "data", "models")
-                    )
-                ]
-                chosen = preferred[0] if preferred else prov_matched[0]
+                priority_order = {"runs": 0, "crucible-vast": 1, "vast": 2, "data": 3, "models": 4, "envs": 5}
+                ranked = sorted(
+                    prov_matched,
+                    key=lambda v: (
+                        0 if v["raw"].get("selected") else 1,
+                        priority_order.get(v["name"].lower(), 99),
+                    ),
+                )
+                chosen = ranked[0]
                 cfg_data["vast"]["persistent_volume_name"] = chosen["name"]
                 report.applied_overrides["vast.persistent_volume_name"] = chosen["name"]
                 if chosen["provisioner"]:
@@ -617,6 +617,17 @@ def apply_mcp_discovery_payload(
                 }
                 inventory.append(inv_entry)
                 discovered_queues.append(inv_entry)
+
+            # Exclude tiny non-GPU substrate/management nodes (e.g. hack-sub1/sub2 @ 8 GiB) when GB10 nodes exist
+            gb10_only = [
+                item
+                for item in inventory
+                if item["memory_gib"] >= 32.0 and "CORDONED" not in str(item["status"]).upper()
+            ]
+            if gb10_only:
+                inventory = gb10_only
+            if len(inventory) > 2:
+                inventory = inventory[:2]
 
             # Filter to target definition_id when multiple node pools exist on the cluster
             target_def = cfg_data.get("definition_id")

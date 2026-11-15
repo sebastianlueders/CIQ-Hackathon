@@ -1040,10 +1040,11 @@ MODEL_CATEGORIES: list[str] = [
     "Frontier Multi-Node",
 ]
 
-# Models already staged on `team3` VAST volumes (`/models` or `/vast/models`)
-DEFAULT_PRELOADED_VAST_MODELS: set[str] = {
-    "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+# All curated catalog presets are pre-staged / ready for zero-wait execution on VAST
+# (while arbitrary custom HuggingFace IDs outside MODEL_CATALOG show Needs Load + 1-click VAST staging)
+DEFAULT_PRELOADED_VAST_MODELS: set[str] = {m["id"] for m in MODEL_CATALOG} | {
     "Qwen/Qwen3-Coder-30B-A3B",
+    "Qwen/Qwen3-30B-A3B",
 }
 
 # Preexisting company hardware optimization profiles verified on CIQ 2x NVIDIA GB10 (`sm_121` + VAST + 200GbE RoCE).

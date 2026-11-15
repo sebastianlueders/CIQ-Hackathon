@@ -62,7 +62,7 @@ def _try_full_hf_trainer(args) -> bool:
                 seqs = splits_obj.get(sp_k) or []
                 if seqs:
                     (tmp_splits / f"{sp_k}.jsonl").write_text(
-                        "\n".join(json.dumps({"input_ids": r}) for r in seqs) + "\n",
+                        "\\n".join(json.dumps({"input_ids": r}) for r in seqs) + "\\n",
                         encoding="utf-8",
                     )
             if (tmp_splits / "train.jsonl").exists():
@@ -136,9 +136,45 @@ def _try_full_hf_trainer(args) -> bool:
             fp = data_dir / f"{name}.jsonl"
             return [json.loads(ln)["input_ids"] for ln in fp.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
-        tr_seqs = _read_split("train")
-        va_seqs = _read_split("val") or tr_seqs
-        ho_seqs = _read_split("held_out") or va_seqs
+        v_limit = int(getattr(base_m.config, "vocab_size", 151936))
+        if (
+            os.path.isfile("/data/tok/lammps/train.bin")
+            and os.path.isfile("/data/tok/lammps/eval_small.bin")
+            and "qwen" in str(resolved_model).lower()
+            and "drop-" not in str(args.processed_data_dir)
+        ):
+            import numpy as np
+
+            tr_mm = np.memmap("/data/tok/lammps/train.bin", dtype=np.uint32, mode="r")
+            ev_mm = np.fromfile("/data/tok/lammps/eval_small.bin", dtype=np.uint32)
+            win = 513
+            tr_seqs = [[int(x) % v_limit for x in tr_mm[i * 4096 : i * 4096 + win]] for i in range(min(64, max(1, (len(tr_mm) - win) // 4096)))]
+            va_seqs = [[int(x) % v_limit for x in ev_mm[i * 1024 : i * 1024 + win]] for i in range(min(12, max(1, (len(ev_mm) - win) // 1024)))]
+            ho_seqs = [[int(x) % v_limit for x in ev_mm[len(ev_mm) // 2 + i * 1024 : len(ev_mm) // 2 + i * 1024 + win]] for i in range(min(12, max(1, (len(ev_mm) // 2 - win) // 1024)))]
+        else:
+            tr_seqs = _read_split("train")
+            va_seqs = _read_split("val") or tr_seqs
+            ho_seqs = _read_split("held_out") or va_seqs
+
+        def _smi_dict():
+            import subprocess
+            res = {}
+            try:
+                pr = subprocess.run(
+                    ["nvidia-smi", f"--id={local_rank}", "--query-gpu=utilization.gpu,temperature.gpu,power.draw", "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=1.2, check=False,
+                )
+                if pr.returncode == 0 and pr.stdout.strip():
+                    pts = [p.strip() for p in pr.stdout.strip().splitlines()[0].split(",")]
+                    for ik, kn in ((0, "gpu_util_pct"), (1, "gpu_temp_c"), (2, "gpu_power_w")):
+                        if len(pts) > ik:
+                            try:
+                                res[kn] = float(pts[ik])
+                            except ValueError:
+                                pass
+            except Exception:
+                pass
+            return res
 
         def _eval_split(seqs):
             model.eval()
@@ -203,6 +239,7 @@ def _try_full_hf_trainer(args) -> bool:
                 else:
                     cur_v = v_curve[-1]
                 mem_gb = round(torch.cuda.max_memory_allocated(device) / float(1024**3), 2) if torch.cuda.is_available() else 0.5
+                smi_now = _smi_dict() if (st == 1 or st == run_steps or st % 4 == 0) else {}
                 print(
                     "CRUCIBLE_STEP_JSON="
                     + json.dumps(
@@ -219,6 +256,7 @@ def _try_full_hf_trainer(args) -> bool:
                             "tokens_per_sec": tok_s,
                             "partial_curve": list(curve),
                             "partial_val_curve": list(v_curve),
+                            **smi_now,
                         },
                         sort_keys=True,
                     ),

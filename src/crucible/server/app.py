@@ -539,6 +539,25 @@ class LiveRunState:
                     if slot["active_trial_id"] == payload.get("trial_id"):
                         slot["state"] = "QUEUED FOR GPU"
                         slot["role"] = "Queued in Fuzzball Scheduler"
+                        slot["sm_util_pct"] = 0.0
+                        slot["tensor_core_pct"] = 0.0
+                        slot["vram_used_gib"] = 0.0
+                        slot["mem_bw_gbs"] = 0.0
+                        slot["bf16_tflops"] = 0.0
+                        slot["tokens_per_sec"] = 0.0
+                        slot["temp_c"] = 39
+                        slot["power_w"] = 24
+                self.gpu_telemetry.update(
+                    {
+                        "link_active": False,
+                        "comm_mode": "QUEUED_ON_SCHEDULER",
+                        "inter_gpu_gbps": 0.0,
+                        "allreduce_ms": 0.0,
+                        "payload_mb": 0.0,
+                        "link_utilization_pct": 0.0,
+                        "collective_op": "Queued on Fuzzball Scheduler — Starts Automatically When GPU Frees",
+                    }
+                )
                 entry["message"] = msg
 
             elif ev_type == "trial_running":
@@ -1624,6 +1643,9 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     @app.get("/")
     def index() -> FileResponse:
         _ensure_seeded()
-        return FileResponse(str(STATIC_DIR / "index.html"))
+        return FileResponse(
+            str(STATIC_DIR / "index.html"),
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
 
     return app

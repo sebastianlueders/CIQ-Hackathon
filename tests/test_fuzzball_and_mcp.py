@@ -555,6 +555,18 @@ def test_turnkey_v4_and_v1_rendering() -> None:
         assert stages == ["eval-held-out", "ingest-lammps", "serve-vllm", "train-lora"]
 
 
+def test_remote_bootstrap_scripts_always_compile_cleanly() -> None:
+    """Unconditional AST + bytecode compilation check (runs even on laptops without PyTorch)."""
+    import ast
+
+    from crucible.fuzzball.remote_bootstrap import REMOTE_SERVE_BENCH_PY, REMOTE_TRAIN_RUNNER_PY
+
+    ast.parse(REMOTE_TRAIN_RUNNER_PY, filename="crucible_remote_train.py")
+    compile(REMOTE_TRAIN_RUNNER_PY, "crucible_remote_train.py", "exec")
+    ast.parse(REMOTE_SERVE_BENCH_PY, filename="crucible_remote_serve_bench.py")
+    compile(REMOTE_SERVE_BENCH_PY, "crucible_remote_serve_bench.py", "exec")
+
+
 def test_self_contained_remote_bootstrap_executes_without_crucible_installed(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     import subprocess

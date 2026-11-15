@@ -25,6 +25,10 @@ AUTO_RUN=0
 TEAM_ID="${CRUCIBLE_DEFINITION_ID:-auto}"
 PORT="${CRUCIBLE_PORT:-8000}"
 HOST="${CRUCIBLE_HOST:-127.0.0.1}"
+TIME_BUDGET="${CRUCIBLE_TIME_BUDGET:-8}"
+COST_BUDGET="${CRUCIBLE_COST_BUDGET:-5.0}"
+USE_PRESETS=1
+CONTINUOUS=1
 OPEN_BROWSER=1
 KEEP_SERVING=1
 
@@ -39,6 +43,22 @@ while [[ $# -gt 0 ]]; do
       MODEL_ID="$2"
       AUTO_RUN=1
       shift 2
+      ;;
+    --time-budget)
+      TIME_BUDGET="$2"
+      shift 2
+      ;;
+    --cost-budget)
+      COST_BUDGET="$2"
+      shift 2
+      ;;
+    --no-presets)
+      USE_PRESETS=0
+      shift
+      ;;
+    --no-continuous)
+      CONTINUOUS=0
+      shift
       ;;
     --auto-run)
       AUTO_RUN=1
@@ -140,7 +160,16 @@ else
 fi
 "$CRUCIBLE" discover
 
-# 4. Start Crucible Studio on http://127.0.0.1:8000
+# 4. Start Crucible Studio on http://127.0.0.1:8000 (cleanly replacing any stale server on PORT)
+if command -v lsof >/dev/null 2>&1; then
+  STALE_PIDS="$(lsof -ti ":${PORT}" 2>/dev/null || true)"
+  if [[ -n "$STALE_PIDS" ]]; then
+    echo "[crucible] Stopping previous server on port ${PORT} ..."
+    kill $STALE_PIDS 2>/dev/null || true
+    sleep 0.4
+  fi
+fi
+
 RUN_DIR="${REPO_ROOT}/runs/${TEAM_ID}-live"
 mkdir -p "$RUN_DIR"
 
@@ -171,8 +200,8 @@ fi
 
 # 5. Optional auto-run when `--auto-run` / `--backend` / `--exit-after-run` is passed
 if [[ "$AUTO_RUN" -eq 1 ]]; then
-  echo "[crucible] Launching optimization (team=${TEAM_ID}, backend=${BACKEND}) ..."
-  PAYLOAD="$("${VENV_BIN}/python" -c 'import json,sys; print(json.dumps({"profile":sys.argv[1],"model_id":sys.argv[2] or None,"backend":sys.argv[3],"fuzzfile_version":"v4","definition_id":sys.argv[4],"async_mode":True}))' "$PROFILE" "$MODEL_ID" "$BACKEND" "$TEAM_ID")"
+  echo "[crucible] Launching optimization (team=${TEAM_ID}, backend=${BACKEND}, time=${TIME_BUDGET}m, cost=\$${COST_BUDGET}) ..."
+  PAYLOAD="$("${VENV_BIN}/python" -c 'import json,sys; print(json.dumps({"profile":sys.argv[1],"model_id":sys.argv[2] or None,"backend":sys.argv[3],"fuzzfile_version":"v4","definition_id":sys.argv[4],"time_budget_minutes":float(sys.argv[5]),"cost_budget_usd":float(sys.argv[6]),"use_company_presets":sys.argv[7]=="1","continuous_mode":sys.argv[8]=="1","async_mode":True}))' "$PROFILE" "$MODEL_ID" "$BACKEND" "$TEAM_ID" "$TIME_BUDGET" "$COST_BUDGET" "$USE_PRESETS" "$CONTINUOUS")"
   curl -fsS -X POST "http://${HOST}:${PORT}/api/run" -H "Content-Type: application/json" -d "$PAYLOAD" >/dev/null
 
   while true; do

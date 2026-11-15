@@ -269,7 +269,7 @@ def render_training_trial_fuzzfile(
             "NCCL_DEBUG=WARN",
         ],
         "resource": _gpu_resource_block(cluster, multinode=(perf.nodes > 1)),
-        "policy": {"timeout": {"execute": "4h"}, "retry": {"attempts": 2}},
+        "policy": {"timeout": {"execute": "25m"}, "retry": {"attempts": 2}},
         "script": script + "\n",
     }
     if perf.nodes > 1:
@@ -338,7 +338,7 @@ def render_serving_trial_fuzzfile(
             gpus_per_node=min(cand.tensor_parallel, cluster.nodes.gpus_per_node),
             multinode=(cand.tensor_parallel > cluster.nodes.gpus_per_node),
         ),
-        "policy": {"timeout": {"execute": "1h"}},
+        "policy": {"timeout": {"execute": "20m"}},
         "script": "\n".join(
             [
                 "#!/bin/bash",
@@ -648,8 +648,8 @@ def render_model_staging_fuzzfile(
             "HOME=/tmp/home",
             "PYTHONUNBUFFERED=1",
         ],
-        "resource": _cpu_helper_resource_block(cluster, cores=8, mem_gib=16),
-        "policy": {"timeout": {"execute": "4h"}, "retry": {"attempts": 2}},
+        "resource": _cpu_helper_resource_block(cluster, cores=2, mem_gib=6),
+        "policy": {"timeout": {"execute": "20m"}, "retry": {"attempts": 2}},
         "script": "\n".join(
             [
                 "#!/bin/bash",

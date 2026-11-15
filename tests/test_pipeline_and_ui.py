@@ -269,23 +269,26 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     probe = client.post("/api/firewall-probe", json={"inject_cpp_snippet": True}).json()
     assert probe["blocked"] is True
 
-    # 5. Verify model readiness badges (Pre-Loaded vs Needs Load vs Preset Opt) + on-demand VAST staging + Continuous Teacher budget
-    m_before = client.get("/api/models?probe_model=Qwen/Qwen2.5-Coder-1.5B-Instruct").json()
-    assert m_before["preloaded_count"] >= 1
-    assert m_before["preset_count"] >= 10
-    assert m_before["inferred"]["has_hardware_preset"] is True
-    assert m_before["inferred"]["vast_state"] == "needs_load"
+    # 5. Verify all 39 catalog models are Pre-Loaded + custom HF IDs support 1-click VAST staging + Continuous Teacher budget
+    m_cat = client.get("/api/models?probe_model=Qwen/Qwen2.5-Coder-1.5B-Instruct").json()
+    assert m_cat["preloaded_count"] == m_cat["total_count"]
+    assert m_cat["preset_count"] >= 10
+    assert m_cat["inferred"]["has_hardware_preset"] is True
+    assert m_cat["inferred"]["vast_state"] == "preloaded"
+
+    m_custom_before = client.get("/api/models?probe_model=acme-org/Custom-Coder-9B-Instruct").json()
+    assert m_custom_before["inferred"]["vast_state"] == "needs_load"
 
     stage_res = client.post(
         "/api/models/stage",
-        json={"model_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct", "backend": "simulator", "async_mode": False},
+        json={"model_id": "acme-org/Custom-Coder-9B-Instruct", "backend": "simulator", "async_mode": False},
     )
     assert stage_res.status_code == 200, stage_res.text
     stage_json = stage_res.json()
     assert stage_json["staged"] is True
     assert Path(stage_json["fuzzfile_path"]).exists()
 
-    m_after = client.get("/api/models?probe_model=Qwen/Qwen2.5-Coder-1.5B-Instruct").json()
+    m_after = client.get("/api/models?probe_model=acme-org/Custom-Coder-9B-Instruct").json()
     assert m_after["inferred"]["vast_state"] == "preloaded"
     assert m_after["inferred"]["preloaded_on_vast"] is True
 

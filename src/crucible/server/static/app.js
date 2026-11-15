@@ -314,47 +314,60 @@ function renderArtifactViewer() {
 
 function updateSingleGpuSvg(idx, node) {
   if (!node) return;
-  const pfx = `svg-gpu${idx}`;
+  const pfx = `gpu${idx}`;
   const smPct = Number(node.sm_util_pct || 0);
   const tcPct = Number(node.tensor_core_pct || 0);
   const memUsed = Number(node.vram_used_gib || 0);
   const memTot = Number(node.physical_memory_gib || 127.9);
   const memPct = Math.min(100, (memUsed / Math.max(memTot, 1)) * 100);
-  const isRunning = String(node.state || "").includes("RUNNING");
+  const stStr = String(node.state || "READY");
+  const isRunning = stStr.includes("RUNNING");
+  const isQueued = stStr.includes("QUEUED");
+
+  const cardEl = document.getElementById(`${pfx}-card`);
+  if (cardEl) {
+    cardEl.classList.toggle("gpu-card-running", isRunning);
+    cardEl.classList.toggle("gpu-card-queued", isQueued);
+  }
 
   document.getElementById(`${pfx}-host`).textContent = node.hostname || `gb10-node-0${idx + 1}`;
-  document.getElementById(`${pfx}-state`).textContent = node.state || "READY";
-  document.getElementById(`${pfx}-state`).setAttribute("fill", isRunning ? "#a3e635" : "#34d399");
-  document.getElementById(`${pfx}-border`).setAttribute("stroke", isRunning ? "#76b900" : "#2b3d5f");
+  const stEl = document.getElementById(`${pfx}-state`);
+  stEl.textContent = stStr;
+  stEl.className = isRunning
+    ? "gpu-state-badge gpu-state-running"
+    : isQueued
+    ? "gpu-state-badge gpu-state-queued"
+    : "gpu-state-badge";
+
   document.getElementById(`${pfx}-role`).textContent = node.role || `${node.gpu_product} (${node.sm_arch || "sm_121"})`;
 
   document.getElementById(`${pfx}-sm-txt`).textContent = `${smPct.toFixed(1)}%`;
-  document.getElementById(`${pfx}-sm-bar`).setAttribute("width", String(Math.max(4, Math.round((smPct / 100) * 292))));
+  document.getElementById(`${pfx}-sm-bar`).style.width = `${Math.max(2, Math.min(100, smPct)).toFixed(1)}%`;
 
   document.getElementById(`${pfx}-tc-txt`).textContent = `${tcPct.toFixed(1)}%`;
-  document.getElementById(`${pfx}-tc-bar`).setAttribute("width", String(Math.max(4, Math.round((tcPct / 100) * 292))));
+  document.getElementById(`${pfx}-tc-bar`).style.width = `${Math.max(2, Math.min(100, tcPct)).toFixed(1)}%`;
 
   document.getElementById(`${pfx}-mem-txt`).textContent = `${memUsed.toFixed(1)} / ${memTot.toFixed(1)} GiB`;
-  document.getElementById(`${pfx}-mem-bar`).setAttribute("width", String(Math.max(6, Math.round((memPct / 100) * 292))));
+  document.getElementById(`${pfx}-mem-bar`).style.width = `${Math.max(2, Math.min(100, memPct)).toFixed(1)}%`;
 
   document.getElementById(`${pfx}-tflops`).textContent =
     `${Number(node.bf16_tflops || 0).toFixed(1)} TFLOP/s · ${Number(node.mem_bw_gbs || 0).toFixed(0)} GB/s`;
   document.getElementById(`${pfx}-toks`).textContent =
-    `${Math.round(Number(node.tokens_per_sec || 0)).toLocaleString()} tok/s · ${node.power_w || 28}W · ${node.temp_c || 40}°C`;
+    `${Math.round(Number(node.tokens_per_sec || 0)).toLocaleString()} tok/s · ${node.power_w || 24}W · ${node.temp_c || 39}°C`;
 
   const wfShort = node.active_workflow_id ? node.active_workflow_id.slice(0, 8) : "idle";
-  document.getElementById(`${pfx}-wf`).textContent =
-    `Workflow: ${wfShort} · Trial: ${node.active_trial_id || node.last_trial_id || "none"} · Done: ${node.trials_completed || 0}`;
+  const rawTrial = node.active_trial_id || node.last_trial_id || "none";
+  const shortTrial = rawTrial.length > 24 ? `${rawTrial.slice(0, 22)}…` : rawTrial;
+  const wfEl = document.getElementById(`${pfx}-wf`);
+  wfEl.textContent = `WF: ${wfShort} · Trial: ${shortTrial} · Done: ${node.trials_completed || 0}`;
+  wfEl.title = `Workflow: ${node.active_workflow_id || "idle"} | Trial: ${rawTrial} | Completed: ${node.trials_completed || 0}`;
 
   // Light up mini SM die cells proportionally to SM utilization
   const cells = document.querySelectorAll(`#${pfx}-cores .sm-cell`);
   const litCount = Math.round((smPct / 100) * cells.length);
   cells.forEach((cell, cIdx) => {
-    if (cIdx < litCount) {
-      cell.setAttribute("fill", isRunning ? "#84cc16" : "#38bdf8");
-    } else {
-      cell.setAttribute("fill", "#1d2c47");
-    }
+    cell.classList.toggle("sm-cell-active", cIdx < litCount && isRunning);
+    cell.classList.toggle("sm-cell-standby", cIdx < litCount && !isRunning);
   });
 }
 
@@ -411,8 +424,8 @@ function renderDualGpuFabric(snap) {
   }
 
   const team = snap.definition_id || currentTeamId();
-  document.getElementById("svg-vast-title").textContent =
-    `VAST Data Shared Persistent Volume (/vast · use: ${team}) — Zero-Copy Weights, Tokenized Splits & LoRA Checkpoints`;
+  document.getElementById("svg-vast-title").innerHTML =
+    `VAST Data Shared Persistent Volume (<code>/vast</code> &middot; <code>use: ${team}</code>) &mdash; Zero-Copy Weights, Tokenized Splits &amp; LoRA Checkpoints`;
 }
 
 function renderRealtimeAnalysis(snap) {
