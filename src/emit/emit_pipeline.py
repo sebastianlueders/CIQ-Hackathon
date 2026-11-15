@@ -14,7 +14,7 @@ import argparse, json, os, subprocess, textwrap
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 FB = os.path.join(REPO, "fuzzball")
 CODE = ["src/ingest/ingest.py", "src/prep/fuse_experts.py", "src/train/train_lora.py", "src/kernels/fused_ce.py",
-        "src/runner/multinode_launch.sh",
+        "src/kernels/grouped_gemm.py", "src/runner/multinode_launch.sh",
         "src/serve/serve_bench.py"]
 
 

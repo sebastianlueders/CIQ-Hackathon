@@ -130,5 +130,17 @@
   "workflow": "4fdd9f40-01af-4f46-9db0-a0dfb728d3ea",
   "job": "run",
   "kind": "serve"
+ },
+ {
+  "id": "s4-perf-stack-1node",
+  "workflow": "d9a4ec78-1e50-4d9d-be1a-3aab0d1125e7",
+  "job": "trial",
+  "kind": "trial"
+ },
+ {
+  "id": "s4-perf-triton-grouped",
+  "workflow": "18542639-4410-46cc-8304-2ca5675a849a",
+  "job": "trial",
+  "kind": "trial"
  }
 ]

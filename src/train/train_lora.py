@@ -156,10 +156,12 @@ def main():
     torch.manual_seed(cfg["seed"]); rng = np.random.default_rng(cfg["seed"] + 1000 * rank)
 
     if rank == 0: start_mem_monitor(fh)
+    import sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     if cfg.get("fused_ce"):
-        import sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         global fused_linear_ce
         from fused_ce import fused_linear_ce
+    if cfg.get("experts_impl") == "triton_grouped":  # src/kernels/grouped_gemm.py, registered with transformers
+        import grouped_gemm; grouped_gemm.register("triton_grouped")
     from transformers import AutoModelForCausalLM
     from peft import LoraConfig, get_peft_model, PeftModel
     t0 = time.time()
