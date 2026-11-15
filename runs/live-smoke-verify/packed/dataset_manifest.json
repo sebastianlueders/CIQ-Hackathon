@@ -1,0 +1,30 @@
+{
+  "chunk_seq_len": 256,
+  "dataset_name": "smoke",
+  "held_out_files": [
+    "src/fix_nvt_nh.cpp",
+    "src/fix_nvt_nh.h"
+  ],
+  "manifest_sha256": "d5f50860f6c062a43efea9a277b9292b28919b21da1843a7606c2844465eac58",
+  "output_dir": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/runs/live-smoke-verify/packed",
+  "raw_data_export_permitted": false,
+  "source_root": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/fixtures/sample_lammps",
+  "split_chunk_counts": {
+    "held_out": 4,
+    "train": 15,
+    "val": 4
+  },
+  "split_file_counts": {
+    "held_out": 2,
+    "train": 12,
+    "val": 2
+  },
+  "split_lexeme_counts": {
+    "held_out": 855,
+    "train": 3326,
+    "val": 788
+  },
+  "split_salt": "crucible-lammps-v1",
+  "total_cpp_files": 16,
+  "vocab_size": 151936
+}

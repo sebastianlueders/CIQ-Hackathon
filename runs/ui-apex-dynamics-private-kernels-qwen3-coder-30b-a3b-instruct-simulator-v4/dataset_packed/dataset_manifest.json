@@ -1,0 +1,94 @@
+{
+  "chunk_seq_len": 256,
+  "dataset_name": "apex-dynamics-private-kernels",
+  "held_out_files": [
+    "qa/domain_tasks.jsonl#record-00001"
+  ],
+  "manifest_sha256": "8cf182725fdb89dc63ac47f728ec447febe87a0041cf51c208f6189d8497ba64",
+  "output_dir": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/runs/ui-apex-dynamics-private-kernels-qwen3-coder-30b-a3b-instruct-simulator-v4/dataset_packed",
+  "raw_data_export_permitted": false,
+  "source_root": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/runs/datasets/drop-36b6fb5fd7/raw",
+  "split_chunk_counts": {
+    "held_out": 1,
+    "train": 11,
+    "val": 2
+  },
+  "split_file_counts": {
+    "held_out": 1,
+    "train": 7,
+    "val": 1
+  },
+  "split_lexeme_counts": {
+    "held_out": 162,
+    "train": 2430,
+    "val": 319
+  },
+  "split_salt": "crucible-apex-dynamics-private-kernels-v1",
+  "teacher_curriculum": {
+    "artifacts": {
+      "test_sft": "teacher_sft_test.jsonl",
+      "train_sft": "teacher_sft_train.jsonl",
+      "val_sft": "teacher_sft_val.jsonl"
+    },
+    "curriculum_sha256": "c06e29aed8631e12fa1fa4aa5691cb7097a6a0af49d38d3e608c12060d44d59f",
+    "dataset_name": "apex-dynamics-private-kernels",
+    "raw_cloud_egress_bytes": 0,
+    "sample_previews": [
+      {
+        "example_id": "train-tchr-0001",
+        "expected_symbols": [
+          "inline",
+          "step_0"
+        ],
+        "instruction": "Optimize force kernel step 0",
+        "response_preview": "inline double step_0(double r2) { return 1.0 / r2; }",
+        "source_file": "qa/domain_tasks.jsonl#record-00000",
+        "split": "train",
+        "task_type": "structured_instruction_distill",
+        "teacher_reasoning": "Teacher verified structured domain specification from `qa/domain_tasks.jsonl`; enforcing key domain identifiers (Optimize, force, kernel, step) for train split."
+      },
+      {
+        "example_id": "train-tchr-0002",
+        "expected_symbols": [
+          "inline",
+          "step_2"
+        ],
+        "instruction": "Optimize force kernel step 2",
+        "response_preview": "inline double step_2(double r2) { return 1.0 / r2; }",
+        "source_file": "qa/domain_tasks.jsonl#record-00002",
+        "split": "train",
+        "task_type": "structured_instruction_distill",
+        "teacher_reasoning": "Teacher verified structured domain specification from `qa/domain_tasks.jsonl`; enforcing key domain identifiers (Optimize, force, kernel, step) for train split."
+      },
+      {
+        "example_id": "train-tchr-0003",
+        "expected_symbols": [
+          "inline",
+          "step_3"
+        ],
+        "instruction": "Optimize force kernel step 3",
+        "response_preview": "inline double step_3(double r2) { return 1.0 / r2; }",
+        "source_file": "qa/domain_tasks.jsonl#record-00003",
+        "split": "train",
+        "task_type": "structured_instruction_distill",
+        "teacher_reasoning": "Teacher verified structured domain specification from `qa/domain_tasks.jsonl`; enforcing key domain identifiers (Optimize, force, kernel, step) for train split."
+      }
+    ],
+    "split_pair_counts": {
+      "test": 1,
+      "train": 9,
+      "val": 1
+    },
+    "task_type_breakdown": {
+      "code_synthesis_sft": 2,
+      "context_completion_sft": 2,
+      "domain_knowledge_qa": 1,
+      "structured_instruction_distill": 6
+    },
+    "teacher_engine": "fuzzball-enclave-teacher-synthesizer (Qwen/Qwen3-Coder-30B-A3B-Instruct SFT schema)",
+    "total_teaching_pairs": 11,
+    "zero_cross_split_leakage": true
+  },
+  "total_cpp_files": 9,
+  "vocab_size": 151936
+}

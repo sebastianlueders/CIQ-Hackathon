@@ -1,0 +1,7 @@
+{
+  "workflow_id": "b10eb56b-99b4-4889-a1cf-5001e5a39dc5",
+  "nodes": [
+    "CIQ-CHI-SPARK39"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stagea-r1-c1-r32-a64-lr1e-04-7m/metrics.json"
+}

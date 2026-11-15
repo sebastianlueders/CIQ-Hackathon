@@ -1,0 +1,8 @@
+{
+  "workflow_id": "06d88f0d-fab2-469c-a06c-92394d57ec4b",
+  "nodes": [
+    "CIQ-CHI-SPARK39",
+    "CIQ-CHI-SPARK40"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stageb-05-oversized-global-batch-2node/metrics.json"
+}

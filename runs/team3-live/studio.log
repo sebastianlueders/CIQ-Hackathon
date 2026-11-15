@@ -1,0 +1,27 @@
+INFO:     Started server process [13639]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8012 (Press CTRL+C to quit)
+Alchemy Team 3 Live Studio -> http://127.0.0.1:8012
+INFO:     127.0.0.1:52079 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52080 - "POST /api/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52081 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52083 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52087 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52089 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52091 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52096 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52102 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52104 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52108 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52110 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52115 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52119 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52123 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52126 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52129 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52132 - "GET /api/live-status HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [13639]

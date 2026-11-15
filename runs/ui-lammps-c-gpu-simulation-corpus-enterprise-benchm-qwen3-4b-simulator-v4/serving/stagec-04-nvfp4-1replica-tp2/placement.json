@@ -1,0 +1,8 @@
+{
+  "workflow_id": "365f7487-80e6-47b5-ad8e-9b06ad1e8acf",
+  "nodes": [
+    "CIQ-CHI-SPARK05",
+    "CIQ-CHI-SPARK06"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-run/serving-stagec-04-nvfp4-1replica-tp2/metrics.json"
+}

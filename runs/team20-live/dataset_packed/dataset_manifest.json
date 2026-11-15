@@ -1,0 +1,30 @@
+{
+  "chunk_seq_len": 2048,
+  "dataset_name": "lammps-cpp",
+  "held_out_files": [
+    "src/fix_nvt_nh.cpp",
+    "src/fix_nvt_nh.h"
+  ],
+  "manifest_sha256": "d00d1b4de8c0874a6bb4a2ec9191a75e414db75a1fc40c2a106d80b13c2d8db1",
+  "output_dir": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/runs/team20-live/dataset_packed",
+  "raw_data_export_permitted": false,
+  "source_root": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/fixtures/sample_lammps",
+  "split_chunk_counts": {
+    "held_out": 1,
+    "train": 2,
+    "val": 1
+  },
+  "split_file_counts": {
+    "held_out": 2,
+    "train": 11,
+    "val": 2
+  },
+  "split_lexeme_counts": {
+    "held_out": 855,
+    "train": 3283,
+    "val": 788
+  },
+  "split_salt": "crucible-lammps-v1",
+  "total_cpp_files": 15,
+  "vocab_size": 151936
+}

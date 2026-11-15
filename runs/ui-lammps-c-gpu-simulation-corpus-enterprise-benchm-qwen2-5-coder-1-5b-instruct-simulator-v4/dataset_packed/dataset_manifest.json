@@ -1,0 +1,103 @@
+{
+  "chunk_seq_len": 256,
+  "dataset_name": "lammps-c-gpu-simulation-corpus-enterprise-benchm",
+  "held_out_files": [
+    "src/comm_brick.cpp",
+    "src/comm_brick.h"
+  ],
+  "manifest_sha256": "6a568aa97e30937a1afce7b0e6fa37c9b1a4a2e49aebfdd84751eedfa6091868",
+  "output_dir": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/runs/ui-lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen2-5-coder-1-5b-instruct-simulator-v4/dataset_packed",
+  "raw_data_export_permitted": false,
+  "source_root": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/fixtures/sample_lammps",
+  "split_chunk_counts": {
+    "held_out": 9,
+    "train": 65,
+    "val": 5
+  },
+  "split_file_counts": {
+    "held_out": 2,
+    "train": 13,
+    "val": 1
+  },
+  "split_lexeme_counts": {
+    "held_out": 2008,
+    "train": 14512,
+    "val": 1070
+  },
+  "split_salt": "crucible-lammps-c-gpu-simulation-corpus-enterprise-benchm-v1",
+  "teacher_curriculum": {
+    "artifacts": {
+      "test_sft": "teacher_sft_test.jsonl",
+      "train_sft": "teacher_sft_train.jsonl",
+      "val_sft": "teacher_sft_val.jsonl"
+    },
+    "curriculum_sha256": "e1a17196e57afa0aa5afc214343d7941a883d1b76ddae7b3169008244b983e23",
+    "dataset_name": "lammps-c-gpu-simulation-corpus-enterprise-benchm",
+    "raw_cloud_egress_bytes": 0,
+    "sample_previews": [
+      {
+        "example_id": "train-tchr-0001",
+        "expected_symbols": [
+          "code",
+          "file",
+          "inside",
+          "sample_lammps",
+          "verify"
+        ],
+        "instruction": "Summarize and apply the private engineering specification for 'Non-code doc file inside sample_lammps to verify C++ extension filtering during ingestion.' defined in `README.txt`.",
+        "response_preview": "# Non-code doc file inside sample_lammps to verify C++ extension filtering during ingestion.\nLAMMPS sample subset used for offline tests and quick dry-run validation.",
+        "source_file": "README.txt",
+        "split": "train",
+        "task_type": "domain_knowledge_qa",
+        "teacher_reasoning": "Teacher extracted authoritative guidance from `README.txt` covering code, file, inside, sample_lammps to ground train evaluation without cross-split leakage."
+      },
+      {
+        "example_id": "train-tchr-0002",
+        "expected_symbols": [
+          "cstddef",
+          "vector",
+          "LAMMPS_NS",
+          "ComputeTemp",
+          "explicit"
+        ],
+        "instruction": "Implement `ComputeTemp` following the conventions, data structures, and invariants in `src/compute_temp.cpp`.",
+        "response_preview": "#include <cstddef>\n#include <vector>\nnamespace LAMMPS_NS {\nclass ComputeTemp {\n public:\n  explicit ComputeTemp(double boltz_constant) : boltz_(boltz_constant) {}\n  double compute_scalar(\n      const std::vector<double>& v,\n      const std::vector<double>& mass,\n      int dof_removed = 3) const {\n    double ke_twice = 0.0;\n    const std::size_t nlocal = mass.",
+        "source_file": "src/compute_temp.cpp",
+        "split": "train",
+        "task_type": "code_synthesis_sft",
+        "teacher_reasoning": "Teacher analyzed `src/compute_temp.cpp` (26 non-empty lines): preserving signature `ComputeTemp` and domain symbols (cstddef, vector, LAMMPS_NS, ComputeTemp, explicit)."
+      },
+      {
+        "example_id": "train-tchr-0003",
+        "expected_symbols": [
+          "ke_twice",
+          "mass",
+          "static_cast",
+          "nlocal",
+          "dof_removed"
+        ],
+        "instruction": "Complete the implementation body in `src/compute_temp.cpp` starting immediately after the provided prefix.",
+        "response_preview": "      const double vy = v[3 * i + 1];\n      const double vz = v[3 * i + 2];\n      ke_twice += mass[i] * (vx * vx + vy * vy + vz * vz);\n    }\n    const int dof = static_cast<int>(3 * nlocal) - dof_removed;\n    if (dof <= 0) return 0.0;\n    return ke_twice / (static_cast<double>(dof) * boltz_);\n  }\n private:\n  double boltz_;\n};\n}  // namespace LAMMPS_NS",
+        "source_file": "src/compute_temp.cpp",
+        "split": "train",
+        "task_type": "context_completion_sft",
+        "teacher_reasoning": "Teacher infilling task for `src/compute_temp.cpp` (train split): completing control flow and referencing ke_twice, mass, static_cast, nlocal."
+      }
+    ],
+    "split_pair_counts": {
+      "test": 4,
+      "train": 25,
+      "val": 2
+    },
+    "task_type_breakdown": {
+      "code_synthesis_sft": 15,
+      "context_completion_sft": 15,
+      "domain_knowledge_qa": 1
+    },
+    "teacher_engine": "fuzzball-enclave-teacher-synthesizer (Qwen/Qwen3-Coder-30B-A3B-Instruct SFT schema)",
+    "total_teaching_pairs": 31,
+    "zero_cross_split_leakage": true
+  },
+  "total_cpp_files": 16,
+  "vocab_size": 151936
+}

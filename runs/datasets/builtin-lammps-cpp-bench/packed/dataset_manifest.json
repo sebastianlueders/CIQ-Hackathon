@@ -1,0 +1,103 @@
+{
+  "chunk_seq_len": 256,
+  "dataset_name": "builtin-lammps-cpp-bench",
+  "held_out_files": [
+    "src/fix_nvt_nh.cpp",
+    "src/fix_nvt_nh.h"
+  ],
+  "manifest_sha256": "3be23e7cb2c980d18f37613172ce2f3547d93d7658568fb509c3b38d5e76c795",
+  "output_dir": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/runs/datasets/builtin-lammps-cpp-bench/packed",
+  "raw_data_export_permitted": false,
+  "source_root": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/fixtures/sample_lammps",
+  "split_chunk_counts": {
+    "held_out": 12,
+    "train": 55,
+    "val": 13
+  },
+  "split_file_counts": {
+    "held_out": 2,
+    "train": 12,
+    "val": 2
+  },
+  "split_lexeme_counts": {
+    "held_out": 2694,
+    "train": 12170,
+    "val": 2726
+  },
+  "split_salt": "crucible-lammps-v1",
+  "teacher_curriculum": {
+    "artifacts": {
+      "test_sft": "teacher_sft_test.jsonl",
+      "train_sft": "teacher_sft_train.jsonl",
+      "val_sft": "teacher_sft_val.jsonl"
+    },
+    "curriculum_sha256": "fc8d550eeb557217987ba5dbe36fb4e8b3d4ae81fe608ce228b97737d933fecc",
+    "dataset_name": "builtin-lammps-cpp-bench",
+    "raw_cloud_egress_bytes": 0,
+    "sample_previews": [
+      {
+        "example_id": "train-tchr-0001",
+        "expected_symbols": [
+          "code",
+          "file",
+          "inside",
+          "sample_lammps",
+          "verify"
+        ],
+        "instruction": "Summarize and apply the private engineering specification for 'Non-code doc file inside sample_lammps to verify C++ extension filtering during ingestion.' defined in `README.txt`.",
+        "response_preview": "# Non-code doc file inside sample_lammps to verify C++ extension filtering during ingestion.\nLAMMPS sample subset used for offline tests and quick dry-run validation.",
+        "source_file": "README.txt",
+        "split": "train",
+        "task_type": "domain_knowledge_qa",
+        "teacher_reasoning": "Teacher extracted authoritative guidance from `README.txt` covering code, file, inside, sample_lammps to ground train evaluation without cross-split leakage."
+      },
+      {
+        "example_id": "train-tchr-0002",
+        "expected_symbols": [
+          "cstddef",
+          "vector",
+          "LAMMPS_NS",
+          "AtomVecAtomic",
+          "grow"
+        ],
+        "instruction": "Implement `AtomVecAtomic` following the conventions, data structures, and invariants in `src/atom_vec_atomic.cpp`.",
+        "response_preview": "#include <cstddef>\n#include <vector>\nnamespace LAMMPS_NS {\nclass AtomVecAtomic {\n public:\n  void grow(std::size_t nmax) {\n    tag_.resize(nmax, 0);\n    type_.resize(nmax, 1);\n    x_.resize(nmax * 3, 0.0);\n    v_.resize(nmax * 3, 0.0);\n    f_.resize(nmax * 3, 0.0);\n  }\n  void copy_atom(std::size_t src, std::size_t dst) {\n    tag_[dst] = tag_[src];\n    type_[d",
+        "source_file": "src/atom_vec_atomic.cpp",
+        "split": "train",
+        "task_type": "code_synthesis_sft",
+        "teacher_reasoning": "Teacher analyzed `src/atom_vec_atomic.cpp` (29 non-empty lines): preserving signature `AtomVecAtomic` and domain symbols (cstddef, vector, LAMMPS_NS, AtomVecAtomic, grow)."
+      },
+      {
+        "example_id": "train-tchr-0003",
+        "expected_symbols": [
+          "size_t",
+          "vector",
+          "tag_",
+          "type_",
+          "LAMMPS_NS"
+        ],
+        "instruction": "Complete the implementation body in `src/atom_vec_atomic.cpp` starting immediately after the provided prefix.",
+        "response_preview": "    for (std::size_t d = 0; d < 3; ++d) {\n      x_[3 * dst + d] = x_[3 * src + d];\n      v_[3 * dst + d] = v_[3 * src + d];\n      f_[3 * dst + d] = f_[3 * src + d];\n    }\n  }\n private:\n  std::vector<int> tag_;\n  std::vector<int> type_;\n  std::vector<double> x_;\n  std::vector<double> v_;\n  std::vector<double> f_;\n};\n}  // namespace LAMMPS_NS",
+        "source_file": "src/atom_vec_atomic.cpp",
+        "split": "train",
+        "task_type": "context_completion_sft",
+        "teacher_reasoning": "Teacher infilling task for `src/atom_vec_atomic.cpp` (train split): completing control flow and referencing size_t, vector, tag_, type_."
+      }
+    ],
+    "split_pair_counts": {
+      "test": 4,
+      "train": 23,
+      "val": 4
+    },
+    "task_type_breakdown": {
+      "code_synthesis_sft": 15,
+      "context_completion_sft": 15,
+      "domain_knowledge_qa": 1
+    },
+    "teacher_engine": "fuzzball-enclave-teacher-synthesizer (Qwen/Qwen3-Coder-30B-A3B-Instruct SFT schema)",
+    "total_teaching_pairs": 31,
+    "zero_cross_split_leakage": true
+  },
+  "total_cpp_files": 16,
+  "vocab_size": 151936
+}

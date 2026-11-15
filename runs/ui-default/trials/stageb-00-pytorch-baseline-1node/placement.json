@@ -1,0 +1,7 @@
+{
+  "workflow_id": "939a304c-4c3f-4650-a5cb-2819df5ada01",
+  "nodes": [
+    "gb10-node-02"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stageb-00-pytorch-baseline-1node/metrics.json"
+}

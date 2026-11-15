@@ -1,0 +1,120 @@
+version: v4
+files:
+  crucible-infer-runner: "#!/usr/bin/env python3\n\"\"\"Crucible live Fuzzball GB10\
+    \ inference runner (compares untuned base vs VAST-saved LoRA adapter).\"\"\"\n\
+    import argparse\nimport glob\nimport json\nimport os\nimport pathlib\nimport socket\n\
+    import sys\nimport time\n\n\ndef main() -> int:\n    for venv_sp in sorted(glob.glob(\"\
+    /envs/*/lib/python*/site-packages\")):\n        if venv_sp not in sys.path:\n\
+    \            sys.path.insert(0, venv_sp)\n\n    p = argparse.ArgumentParser()\n\
+    \    p.add_argument(\"--model-id\", required=True)\n    p.add_argument(\"--adapter-dir\"\
+    , default=\"\")\n    p.add_argument(\"--company-name\", default=\"Apex Dynamics\"\
+    )\n    p.add_argument(\"--prompt\", required=True)\n    p.add_argument(\"--compare-base\"\
+    , type=int, default=1)\n    p.add_argument(\"--max-new-tokens\", type=int, default=220)\n\
+    \    args = p.parse_args()\n\n    import torch\n    from transformers import AutoModelForCausalLM,\
+    \ AutoTokenizer\n\n    sub = pathlib.Path(args.model_id.strip(\"/\")).name\n \
+    \   parent_sub = \"/\".join(pathlib.Path(args.model_id.strip(\"/\")).parts[-2:])\n\
+    \    cands = [\n        pathlib.Path(f\"/models/{parent_sub}\"),\n        pathlib.Path(f\"\
+    /vast/models/{parent_sub}\"),\n        pathlib.Path(f\"/models/{sub}\"),\n   \
+    \     pathlib.Path(f\"/vast/models/{sub}\"),\n        pathlib.Path(\"/models/Qwen/Qwen2.5-Coder-1.5B-Instruct\"\
+    ),\n        pathlib.Path(\"/models/Qwen/Qwen3-4B\"),\n        pathlib.Path(\"\
+    /models/Qwen/Qwen3-Coder-30B-A3B-Instruct\"),\n    ]\n    resolved = next((c for\
+    \ c in cands if (c / \"config.json\").exists()), None)\n    if resolved is None:\n\
+    \        raise RuntimeError(f\"Model {args.model_id} not staged on /models; select\
+    \ Qwen2.5-Coder-1.5B, Qwen3-4B, or Qwen3-Coder-30B-A3B.\")\n\n    device = torch.device(\"\
+    cuda:0\" if torch.cuda.is_available() else \"cpu\")\n    dtype = torch.bfloat16\
+    \ if torch.cuda.is_available() else torch.float32\n    tok = AutoTokenizer.from_pretrained(str(resolved),\
+    \ local_files_only=True)\n    model = AutoModelForCausalLM.from_pretrained(str(resolved),\
+    \ dtype=dtype, local_files_only=True).to(device)\n    model.eval()\n\n    adapter_loaded\
+    \ = False\n    resolved_adapter = \"\"\n    adapter_candidates = []\n    if args.adapter_dir:\n\
+    \        adapter_candidates.append(pathlib.Path(args.adapter_dir))\n    for p_ad\
+    \ in sorted(glob.glob(\"/vast/**/lora_adapter\", recursive=True), reverse=True)[:8]:\n\
+    \        adapter_candidates.append(pathlib.Path(p_ad))\n    for p_ad in sorted(glob.glob(\"\
+    /runs/**/adapter\", recursive=True), reverse=True)[:4]:\n        adapter_candidates.append(pathlib.Path(p_ad))\n\
+    \n    try:\n        from peft import PeftModel\n        for ad_p in adapter_candidates:\n\
+    \            if (ad_p / \"adapter_config.json\").exists():\n                try:\n\
+    \                    acfg = json.loads((ad_p / \"adapter_config.json\").read_text(encoding=\"\
+    utf-8\"))\n                    if sub.lower() in str(acfg.get(\"base_model_name_or_path\"\
+    , \"\")).lower() or ad_p == pathlib.Path(args.adapter_dir):\n                \
+    \        model = PeftModel.from_pretrained(model, str(ad_p))\n               \
+    \         model.eval()\n                        adapter_loaded = True\n      \
+    \                  resolved_adapter = str(ad_p)\n                        break\n\
+    \                except Exception:\n                    pass\n    except Exception:\n\
+    \        pass\n\n    def _gen(sys_msg: str) -> tuple[str, float, int]:\n     \
+    \   msgs = [\n            {\"role\": \"system\", \"content\": sys_msg},\n    \
+    \        {\"role\": \"user\", \"content\": args.prompt},\n        ]\n        try:\n\
+    \            text_in = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)\n\
+    \        except Exception:\n            text_in = f\"System: {sys_msg}\\nUser:\
+    \ {args.prompt}\\nAssistant:\\n\"\n        inp = tok(text_in, return_tensors=\"\
+    pt\").to(device)\n        if torch.cuda.is_available():\n            torch.cuda.synchronize()\n\
+    \        t0 = time.perf_counter()\n        with torch.no_grad():\n           \
+    \ out_ids = model.generate(\n                **inp,\n                max_new_tokens=args.max_new_tokens,\n\
+    \                do_sample=False,\n                pad_token_id=tok.eos_token_id,\n\
+    \            )\n        if torch.cuda.is_available():\n            torch.cuda.synchronize()\n\
+    \        dt = max(time.perf_counter() - t0, 1e-4)\n        gen_ids = out_ids[0][inp[\"\
+    input_ids\"].shape[1] :]\n        txt = tok.decode(gen_ids, skip_special_tokens=True).strip()\n\
+    \        return txt, dt, int(gen_ids.numel())\n\n    base_txt = None\n    if args.compare_base:\n\
+    \        if adapter_loaded and hasattr(model, \"disable_adapter\"):\n        \
+    \    with model.disable_adapter():\n                base_txt, _, _ = _gen(\"You\
+    \ are a helpful coding assistant.\")\n        else:\n            base_txt, _,\
+    \ _ = _gen(\"You are a helpful general assistant.\")\n\n    tuned_sys = (\n  \
+    \      f\"You are {args.company_name}'s private domain-tuned HPC & simulation\
+    \ engineering assistant, \"\n        \"writing SIMD-vectorized C++ neighbor-list\
+    \ and molecular force kernels following internal conventions.\"\n    )\n    tuned_txt,\
+    \ dt_s, n_toks = _gen(tuned_sys)\n    gpu_name = torch.cuda.get_device_name(0)\
+    \ if torch.cuda.is_available() else \"cpu\"\n    res = {\n        \"source\":\
+    \ \"live_fuzzball_gb10_gpu\",\n        \"hostname\": socket.gethostname(),\n \
+    \       \"gpu_name\": gpu_name,\n        \"resolved_model_path\": str(resolved),\n\
+    \        \"adapter_loaded\": adapter_loaded,\n        \"adapter_path\": resolved_adapter,\n\
+    \        \"company_name\": args.company_name,\n        \"latency_ms\": round(dt_s\
+    \ * 1000.0, 1),\n        \"generated_tokens\": n_toks,\n        \"throughput_tok_s\"\
+    : round(n_toks / dt_s, 1),\n        \"base_output\": base_txt,\n        \"tuned_output\"\
+    : tuned_txt,\n    }\n    print(\"CRUCIBLE_INFER_JSON=\" + json.dumps(res, sort_keys=True),\
+    \ flush=True)\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+volumes:
+  vast:
+    name: runs
+    use: team3
+  data:
+    name: data
+    use: team3
+  envs:
+    name: envs
+    use: team3
+  models:
+    name: models
+    use: team3
+jobs:
+  infer-copilot:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.10-py3
+    mounts:
+      /vast:
+        volume: vast
+      /data:
+        volume: data
+      /envs:
+        volume: envs
+      /models:
+        volume: models
+    files:
+      /opt/crucible_infer.py: file://crucible-infer-runner
+    env:
+    - HOME=/tmp/home
+    - PYTHONUNBUFFERED=1
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 96GiB
+      devices:
+        nvidia.com/gpu: 1
+    policy:
+      timeout:
+        execute: 10m
+    script: "#!/bin/bash\nset -euo pipefail\nmkdir -p /tmp/home\nPROMPT_TXT=\"$(echo\
+      \ 'V3JpdGUgYSBTSU1ELWZyaWVuZGx5IG5laWdoYm9yLWJpbiBsb29wIGZvciBhIGN1dG9mZiBtb2xlY3VsYXIgZHluYW1pY3MgZm9yY2Uga2VybmVsLg=='\
+      \ | base64 -d)\"\nCOMPANY_TXT=\"$(echo 'QXBleCBEeW5hbWljcw==' | base64 -d)\"\
+      \npython3 /opt/crucible_infer.py \\\n  --model-id 'Qwen/Qwen3-Coder-30B-A3B'\
+      \ \\\n  --adapter-dir '/vast/runs/lammps-qwen3-coder-30b-run/trials/stagea-r2-c1-r32-a64-lr1e-04-7m/lora_adapter'\
+      \ \\\n  --company-name \"$COMPANY_TXT\" \\\n  --prompt \"$PROMPT_TXT\" \\\n\
+      \  --compare-base 1\n"

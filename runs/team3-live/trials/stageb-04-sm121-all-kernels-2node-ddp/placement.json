@@ -1,0 +1,8 @@
+{
+  "workflow_id": "ef3651bd-cb94-4eb9-ae02-d47b5b95996d",
+  "nodes": [
+    "gb10-node-01",
+    "gb10-node-02"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stageb-04-sm121-all-kernels-2node-ddp/metrics.json"
+}
