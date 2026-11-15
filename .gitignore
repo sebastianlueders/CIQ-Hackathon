@@ -17,3 +17,5 @@ docs/build/*
 !docs/slides.pdf
 !docs/build/build-slides.sh
 !docs/build/slides-plain.tex
+!docs/slides.pptx
+!docs/build/build_slides_pptx.js
