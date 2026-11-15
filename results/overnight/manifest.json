@@ -142,5 +142,23 @@
   "workflow": "18542639-4410-46cc-8304-2ca5675a849a",
   "job": "trial",
   "kind": "trial"
+ },
+ {
+  "id": "s6-pipeline-final-2node-train",
+  "workflow": "d05ef942-1cf3-4e60-8218-2c05295b6291",
+  "job": "train",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s6-pipeline-final-2node-serve",
+  "workflow": "d05ef942-1cf3-4e60-8218-2c05295b6291",
+  "job": "serve-and-verify",
+  "kind": "pipeline"
+ },
+ {
+  "id": "s4-kernel-grouped-gemm",
+  "workflow": "dde2a528-11a4-42da-a92f-3d7ed8d23f69",
+  "job": "run",
+  "kind": "kernel"
  }
 ]
