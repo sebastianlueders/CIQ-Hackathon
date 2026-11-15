@@ -115,6 +115,7 @@ code, pre {
   border-radius: 50%;
 }
 .dot-green { background: var(--green); }
+.dot-amber { background: var(--amber); }
 .dot-cyan { background: var(--cyan); }
 .dot-violet { background: var(--violet); }
 

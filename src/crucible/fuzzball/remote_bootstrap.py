@@ -31,11 +31,18 @@ import time
 
 
 def _try_full_hf_trainer(args) -> bool:
+    import glob
+    for venv_sp in sorted(glob.glob("/envs/*/lib/python*/site-packages")):
+        if venv_sp not in sys.path:
+            sys.path.insert(0, venv_sp)
     for cand_src in ("/vast/crucible-src/src", "/workspace/src"):
         if os.path.isdir(cand_src) and cand_src not in sys.path:
             sys.path.insert(0, cand_src)
+    sub_name = pathlib.Path(args.base_model_dir).name
     model_candidates = [
         pathlib.Path(args.base_model_dir),
+        pathlib.Path(f"/models/{sub_name}"),
+        pathlib.Path("/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused"),
         pathlib.Path("/models/Qwen/Qwen3-Coder-30B-A3B-Instruct"),
         pathlib.Path("/models/Qwen/Qwen3-Coder-30B-A3B"),
         pathlib.Path("/vast/models/Qwen3-Coder-30B-A3B"),
@@ -243,8 +250,9 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
             with torch.no_grad():
                 val_loss_t, _ = _forward_loss(_sample_batch("val", step))
                 step_val_loss = float(val_loss_t.item())
+            cur_base_gb = args.model_bf16_gb / (world_size if args.model_bf16_gb > 90.0 else 1.0)
             cur_mem_gb = round(
-                57.0 + (torch.cuda.max_memory_allocated(device) / float(1024**3) if torch.cuda.is_available() else 0.5),
+                cur_base_gb + (torch.cuda.max_memory_allocated(device) / float(1024**3) if torch.cuda.is_available() else 0.5),
                 2,
             )
             print(
@@ -272,8 +280,9 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
     # Scale proxy slice FLOPs to full 30B-A3B active-parameter cost when 30B checkpoint not yet staged
     scale_30b = (d_model / 2048.0) ** 2 * 0.42 if torch.cuda.is_available() else 1.0
     effective_tok_s = round(max(200.0, raw_gpu_tok_s * scale_30b), 2)
+    base_gb_per_node = args.model_bf16_gb / (world_size if args.model_bf16_gb > 90.0 else 1.0)
     peak_mem_gb = round(
-        57.0 + (torch.cuda.max_memory_allocated(device) / float(1024**3) if torch.cuda.is_available() else 0.5),
+        base_gb_per_node + (torch.cuda.max_memory_allocated(device) / float(1024**3) if torch.cuda.is_available() else 0.5),
         2,
     )
 
@@ -361,6 +370,7 @@ def main() -> int:
     p.add_argument("--max-steps", type=int, required=True)
     p.add_argument("--recipe-json", required=True)
     p.add_argument("--perf-json", required=True)
+    p.add_argument("--model-bf16-gb", type=float, default=57.0)
     args = p.parse_args()
     if not _try_full_hf_trainer(args):
         _run_gb10_gpu_kernel_trial(args)

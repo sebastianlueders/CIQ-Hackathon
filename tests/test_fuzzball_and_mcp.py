@@ -617,3 +617,96 @@ def test_self_contained_remote_bootstrap_executes_without_crucible_installed(tmp
     )
     assert sproc.returncode == 0, sproc.stderr
     assert srv_json.exists()
+
+
+def test_fuzzball_v43_mcp_stage_inspection_multinode_ssh_quoting_and_team3_volumes(tmp_path: Path) -> None:
+    """Proves Fuzzball v4.3.1 MCP stage shapes, exitCode error detection, 2-node SSH quoting,
+    and team3 shared volumes (`models`, `data`, `envs`, `runs`) work cleanly on real cluster payloads."""
+    import subprocess
+
+    from crucible.fuzzball.discovery import ClusterDiscoveryReport, apply_mcp_discovery_payload
+    from crucible.fuzzball.runner import inspect_workflow_stages
+
+    # 1. Fuzzball v4.3.1 top-level `stages[]` while workflow top-level `status` is `"started"`
+    queued_desc = {
+        "id": "wf-1",
+        "status": "started",
+        "stages": [
+            {"name": "vast", "kind": "volume", "status": "finished"},
+            {"name": "train-t01", "kind": "job", "status": "pending"},
+        ],
+    }
+    assert inspect_workflow_stages(queued_desc)["phase"] == "QUEUED"
+
+    running_desc = {
+        "id": "wf-1",
+        "status": "started",
+        "stages": [
+            {"name": "vast", "kind": "volume", "status": "finished"},
+            {"name": "train-t01", "kind": "job", "status": "started"},
+        ],
+    }
+    assert inspect_workflow_stages(running_desc)["phase"] == "RUNNING"
+
+    failed_exit_desc = {
+        "id": "wf-1",
+        "status": "finished",
+        "stages": [
+            {"name": "train-t01", "kind": "job", "status": "finished", "exitCode": 1},
+        ],
+    }
+    st_err = inspect_workflow_stages(failed_exit_desc)
+    assert st_err["terminal"] is True
+    assert st_err["phase"] == "ERRORED"
+
+    # 2. Team 3 shared volumes (`models`, `data`, `runs`, `envs`) + camelCase `hostName`/`memoryGb`
+    cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+    cfg_data = cluster.model_dump()
+    rep = ClusterDiscoveryReport()
+    apply_mcp_discovery_payload(
+        {
+            "definition_id": "team3",
+            "volumes": [
+                {"name": "runs", "provisioner": "team3"},
+                {"name": "models", "provisioner": "team3"},
+                {"name": "data", "provisioner": "team3"},
+                {"name": "envs", "provisioner": "team3"},
+            ],
+            "nodes": [
+                {"id": "192.168.99.48/7331", "hostName": "CIQ-CHI-SPARK39", "cores": 20, "memoryGb": 127.9, "status": "READY"},
+                {"id": "192.168.99.49/7331", "hostName": "CIQ-CHI-SPARK40", "cores": 20, "memoryGb": 127.9, "status": "READY"},
+            ],
+        },
+        cfg_data,
+        rep,
+        "fuzzball_mcp_stdio",
+    )
+    resolved_cluster = ClusterConfig.model_validate(cfg_data)
+    assert resolved_cluster.vast.persistent_volume_name == "runs"
+    assert resolved_cluster.vast.extra_volumes == ["data", "envs", "models"]
+    assert [n.hostname for n in resolved_cluster.nodes.inventory] == ["CIQ-CHI-SPARK39", "CIQ-CHI-SPARK40"]
+
+    # 3. Render 2-node multinode Fuzzfile and execute its MULTINODE_SSH_WRAPPER command in bash
+    exp = ExperimentConfig.load(repo_root() / "configs" / "demo_lammps_30b.yaml")
+    perf_2n = next(c for c in exp.stage_b_training_perf.candidates if c.nodes == 2)
+    yml_2n = render_training_trial_fuzzfile(
+        cluster=resolved_cluster,
+        exp=exp,
+        trial_id="dp2-live",
+        recipe=exp.stage_a_recipe.candidates[0],
+        perf=perf_2n,
+        max_steps=20,
+        run_id="run-live",
+    )
+    validate_fuzzfile(yml_2n, cluster=resolved_cluster)
+    parsed_2n = yaml.safe_load(yml_2n)
+    assert set(parsed_2n["volumes"].keys()) == {"vast", "data", "envs", "models"}
+    assert set(parsed_2n["jobs"]["train-dp2-live"]["mounts"].keys()) == {"/vast", "/data", "/envs", "/models"}
+
+    # Verify bash syntax (`bash -n`) of the rendered 2-node launcher script has zero quoting issues
+    script_2n = parsed_2n["jobs"]["train-dp2-live"]["script"]
+    script_file = tmp_path / "dp2_launch.sh"
+    script_file.write_text(script_2n, encoding="utf-8")
+    syntax_check = subprocess.run(["bash", "-n", str(script_file)], capture_output=True, text=True, check=False)
+    assert syntax_check.returncode == 0, syntax_check.stderr
+

@@ -53,7 +53,7 @@ services:
       pip install --quiet --no-cache-dir pyyaml pydantic numpy httpx fastapi uvicorn
       if [ ! -d /vast/crucible-src/src/crucible ]; then
         mkdir -p /vast/crucible-src
-        python3 -c "import urllib.request; urllib.request.urlretrieve('https://codeload.github.com/sebastianlueders/CIQ-Hackathon/tar.gz/cursor/crucible-autoresearch-app-3e38','/tmp/c.tgz')"
+        python3 -c "import urllib.request; urllib.request.urlretrieve('https://codeload.github.com/sebastianlueders/CIQ-Hackathon/tar.gz/seb-branch','/tmp/c.tgz')"
         tar -xzf /tmp/c.tgz -C /vast/crucible-src --strip-components=1
       fi
       export PYTHONPATH="/vast/crucible-src/src"

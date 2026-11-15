@@ -16,7 +16,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-export PATH="${REPO_ROOT}:${PATH}"
+export PATH="${HOME}/bin:${REPO_ROOT}:${PATH}"
 
 MODEL_ID=""
 PROFILE="demo_30b"
@@ -91,9 +91,17 @@ fi
 
 CRUCIBLE="${VENV_BIN}/crucible"
 
-# 2. Auto-select execution backend
+# 2. Discover active Fuzzball team (`team3`) and check whether venue/cluster Wi-Fi is reachable
+DISCOVER_JSON="$("$CRUCIBLE" discover --json)"
+if [[ "$TEAM_ID" == "auto" ]]; then
+  TEAM_ID="$("${VENV_BIN}/python" -c 'import json,sys; print(json.loads(sys.stdin.read())["cluster_config"]["definition_id"])' <<<"$DISCOVER_JSON")"
+fi
+CLUSTER_REACHABLE="$("${VENV_BIN}/python" -c 'import json,sys; print("1" if json.loads(sys.stdin.read())["discovery_report"].get("cluster_reachable") else "0")' <<<"$DISCOVER_JSON")"
+export CRUCIBLE_DEFINITION_ID="$TEAM_ID"
+
+# 3. Auto-select execution backend based on live cluster reachability
 if [[ "$BACKEND" == "auto" ]]; then
-  if command -v fuzzball >/dev/null 2>&1; then
+  if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; then
     if fuzzball mcp serve --help >/dev/null 2>&1; then
       BACKEND="fuzzball_mcp"
     else
@@ -104,14 +112,7 @@ if [[ "$BACKEND" == "auto" ]]; then
   fi
 fi
 
-# 3. Discover active Fuzzball team (`team3`) and ensure VAST volume exists
-if [[ "$TEAM_ID" == "auto" ]]; then
-  DISCOVER_JSON="$("$CRUCIBLE" discover --json)"
-  TEAM_ID="$("${VENV_BIN}/python" -c 'import json,sys; print(json.loads(sys.stdin.read())["cluster_config"]["definition_id"])' <<<"$DISCOVER_JSON")"
-fi
-export CRUCIBLE_DEFINITION_ID="$TEAM_ID"
-
-if command -v fuzzball >/dev/null 2>&1; then
+if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; then
   VOL_OUT="$(fuzzball volume list "$TEAM_ID" 2>/dev/null || true)"
   if echo "$VOL_OUT" | grep -qw "runs"; then
     export CRUCIBLE_VAST_VOLUME="runs"
@@ -122,9 +123,11 @@ if command -v fuzzball >/dev/null 2>&1; then
     fuzzball volume create "$TEAM_ID" runs >/dev/null 2>&1 || fuzzball volume provisioner scan "$TEAM_ID" >/dev/null 2>&1 || true
     export CRUCIBLE_VAST_VOLUME="runs"
   fi
+  echo "[crucible] LIVE CLUSTER CONNECTED -> team='${TEAM_ID}', backend='${BACKEND}', volume='${CRUCIBLE_VAST_VOLUME}'"
+else
+  export CRUCIBLE_VAST_VOLUME="runs"
+  echo "[crucible] Cluster Wi-Fi not currently connected -> starting Client Studio in GB10 Empirical Twin mode (team='${TEAM_ID}', auto-switches to live Fuzzball MCP when on cluster Wi-Fi)."
 fi
-
-echo "[crucible] Active provisioner/team: ${TEAM_ID} (volume: ${CRUCIBLE_VAST_VOLUME:-runs})"
 "$CRUCIBLE" discover
 
 # 4. Start Crucible Studio on http://127.0.0.1:8000

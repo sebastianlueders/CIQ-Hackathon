@@ -97,6 +97,7 @@ class VastStorageConfig(BaseModel):
     runs_dir: str = "/vast/runs"
     object_cache_scope: Literal["user", "group"] = "user"
     egress_metrics_to_object_cache: bool = False
+    extra_volumes: list[str] = Field(default_factory=list)
 
 
 class ContainerImagesConfig(BaseModel):

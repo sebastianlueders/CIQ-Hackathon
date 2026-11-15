@@ -24,6 +24,7 @@ from crucible.config import (
 from crucible.eval.evaluator import evaluate_quality_floor
 from crucible.fuzzball.discovery import (
     _extract_volume_provisioner,
+    check_cluster_tcp_reachable,
     ensure_provisioner_volume,
     extract_team_from_text,
     resolve_fuzzball_executable,
@@ -103,35 +104,54 @@ def inspect_workflow_stages(desc: Any) -> dict[str, Any]:
 
     if isinstance(desc, dict):
         status_block = desc.get("status")
-        stages = status_block.get("stages") if isinstance(status_block, dict) else None
+        top_stages = desc.get("stages")
+        stages = (
+            top_stages
+            if isinstance(top_stages, list)
+            else (status_block.get("stages") if isinstance(status_block, dict) else None)
+        )
+        top_status_str = (
+            status_block.get("status", "")
+            if isinstance(status_block, dict)
+            else (status_block if isinstance(status_block, str) else str(desc.get("state") or desc.get("workflowStatus") or ""))
+        )
         if isinstance(stages, list) and stages:
-            wf_stage_status = ""
+            wf_stage_status = str(top_status_str).upper()
             job_stage_status = ""
             job_name = ""
             errors: list[str] = []
+            nonzero_exit = False
             for st in stages:
                 if not isinstance(st, dict):
                     continue
-                kind = str(st.get("kind", "")).upper()
-                st_val = str(st.get("status", "")).upper()
+                kind = str(st.get("kind") or st.get("type") or "").upper()
+                st_val = str(st.get("status") or st.get("state") or "").upper()
                 if st.get("error"):
                     errors.append(f"{st.get('name') or kind}: {st['error']}")
+                exit_code = st.get("exitCode")
+                if isinstance(exit_code, int) and exit_code != 0:
+                    nonzero_exit = True
+                    errors.append(f"{st.get('name') or kind} exited with code {exit_code}")
+                exit_codes = st.get("exitCodes")
+                if isinstance(exit_codes, list) and any(isinstance(c, int) and c != 0 for c in exit_codes):
+                    nonzero_exit = True
+                    errors.append(f"{st.get('name') or kind} exited with codes {exit_codes}")
                 if "WORKFLOW" in kind:
                     wf_stage_status = st_val
-                elif "JOB" in kind or "SERVICE" in kind:
+                elif "JOB" in kind or "SERVICE" in kind or (not kind and str(st.get("name", "")).startswith(("train-", "bench-"))):
                     job_stage_status = st_val
                     job_name = str(st.get("name") or job_name)
 
             err_joined = "; ".join(errors)
-            if "FAILED" in wf_stage_status or "ERROR" in wf_stage_status or "FAILED" in job_stage_status:
+            if nonzero_exit or "FAIL" in wf_stage_status or "ERROR" in wf_stage_status or "FAIL" in job_stage_status or "ERROR" in job_stage_status:
                 return {"has_status": True, "terminal": True, "phase": "ERRORED", "job_name": job_name, "error": err_joined}
             if "CANCEL" in wf_stage_status or "CANCEL" in job_stage_status:
                 return {"has_status": True, "terminal": True, "phase": "CANCELED", "job_name": job_name, "error": err_joined}
-            if "FINISHED" in wf_stage_status or ("FINISHED" in job_stage_status and job_stage_status):
+            if "FINISH" in wf_stage_status or "SUCCEED" in wf_stage_status or ("FINISH" in job_stage_status and job_stage_status):
                 return {"has_status": True, "terminal": True, "phase": "FINISHED", "job_name": job_name, "error": ""}
-            if "STARTED" in job_stage_status or "RUNNING" in job_stage_status:
+            if "START" in job_stage_status or "RUN" in job_stage_status:
                 return {"has_status": True, "terminal": False, "phase": "RUNNING", "job_name": job_name, "error": ""}
-            # Workflow started (volume/image done), but STAGE_KIND_JOB is still waiting for a free GPU!
+            # Workflow started (volume/image done), but job stage is still pending/queued for a free GPU!
             return {"has_status": True, "terminal": False, "phase": "QUEUED", "job_name": job_name, "error": ""}
 
         # Flat status dict fallback (`{"status": "finished"}` or `{"state": "..."}`)
@@ -572,6 +592,14 @@ class FuzzballMCPBackend:
         fz_path.write_text(yaml_text, encoding="utf-8")
         validate_fuzzfile(yaml_text, cluster=self.cluster)
 
+        if self.mcp_command is None and not os.getenv("CRUCIBLE_FUZZBALL_MCP_CMD"):
+            reachable, ep = check_cluster_tcp_reachable()
+            if not reachable:
+                raise FuzzballMCPError(
+                    f"Cannot reach CIQ Fuzzball cluster server ({ep}) from your current Wi-Fi. "
+                    "Select 'Fuzzball GB10 Empirical Twin' while off-network, or connect to the cluster Wi-Fi."
+                )
+
         with FuzzballMCPStdioClient(
             command=self.mcp_command,
             allow_write=True,
@@ -787,8 +815,11 @@ class FuzzballMCPBackend:
                         mcp.workflow_describe(wf_id), self.cluster, requested_nodes, seq_idx
                     )
             if not self.cluster.vast.egress_metrics_to_object_cache and "workflow_log" in mcp.advertised_tools:
-                log_txt = mcp.workflow_log(wf_id, job_name)
+                log_txt = mcp.workflow_log(wf_id, job_name, lines=500)
                 from_log = _parse_summary_from_logs(log_txt)
+                if from_log is None:
+                    log_all = mcp.workflow_log(wf_id, "", lines=-1)
+                    from_log = _parse_summary_from_logs(log_all)
                 if from_log is not None:
                     return from_log, wf_id, nodes
 
@@ -806,8 +837,11 @@ class FuzzballMCPBackend:
                     raise FuzzballMCPError(f"Unexpected object_get payload: {obj_payload!r}")
             except Exception as obj_exc:
                 if "workflow_log" in mcp.advertised_tools:
-                    log_txt = mcp.workflow_log(wf_id, job_name)
+                    log_txt = mcp.workflow_log(wf_id, job_name, lines=500)
                     from_log = _parse_summary_from_logs(log_txt)
+                    if from_log is None:
+                        log_all = mcp.workflow_log(wf_id, "", lines=-1)
+                        from_log = _parse_summary_from_logs(log_all)
                     if from_log is not None:
                         return from_log, wf_id, nodes
                 raise FuzzballMCPError(

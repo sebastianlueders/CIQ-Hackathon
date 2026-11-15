@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -37,10 +38,33 @@ def resolve_fuzzball_executable(fuzzball_bin: str = "fuzzball") -> str | None:
     found = shutil.which(fuzzball_bin)
     if found:
         return found
-    local_bin = Path("./fuzzball")
-    if local_bin.is_file():
-        return str(local_bin.resolve())
+    for candidate in (
+        Path("./fuzzball"),
+        Path.home() / "bin" / fuzzball_bin,
+        Path("/opt/homebrew/bin") / fuzzball_bin,
+        Path("/usr/local/bin") / fuzzball_bin,
+    ):
+        if candidate.is_file():
+            return str(candidate.resolve())
     return None
+
+
+def check_cluster_tcp_reachable(endpoint: str | None = None, timeout_s: float = 0.8) -> tuple[bool, str]:
+    """Fast non-blocking TCP pre-check so offline laptops never stall 30s+ on Fuzzball gRPC SYN retries."""
+    raw_ep = (endpoint or os.getenv("CRUCIBLE_CLUSTER_ENDPOINT") or "api.fb-hack.civilfritz.net:443").strip()
+    if ":" in raw_ep:
+        host, port_s = raw_ep.rsplit(":", 1)
+        try:
+            port = int(port_s)
+        except ValueError:
+            port = 443
+    else:
+        host, port = raw_ep, 443
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True, f"{host}:{port}"
+    except OSError:
+        return False, f"{host}:{port}"
 
 
 def _extract_volume_provisioner(raw_vol: dict[str, Any]) -> str | None:
@@ -202,6 +226,8 @@ def _clean_image(val: Any) -> str | None:
 @dataclass
 class ClusterDiscoveryReport:
     fuzzball_cli_available: bool = False
+    cluster_reachable: bool = False
+    cluster_endpoint: str = "api.fb-hack.civilfritz.net:443"
     mcp_source_used: str | None = None
     fetch_workflow_inspected: str | None = None
     active_cluster_context: str | None = None
@@ -321,20 +347,18 @@ def _run_fuzzball_read_cmd(fuzzball_bin: str, subargs: list[str], timeout_s: flo
     return None
 
 
-def probe_fuzzball_cli(
+def probe_fuzzball_local_context(
     cfg_data: dict[str, Any],
     report: ClusterDiscoveryReport,
     fuzzball_bin: str = "fuzzball",
-) -> None:
+) -> str | None:
+    """Read `fuzzball context list` locally (0 network calls, ~30ms) to detect team & active context."""
     fb_exe = resolve_fuzzball_executable(fuzzball_bin)
     if fb_exe is None:
         report.fuzzball_cli_available = False
-        report.notes.append("fuzzball CLI binary not found on PATH; using config/MCP/00-fetch values.")
-        return
-
+        return None
     report.fuzzball_cli_available = True
-
-    ctx_out = _run_fuzzball_read_cmd(fb_exe, ["context", "list"])
+    ctx_out = _run_fuzzball_read_cmd(fb_exe, ["context", "list"], timeout_s=1.5)
     if ctx_out:
         ctx_team = extract_team_from_text(ctx_out)
         if ctx_team:
@@ -344,11 +368,29 @@ def probe_fuzzball_cli(
             report.applied_overrides["vast.provisioner"] = ctx_team
         for row in _parse_pipe_table(ctx_out):
             name = _clean_ident(row.get("name") or row.get("context") or row.get("cluster"))
-            is_current = "*" in "".join(row.values()) or row.get("current", "").lower() in {"true", "yes", "*"}
+            is_current = "*" in "".join(row.values()) or row.get("active", "").strip() == "*" or row.get("current", "").lower() in {"true", "yes", "*"}
             if name and (is_current or report.active_cluster_context is None):
                 report.active_cluster_context = name
                 cfg_data["cluster_name"] = name
                 report.applied_overrides["cluster_name"] = name
+    return fb_exe
+
+
+def probe_fuzzball_cli(
+    cfg_data: dict[str, Any],
+    report: ClusterDiscoveryReport,
+    fuzzball_bin: str = "fuzzball",
+) -> None:
+    fb_exe = probe_fuzzball_local_context(cfg_data, report, fuzzball_bin=fuzzball_bin)
+    if fb_exe is None:
+        report.notes.append("fuzzball CLI binary not found on PATH; using config/MCP/00-fetch values.")
+        return
+    if not report.cluster_reachable:
+        report.notes.append(
+            f"Cluster endpoint {report.cluster_endpoint} is not reachable on current Wi-Fi; "
+            f"using local Fuzzball context '{report.active_cluster_context or 'default'}' ({cfg_data.get('definition_id')})."
+        )
+        return
 
     prov_out = _run_fuzzball_read_cmd(fb_exe, ["volume", "provisioner", "list"])
     if prov_out:
@@ -475,6 +517,16 @@ def apply_mcp_discovery_payload(
                 if chosen["provisioner"]:
                     cfg_data["vast"]["provisioner"] = chosen["provisioner"]
                     report.applied_overrides["vast.provisioner"] = chosen["provisioner"]
+                extra_shared = sorted(
+                    {
+                        v["name"]
+                        for v in prov_matched
+                        if v["name"] in {"models", "data", "envs"} and v["name"] != chosen["name"]
+                    }
+                )
+                if extra_shared:
+                    cfg_data["vast"]["extra_volumes"] = extra_shared
+                    report.applied_overrides["vast.extra_volumes"] = extra_shared
                 if chosen["mount"] and str(chosen["mount"]).startswith("/"):
                     m = str(chosen["mount"])
                     cfg_data["vast"]["mount_path"] = m
@@ -523,9 +575,13 @@ def apply_mcp_discovery_payload(
                         detected_def_id = cand_def
 
                 raw_id = _clean_ident(node_meta.get("id") or n.get("node_id") or n.get("id") or n.get("name"))
-                hostname = _clean_ident(node_meta.get("hostname") or n.get("hostname") or n.get("name")) or (
-                    raw_id or f"node-{idx}"
-                )
+                hostname = _clean_ident(
+                    node_meta.get("hostname")
+                    or node_meta.get("hostName")
+                    or n.get("hostname")
+                    or n.get("hostName")
+                    or n.get("name")
+                ) or (raw_id or f"node-{idx}")
                 node_id = raw_id or hostname
                 address = node_id.split("/")[0] if "/" in node_id else str(n.get("address", hostname))[:64]
 
@@ -544,7 +600,9 @@ def apply_mcp_discovery_payload(
                 if isinstance(mem_block.get("bytes"), (int, float)) and mem_block["bytes"] > 0:
                     phys_mem_gib = round(float(mem_block["bytes"]) / float(1024**3), 1)
                 else:
-                    phys_mem_gib = float(n.get("memory_gib") or n.get("memory_gb") or 127.9)
+                    phys_mem_gib = float(
+                        n.get("memory_gib") or n.get("memoryGb") or n.get("memory_gb") or 127.9
+                    )
 
                 gpu_prod = str(n.get("gpu_product") or n.get("gpu_model") or "NVIDIA-GB10")[:64]
                 inv_entry = {
@@ -686,7 +744,10 @@ def probe_fuzzball_mcp_stdio(
                     payload["volumes"] = vols
 
             if "node_list" in mcp.advertised_tools:
-                nodes_raw = mcp.node_list(fields=["id", "resource"])
+                try:
+                    nodes_raw = mcp.node_list(fields=["id", "hostName", "cores", "memoryGb", "status", "resource"])
+                except Exception:
+                    nodes_raw = mcp.node_list(fields=["id", "resource"])
                 raw_list = (
                     nodes_raw.get("nodes", [])
                     if isinstance(nodes_raw, dict)
@@ -711,7 +772,7 @@ def probe_fuzzball_mcp_stdio(
                     payload["nodes"] = valid_raw
 
             if "workflow_list" in mcp.advertised_tools:
-                wfs_raw = mcp.workflow_list()
+                wfs_raw = mcp.workflow_list(max_results=10)
                 wfs = (
                     wfs_raw.get("workflows", [])
                     if isinstance(wfs_raw, dict)
@@ -750,6 +811,7 @@ def discover_cluster_config(
     if resolved_snap is not None and resolved_snap.exists():
         raw_snap = json.loads(resolved_snap.read_text(encoding="utf-8"))
         if isinstance(raw_snap, dict):
+            report.cluster_reachable = True
             apply_mcp_discovery_payload(raw_snap, cfg_data, report, f"mcp_snapshot:{resolved_snap.name}")
             mcp_succeeded = True
     else:
@@ -757,15 +819,30 @@ def discover_cluster_config(
         if mcp_url:
             http_payload = _probe_mcp_http_endpoint(mcp_url)
             if http_payload:
+                report.cluster_reachable = True
                 apply_mcp_discovery_payload(http_payload, cfg_data, report, f"mcp_http:{mcp_url}")
                 mcp_succeeded = True
-        elif mcp_command is not None or FuzzballMCPStdioClient.is_binary_available(fuzzball_bin):
-            cmd = mcp_command or (
-                shlex.split(os.environ["CRUCIBLE_FUZZBALL_MCP_CMD"])
-                if os.getenv("CRUCIBLE_FUZZBALL_MCP_CMD")
-                else [fuzzball_bin, "mcp", "serve"]
-            )
-            mcp_succeeded = probe_fuzzball_mcp_stdio(cfg_data, report, mcp_command=cmd)
+        elif mcp_command is not None:
+            # Explicit custom/mock MCP command passed -> query stdio server directly
+            mcp_succeeded = probe_fuzzball_mcp_stdio(cfg_data, report, mcp_command=mcp_command)
+            if mcp_succeeded:
+                report.cluster_reachable = True
+        elif FuzzballMCPStdioClient.is_binary_available(fuzzball_bin):
+            fb_resolved = probe_fuzzball_local_context(cfg_data, report, fuzzball_bin=fuzzball_bin)
+            reachable, checked_ep = check_cluster_tcp_reachable()
+            report.cluster_reachable = reachable
+            report.cluster_endpoint = checked_ep
+            if reachable:
+                cmd = (
+                    shlex.split(os.environ["CRUCIBLE_FUZZBALL_MCP_CMD"])
+                    if os.getenv("CRUCIBLE_FUZZBALL_MCP_CMD")
+                    else [fb_resolved or fuzzball_bin, "mcp", "serve"]
+                )
+                mcp_succeeded = probe_fuzzball_mcp_stdio(cfg_data, report, mcp_command=cmd)
+            else:
+                report.notes.append(
+                    f"Skipped blocking MCP gRPC calls because {checked_ep} is unreachable from current Wi-Fi."
+                )
 
     # 3. Probe live `fuzzball` CLI tables when MCP did not already populate live state
     if not mcp_succeeded:
@@ -774,7 +851,7 @@ def discover_cluster_config(
         fb_exe = resolve_fuzzball_executable(fuzzball_bin)
         report.fuzzball_cli_available = fb_exe is not None
         # When MCP `volume_list` omits per-volume provisioner tags, confirm/ensure the volume on `active_prov` via CLI
-        if fb_exe is not None and mcp_command is None and resolved_snap is None:
+        if fb_exe is not None and mcp_command is None and resolved_snap is None and report.cluster_reachable:
             active_prov = str(cfg_data["vast"].get("provisioner") or cfg_data.get("definition_id") or "")
             if active_prov and not cfg_data["vast"].get("ephemeral"):
                 ensured_vol = ensure_provisioner_volume(
@@ -784,6 +861,13 @@ def discover_cluster_config(
                 )
                 cfg_data["vast"]["persistent_volume_name"] = ensured_vol
                 report.applied_overrides["vast.persistent_volume_name"] = ensured_vol
+                all_prov_vols = list_provisioner_volumes_cli(active_prov, fuzzball_bin=fb_exe)
+                extra_shared = sorted(
+                    v for v in ("models", "data", "envs") if v in all_prov_vols and v != ensured_vol
+                )
+                if extra_shared:
+                    cfg_data["vast"]["extra_volumes"] = extra_shared
+                    report.applied_overrides["vast.extra_volumes"] = extra_shared
 
     # 4. Re-apply explicit CRUCIBLE_* environment variable overrides on top
     final_cfg = ClusterConfig.model_validate(cfg_data).with_env_overrides()

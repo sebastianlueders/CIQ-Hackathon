@@ -13,6 +13,7 @@ Aligned with the live CIQ Hackathon Grace Blackwell GB10 cluster (`CIQ-CHI-SPARK
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -76,18 +77,41 @@ def _volume_section(
                 }
                 for rel_src, dst_uri in egress_entries
             ]
-        return {cluster.vast.volume_key: vol_spec}
-    return {
+        vols_out: dict[str, Any] = {cluster.vast.volume_key: vol_spec}
+        if not cluster.vast.ephemeral:
+            use_prov = cluster.vast.provisioner or cluster.definition_id or "team3"
+            for extra_v in cluster.vast.extra_volumes:
+                if extra_v not in vols_out:
+                    vols_out[extra_v] = {"name": extra_v, "use": use_prov}
+        return vols_out
+    base_prov = cluster.vast.provisioner or "team20"
+    vols_v1: dict[str, Any] = {
         cluster.vast.volume_key: {
-            "reference": f"volume://user/{cluster.vast.provisioner or 'team20'}/{cluster.vast.persistent_volume_name}"
+            "reference": f"volume://user/{base_prov}/{cluster.vast.persistent_volume_name}"
         }
     }
+    if not cluster.vast.ephemeral:
+        for extra_v in cluster.vast.extra_volumes:
+            if extra_v not in vols_v1:
+                vols_v1[extra_v] = {"reference": f"volume://user/{base_prov}/{extra_v}"}
+    return vols_v1
 
 
 def _mounts_section(cluster: ClusterConfig) -> dict[str, Any]:
     if cluster.fuzzfile_version == "v4":
-        return {cluster.vast.mount_path: {"volume": cluster.vast.volume_key}}
-    return {cluster.vast.volume_key: {"location": cluster.vast.mount_path}}
+        mounts_v4: dict[str, Any] = {cluster.vast.mount_path: {"volume": cluster.vast.volume_key}}
+        if not cluster.vast.ephemeral:
+            for extra_v in cluster.vast.extra_volumes:
+                mpath = f"/{extra_v.lstrip('/')}"
+                if mpath not in mounts_v4:
+                    mounts_v4[mpath] = {"volume": extra_v}
+        return mounts_v4
+    mounts_v1: dict[str, Any] = {cluster.vast.volume_key: {"location": cluster.vast.mount_path}}
+    if not cluster.vast.ephemeral:
+        for extra_v in cluster.vast.extra_volumes:
+            if extra_v not in mounts_v1:
+                mounts_v1[extra_v] = {"location": f"/{extra_v.lstrip('/')}"}
+    return mounts_v1
 
 
 def _dependency_field(
@@ -154,6 +178,13 @@ def render_training_trial_fuzzfile(
 
     recipe_str = json.dumps(recipe.model_dump(), sort_keys=True)
     perf_str = json.dumps(perf.model_dump(), sort_keys=True)
+    recipe_b64 = base64.b64encode(recipe_str.encode("utf-8")).decode("ascii")
+    perf_b64 = base64.b64encode(perf_str.encode("utf-8")).decode("ascii")
+    bf16_arg = (
+        f" --model-bf16-gb {exp.model.bf16_footprint_gb}"
+        if cluster.fuzzfile_version == "v4"
+        else ""
+    )
 
     runner_entry = (
         "/opt/crucible_remote_train.py"
@@ -166,6 +197,9 @@ def render_training_trial_fuzzfile(
                 "#!/bin/bash",
                 "set -euo pipefail",
                 "mkdir -p /tmp/home",
+                f"echo '{recipe_b64}' | base64 -d > /tmp/crucible_recipe.json",
+                f"echo '{perf_b64}' | base64 -d > /tmp/crucible_perf.json",
+                "export NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker TORCH_NCCL_ASYNC_ERROR_HANDLING=1",
                 'SELF=$(hostname); FQDN=$(hostname -f 2>/dev/null || echo "$SELF")',
                 'HOSTS=$(echo "${MULTINODE_HOSTLIST_NOSLOTS:-$SELF}" | tr \',\' \'\\n\' | sort)',
                 'MASTER=${MN_MASTER:-$(echo "$HOSTS" | head -1)}',
@@ -178,7 +212,7 @@ def render_training_trial_fuzzfile(
                 "  for h in $HOSTS; do",
                 '    [ "$h" = "$SELF" ] || [ "$h" = "$FQDN" ] && continue',
                 "    i=$((i + 1))",
-                f'    "$MULTINODE_SSH_WRAPPER" "$h" "MN_NODE_RANK=$i MN_MASTER=$HEAD_IP HOME=/tmp/home python3 -m torch.distributed.run --nnodes {perf.nodes} --nproc-per-node {cluster.nodes.gpus_per_node} --node-rank $i --master-addr $HEAD_IP --master-port 29500 {runner_entry} --trial-id {trial_id} --base-model-dir {base_model_path} --processed-data-dir {processed_path} --output-dir {trial_out_path} --max-steps {max_steps} --recipe-json \'{recipe_str}\' --perf-json \'{perf_str}\'" > /tmp/rank$i.log 2>&1 &',
+                f'    "$MULTINODE_SSH_WRAPPER" "$h" "mkdir -p /tmp/home && echo {recipe_b64} | base64 -d > /tmp/crucible_recipe.json && echo {perf_b64} | base64 -d > /tmp/crucible_perf.json && MN_NODE_RANK=$i MN_MASTER=$HEAD_IP NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker TORCH_NCCL_ASYNC_ERROR_HANDLING=1 HOME=/tmp/home python3 -m torch.distributed.run --nnodes {perf.nodes} --nproc-per-node {cluster.nodes.gpus_per_node} --node-rank $i --master-addr $HEAD_IP --master-port 29500 {runner_entry} --trial-id {trial_id} --base-model-dir {base_model_path} --processed-data-dir {processed_path} --output-dir {trial_out_path} --max-steps {max_steps}{bf16_arg} --recipe-json \\"\\$(cat /tmp/crucible_recipe.json)\\" --perf-json \\"\\$(cat /tmp/crucible_perf.json)\\"" > /tmp/rank$i.log 2>&1 &',
                 "  done",
                 '  NODE_RANK=0; MASTER=$HEAD_IP',
                 "fi",
@@ -194,9 +228,9 @@ def render_training_trial_fuzzfile(
                 f"  --base-model-dir {base_model_path} \\",
                 f"  --processed-data-dir {processed_path} \\",
                 f"  --output-dir {trial_out_path} \\",
-                f"  --max-steps {max_steps} \\",
-                f"  --recipe-json '{recipe_str}' \\",
-                f"  --perf-json '{perf_str}'",
+                f"  --max-steps {max_steps}{bf16_arg} \\",
+                '  --recipe-json "$(cat /tmp/crucible_recipe.json)" \\',
+                '  --perf-json "$(cat /tmp/crucible_perf.json)"',
             ]
         )
     else:
@@ -210,7 +244,7 @@ def render_training_trial_fuzzfile(
                 f"  --base-model-dir {base_model_path} \\",
                 f"  --processed-data-dir {processed_path} \\",
                 f"  --output-dir {trial_out_path} \\",
-                f"  --max-steps {max_steps} \\",
+                f"  --max-steps {max_steps}{bf16_arg} \\",
                 f"  --recipe-json '{recipe_str}' \\",
                 f"  --perf-json '{perf_str}'",
             ]
@@ -370,6 +404,8 @@ def render_final_turnkey_fuzzfile(
 
     recipe_json = json.dumps(winning_recipe.model_dump(), sort_keys=True)
     perf_json = json.dumps(winning_train_perf.model_dump(), sort_keys=True)
+    win_recipe_b64 = base64.b64encode(recipe_json.encode("utf-8")).decode("ascii")
+    win_perf_b64 = base64.b64encode(perf_json.encode("utf-8")).decode("ascii")
     crucible_src_dir = f"{cluster.vast.mount_path.rstrip('/')}/crucible-src"
 
     ingest_job: dict[str, Any] = {
@@ -407,6 +443,9 @@ def render_final_turnkey_fuzzfile(
                 "#!/bin/bash",
                 "set -euo pipefail",
                 "mkdir -p /tmp/home",
+                f"echo '{win_recipe_b64}' | base64 -d > /tmp/crucible_recipe.json",
+                f"echo '{win_perf_b64}' | base64 -d > /tmp/crucible_perf.json",
+                "export NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker TORCH_NCCL_ASYNC_ERROR_HANDLING=1",
                 'SELF=$(hostname); FQDN=$(hostname -f 2>/dev/null || echo "$SELF")',
                 'HOSTS=$(echo "${MULTINODE_HOSTLIST_NOSLOTS:-$SELF}" | tr \',\' \'\\n\' | sort)',
                 'MASTER=${MN_MASTER:-$(echo "$HOSTS" | head -1)}',
@@ -418,7 +457,7 @@ def render_final_turnkey_fuzzfile(
                 "  for h in $HOSTS; do",
                 '    [ "$h" = "$SELF" ] || [ "$h" = "$FQDN" ] && continue',
                 "    i=$((i + 1))",
-                f'    "$MULTINODE_SSH_WRAPPER" "$h" "MN_NODE_RANK=$i MN_MASTER=$HEAD_IP PYTHONPATH={crucible_src_dir}/src HOME=/tmp/home python3 -m torch.distributed.run --nnodes {winning_train_perf.nodes} --nproc-per-node {cluster.nodes.gpus_per_node} --node-rank $i --master-addr $HEAD_IP --master-port 29500 -m crucible.trainer.lora_trainer --trial-id production-lora --base-model-dir {base_model_path} --processed-data-dir {processed_path} --output-dir {prod_out_dir} --max-steps {production_steps} --recipe-json \'{recipe_json}\' --perf-json \'{perf_json}\'" > /tmp/rank$i.log 2>&1 &',
+                f'    "$MULTINODE_SSH_WRAPPER" "$h" "mkdir -p /tmp/home && echo {win_recipe_b64} | base64 -d > /tmp/crucible_recipe.json && echo {win_perf_b64} | base64 -d > /tmp/crucible_perf.json && MN_NODE_RANK=$i MN_MASTER=$HEAD_IP NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker TORCH_NCCL_ASYNC_ERROR_HANDLING=1 PYTHONPATH={crucible_src_dir}/src HOME=/tmp/home python3 -m torch.distributed.run --nnodes {winning_train_perf.nodes} --nproc-per-node {cluster.nodes.gpus_per_node} --node-rank $i --master-addr $HEAD_IP --master-port 29500 -m crucible.trainer.lora_trainer --trial-id production-lora --base-model-dir {base_model_path} --processed-data-dir {processed_path} --output-dir {prod_out_dir} --max-steps {production_steps} --recipe-json \\"\\$(cat /tmp/crucible_recipe.json)\\" --perf-json \\"\\$(cat /tmp/crucible_perf.json)\\"" > /tmp/rank$i.log 2>&1 &',
                 "  done",
                 '  NODE_RANK=0; MASTER=$HEAD_IP',
                 "fi",
@@ -434,8 +473,8 @@ def render_final_turnkey_fuzzfile(
                 f"  --processed-data-dir {processed_path} \\",
                 f"  --output-dir {prod_out_dir} \\",
                 f"  --max-steps {production_steps} \\",
-                f"  --recipe-json '{recipe_json}' \\",
-                f"  --perf-json '{perf_json}'",
+                '  --recipe-json "$(cat /tmp/crucible_recipe.json)" \\',
+                '  --perf-json "$(cat /tmp/crucible_perf.json)"',
             ]
         )
     else:

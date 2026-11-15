@@ -74,6 +74,21 @@ class FuzzballMCPError(RuntimeError):
     """Raised on MCP transport, protocol, or tool-execution errors."""
 
 
+def _find_fuzzball_binary(fuzzball_bin: str = "fuzzball") -> str | None:
+    found = shutil.which(fuzzball_bin)
+    if found:
+        return found
+    for candidate in (
+        Path("./fuzzball"),
+        Path.home() / "bin" / fuzzball_bin,
+        Path("/opt/homebrew/bin") / fuzzball_bin,
+        Path("/usr/local/bin") / fuzzball_bin,
+    ):
+        if candidate.is_file():
+            return str(candidate.resolve())
+    return None
+
+
 class FuzzballMCPStdioClient:
     """Schema-aware JSON-RPC 2.0 stdio client speaking to `fuzzball mcp serve`."""
 
@@ -91,9 +106,7 @@ class FuzzballMCPStdioClient:
             if env_cmd:
                 self.command = shlex.split(env_cmd)
             else:
-                fb_exe = "fuzzball"
-                if shutil.which(fb_exe) is None and Path("./fuzzball").is_file():
-                    fb_exe = str(Path("./fuzzball").resolve())
+                fb_exe = _find_fuzzball_binary("fuzzball") or "fuzzball"
                 self.command = [fb_exe, "mcp", "serve"]
                 if allow_write:
                     self.command.append("--allow-write")
@@ -112,8 +125,12 @@ class FuzzballMCPStdioClient:
         env_cmd = os.getenv("CRUCIBLE_FUZZBALL_MCP_CMD", "").strip()
         if env_cmd:
             argv = shlex.split(env_cmd)
-            return bool(argv) and (shutil.which(argv[0]) is not None or Path(argv[0]).exists())
-        return shutil.which(fuzzball_bin) is not None or Path("./fuzzball").is_file()
+            return bool(argv) and (
+                shutil.which(argv[0]) is not None
+                or Path(argv[0]).exists()
+                or _find_fuzzball_binary(argv[0]) is not None
+            )
+        return _find_fuzzball_binary(fuzzball_bin) is not None
 
     def __enter__(self) -> "FuzzballMCPStdioClient":
         self.connect()
@@ -316,6 +333,9 @@ class FuzzballMCPStdioClient:
             return value
         pspec = props[prop_name]
         ptype = pspec.get("type")
+        is_array_type = ptype == "array" or (isinstance(ptype, list) and "array" in ptype)
+        if is_array_type and isinstance(value, str):
+            return [value]
         if is_duration_seconds and ptype == "string" and isinstance(value, (int, float)):
             return f"{int(value)}s"
         if ptype == "integer" and isinstance(value, (int, float, str)):
@@ -441,16 +461,20 @@ class FuzzballMCPStdioClient:
             args[nkey] = name
         return self.call_tool("volume_create", args)
 
-    def workflow_list(self, status: str | None = None) -> Any:
+    def workflow_list(self, status: str | list[str] | None = None, max_results: int | None = None) -> Any:
         args: dict[str, Any] = {}
         if status:
             skey = self.resolve_argument_key("workflow_list", ("status",))
             if skey is not None:
-                args[skey] = status
+                args[skey] = self._coerce_for_prop("workflow_list", skey, status)
             else:
                 flt_key = self.resolve_argument_key("workflow_list", ("filter",))
-                if flt_key is not None:
+                if flt_key is not None and isinstance(status, str):
                     args[flt_key] = f'status = "{status}"'
+        if max_results is not None:
+            mkey = self.resolve_argument_key("workflow_list", ("max_results", "maxResults", "limit"))
+            if mkey is not None:
+                args[mkey] = self._coerce_for_prop("workflow_list", mkey, max_results)
         return self.call_tool("workflow_list", args)
 
     def workflow_validate(
@@ -517,7 +541,7 @@ class FuzzballMCPStdioClient:
         out = self.call_tool("workflow_wait", args)
         return out if isinstance(out, dict) else {"status": str(out)}
 
-    def workflow_log(self, workflow_id: str, job_name: str) -> str:
+    def workflow_log(self, workflow_id: str, job_name: str = "", lines: int | None = None) -> str:
         args: dict[str, Any] = {}
         id_key = self.resolve_argument_key(
             "workflow_log",
@@ -525,12 +549,17 @@ class FuzzballMCPStdioClient:
         )
         if id_key is not None:
             args[id_key] = workflow_id
-        j_key = self.resolve_argument_key(
-            "workflow_log",
-            ("job_name", "job", "job_id", "jobId", "stage", "task", "name"),
-        )
-        if j_key is not None and j_key != id_key:
-            args[j_key] = job_name
+        if job_name:
+            j_key = self.resolve_argument_key(
+                "workflow_log",
+                ("job_name", "job", "job_id", "jobId", "stage", "task", "name"),
+            )
+            if j_key is not None and j_key != id_key:
+                args[j_key] = job_name
+        if lines is not None:
+            l_key = self.resolve_argument_key("workflow_log", ("lines", "tail_lines", "max_lines"))
+            if l_key is not None:
+                args[l_key] = self._coerce_for_prop("workflow_log", l_key, lines)
         out = self.call_tool("workflow_log", args)
         return out if isinstance(out, str) else json.dumps(out)
 

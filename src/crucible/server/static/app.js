@@ -143,6 +143,37 @@ function renderClientMachineBridge(clientInfo, clusterEp, teamId) {
   }
 }
 
+function renderNetworkBridgeState(discReport, clusterCfg) {
+  const dot = document.getElementById("dot-cluster");
+  const statusEl = document.getElementById("bridge-conn-status");
+  const backendSel = document.getElementById("backend-select");
+  if (!discReport || !statusEl) return;
+
+  const reachable = Boolean(discReport.cluster_reachable);
+  const cliOk = Boolean(discReport.fuzzball_cli_available);
+  const vol = (clusterCfg && clusterCfg.vast && clusterCfg.vast.persistent_volume_name) || "runs";
+  const prov = (clusterCfg && clusterCfg.vast && clusterCfg.vast.provisioner) || "team3";
+
+  if (reachable) {
+    if (dot) dot.className = "dot dot-green";
+    statusEl.innerHTML =
+      `<strong style="color:#a3e635">LIVE CLUSTER CONNECTED</strong> &middot; Fuzzball MCP Ready &middot; ` +
+      `VAST Volume <code>${vol}</code> (<code>use: ${prov}</code>)`;
+    if (cliOk && backendSel) {
+      backendSel.value = "fuzzball_mcp";
+    }
+  } else {
+    if (dot) dot.className = "dot dot-amber";
+    const cliBadge = cliOk ? "<code>fuzzball</code> CLI + <code>team3</code> context ready" : "local config ready";
+    statusEl.innerHTML =
+      `<strong style="color:#fbbf24">OFF-CLUSTER WI-FI (PREVIEW MODE)</strong> &middot; ${cliBadge} &middot; ` +
+      `Auto-switches to Live GPUs on cluster Wi-Fi (or click <strong>Probe Server</strong>)`;
+    if (backendSel && (backendSel.value === "fuzzball_mcp" || backendSel.value === "fuzzball")) {
+      backendSel.value = "simulator";
+    }
+  }
+}
+
 async function initStudio() {
   try {
     const [modelsResp, dsResp, discResp] = await Promise.all([
@@ -164,6 +195,7 @@ async function initStudio() {
       document.getElementById("team-input").value = team;
       renderClientMachineBridge(discResp.client_machine, currentClusterEndpoint(), team);
     }
+    renderNetworkBridgeState(discResp.discovery_report, discResp.cluster_config);
     await refreshModelSpec(currentModelId());
     await runPlaygroundSample();
   } catch (_) {}
@@ -646,9 +678,18 @@ document.getElementById("btn-connect-cluster").addEventListener("click", async (
       }),
     });
     renderClientMachineBridge(null, res.cluster_endpoint, res.cluster_config.definition_id);
+    const dot = document.getElementById("dot-cluster");
     const statusEl = document.getElementById("bridge-conn-status");
     const pingTxt = res.ping_ms != null ? ` (${res.ping_ms} ms)` : "";
-    statusEl.innerHTML = `<strong>${res.execution_mode_hint}</strong>${pingTxt} &middot; VAST volume <code>${res.cluster_config.vast.persistent_volume_name}</code> (<code>use: ${res.cluster_config.vast.provisioner}</code>)`;
+    if (res.tcp_reachable) {
+      if (dot) dot.className = "dot dot-green";
+      document.getElementById("backend-select").value = "fuzzball_mcp";
+      statusEl.innerHTML = `<strong style="color:#a3e635">LIVE CLUSTER CONNECTED${pingTxt}</strong> &middot; Switched to Live Fuzzball MCP &middot; VAST volume <code>${res.cluster_config.vast.persistent_volume_name}</code> (<code>use: ${res.cluster_config.vast.provisioner}</code>)`;
+    } else {
+      if (dot) dot.className = "dot dot-amber";
+      document.getElementById("backend-select").value = "simulator";
+      statusEl.innerHTML = `<strong style="color:#fbbf24">OFF-CLUSTER WI-FI</strong> &middot; ${res.cluster_endpoint} unreachable right now &middot; GB10 Empirical Twin active (will auto-switch on venue Wi-Fi)`;
+    }
   } catch (_) {}
   btn.textContent = "Probe Server";
 });
