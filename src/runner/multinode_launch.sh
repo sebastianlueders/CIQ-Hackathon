@@ -3,6 +3,7 @@
 # Env in:  MN_NODES, MN_VARIANT (ip|c10d), PY, TRAIN_ARGS. Prints DIAG lines for post-mortem.
 set -u
 mkdir -p /tmp/home
+MN_SCRIPT=${MN_SCRIPT:-/opt/multinode_launch.sh}   # path of this script on every node
 SELF=$(hostname); FQDN=$(hostname -f 2>/dev/null || echo "$SELF")
 HOSTS=$(echo "${MULTINODE_HOSTLIST_NOSLOTS:-$SELF}" | tr ',' '\n' | sort)
 echo "DIAG self=$SELF fqdn=$FQDN hostlist=$(echo $HOSTS) variant=$MN_VARIANT"
@@ -21,7 +22,7 @@ if [ -z "${MN_NODE_RANK:-}" ] && [ -n "${MULTINODE_SSH_WRAPPER:-}" ]; then
     [ "$h" = "$SELF" ] || [ "$h" = "$FQDN" ] && continue
     i=$((i + 1))
     echo "DIAG head ($SELF, $HEAD_IP) starting rank $i on $h"
-    "$MULTINODE_SSH_WRAPPER" "$h" "MN_NODE_RANK=$i MN_MASTER=$SELF MN_MASTER_IP=$HEAD_IP MN_NODES=$MN_NODES MN_VARIANT=$MN_VARIANT PY=$PY TRAIN_ARGS='$TRAIN_ARGS' MULTINODE_HOSTLIST_NOSLOTS=$MULTINODE_HOSTLIST_NOSLOTS HOME=/tmp/home bash /opt/multinode_launch.sh" > /tmp/rank$i.log 2>&1 &
+    "$MULTINODE_SSH_WRAPPER" "$h" "MN_NODE_RANK=$i MN_MASTER=$SELF MN_MASTER_IP=$HEAD_IP MN_NODES=$MN_NODES MN_VARIANT=$MN_VARIANT MN_TIMEOUT=${MN_TIMEOUT:-0} MN_SCRIPT=$MN_SCRIPT PY=$PY TRAIN_ARGS='$TRAIN_ARGS' MULTINODE_HOSTLIST_NOSLOTS=$MULTINODE_HOSTLIST_NOSLOTS HOME=/tmp/home bash $MN_SCRIPT" > /tmp/rank$i.log 2>&1 &
   done
   NODE_RANK=0; MASTER=$SELF; MN_MASTER_IP=$HEAD_IP
   trap 'for f in /tmp/rank*.log; do echo "== worker log $f"; tail -60 "$f"; done' EXIT
@@ -54,6 +55,7 @@ else
   export NCCL_IB_DISABLE=1
   RDZV="--node-rank $NODE_RANK --master-addr $MASTER_IP --master-port 29500"
 fi
-echo "DIAG launching: torch.distributed.run --nnodes $MN_NODES $RDZV"
-timeout 1200 $PY -m torch.distributed.run --nnodes "$MN_NODES" --nproc-per-node 1 $RDZV $TRAIN_ARGS
-rc=$?; [ $rc -eq 124 ] && echo "DIAG TIMEOUT after 1200 s (rendezvous or collective hung)"; exit $rc
+echo "DIAG launching: torch.distributed.run --nnodes $MN_NODES $RDZV (timeout=${MN_TIMEOUT:-0}s)"
+TO=""; [ "${MN_TIMEOUT:-0}" -gt 0 ] && TO="timeout $MN_TIMEOUT"   # only for short perf probes; never for training
+$TO $PY -m torch.distributed.run --nnodes "$MN_NODES" --nproc-per-node 1 $RDZV $TRAIN_ARGS
+rc=$?; [ $rc -eq 124 ] && echo "DIAG TIMEOUT after ${MN_TIMEOUT}s"; exit $rc
