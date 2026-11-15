@@ -438,10 +438,12 @@ select {
   border: 1.5px dashed #36507d;
   background: rgba(10, 16, 28, 0.8);
   border-radius: 9px;
-  padding: 10px 12px;
+  padding: 14px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  justify-content: center;
+  flex: 1;
+  gap: 10px;
 }
 
 .dropzone.drag-over {
@@ -474,27 +476,6 @@ select {
   border: 1px solid rgba(52, 211, 153, 0.35);
   border-radius: 6px;
   padding: 6px 9px;
-}
-
-.server-conn-box {
-  background: rgba(10, 16, 28, 0.72);
-  border: 1px solid #20304c;
-  border-radius: 8px;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.conn-grid {
-  display: grid;
-  grid-template-columns: 1.3fr 0.65fr auto;
-  gap: 7px;
-  align-items: end;
-}
-
-.btn-connect {
-  height: 35px;
 }
 
 .measured-callout {
