@@ -8,3 +8,8 @@ docs/*
 !docs/one-pager.pdf
 # transient runner console output
 results/*.out
+!docs/build/
+docs/build/*
+!docs/build/build-onepager.sh
+!docs/build/grid_tables.py
+!docs/build/onepager-plain.tex
