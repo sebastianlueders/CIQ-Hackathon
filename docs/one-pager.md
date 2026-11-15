@@ -1,13 +1,9 @@
 # Alchemy: Turning Private Data into Fast, Fine-Tuned Local Models
 
-\begin{center}
-\begin{minipage}{0.92\linewidth}\centering\itshape
 Bring your data, your base model, and your hardware. Our agent runs the experiments on your own hardware and hands back one Fuzzball workflow that fine-tunes the model and serves it as fast as your hardware allows, without your data ever leaving the room.
-\end{minipage}
 
-\vspace{4pt}
-\textbf{Team:} Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania \quad\textbar\quad \textbf{Track:} Multi-Node Training
-\end{center}
+**Team:** Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania \
+**Track:** Multi-Node Training
 
 ### The problem
 
