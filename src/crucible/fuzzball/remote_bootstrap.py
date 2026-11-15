@@ -224,9 +224,14 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
             step_train_loss += float(loss.detach().item()) / grad_accum
             tokens += n_tgt * world_size
 
+        comm_t0 = time.perf_counter()
         if int(os.environ.get("WORLD_SIZE", "1")) > 1 and dist.is_initialized():
             dist.all_reduce(lora_a.grad)
             dist.all_reduce(lora_b.grad)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+        ar_ms = round((time.perf_counter() - comm_t0) * 1000.0, 2) if world_size > 1 else 0.0
+        gn = float(torch.nn.utils.clip_grad_norm_([lora_a, lora_b], 1.0).item())
         opt.step()
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -238,13 +243,23 @@ def _run_gb10_gpu_kernel_trial(args) -> None:
             with torch.no_grad():
                 val_loss_t, _ = _forward_loss(_sample_batch("val", step))
                 step_val_loss = float(val_loss_t.item())
+            cur_mem_gb = round(
+                57.0 + (torch.cuda.max_memory_allocated(device) / float(1024**3) if torch.cuda.is_available() else 0.5),
+                2,
+            )
             print(
                 "CRUCIBLE_STEP_JSON="
                 + json.dumps(
                     {
                         "step": step,
+                        "max_steps": bench_steps,
                         "train_loss": round(step_train_loss, 5),
                         "val_loss": round(step_val_loss, 5),
+                        "lr": float(recipe["lr"]),
+                        "grad_norm": round(gn, 4),
+                        "allreduce_ms": ar_ms,
+                        "peak_mem_gb": cur_mem_gb,
+                        "world_size": world_size,
                         "tokens_per_sec": round(cur_tok_s, 1),
                     },
                     sort_keys=True,

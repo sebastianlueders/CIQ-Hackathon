@@ -150,6 +150,27 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     assert ds_list["preset"]["split_doc_counts"]["val"] >= 1
     assert ds_list["preset"]["split_doc_counts"]["held_out"] >= 1
 
+    # 1b. Client-server architecture, 40+ vast model catalog, & remote Fuzzball connection probe
+    arch = client.get("/api/architecture").json()
+    assert arch["mode"] == "client_server_split"
+    assert arch["fuzzball_server"]["endpoint"] == "api.fb-hack.civilfritz.net:443"
+    assert arch["measured_reference"]["measured_bf16_gemm_tflops"] == 99.1
+
+    models_all = client.get("/api/models").json()
+    assert models_all["total_count"] >= 35
+    assert "Frontier Multi-Node" in models_all["categories"]
+    assert "Compact & Edge" in models_all["categories"]
+    frontier_only = client.get("/api/models?category=Frontier%20Multi-Node").json()
+    assert len(frontier_only["catalog"]) >= 4
+    assert all(m["min_nodes_required"] == 2 for m in frontier_only["catalog"])
+
+    conn_probe = client.post(
+        "/api/cluster/connect",
+        json={"cluster_endpoint": "api.fb-hack.civilfritz.net:443", "definition_id": "team3"},
+    )
+    assert conn_probe.status_code == 200
+    assert conn_probe.json()["cluster_config"]["definition_id"] == "team3"
+
     # 2. Custom file drop upload (JSON + code, zero python-multipart needed!)
     upload_res = client.post(
         "/api/dataset/upload",
@@ -213,10 +234,12 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
         names = set(zf.namelist())
         expected_files = {
             "fuzzfile.yaml",
+            "Modelfile.ollama",
             "configs/train_recipe.yaml",
             "configs/vllm_serve.yaml",
             "scripts/launch_fuzzball.sh",
             "scripts/train_and_serve_local.py",
+            "scripts/client_query_llm.py",
             "data/train.jsonl",
             "data/val.jsonl",
             "data/test.jsonl",
@@ -228,6 +251,20 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
         assert "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("fuzzfile.yaml").decode()
         assert "team3" in zf.read("fuzzfile.yaml").decode()
         assert "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("configs/train_recipe.yaml").decode()
+        assert "FROM deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("Modelfile.ollama").decode()
+
+    # Verify live dual-GPU telemetry & step diagnostics populated after run
+    post_live = client.get("/api/live-status").json()
+    assert "gpu_telemetry" in post_live
+    assert len(post_live["nodes"]) == 2
+    assert post_live["live_step_metrics"]["tokens_per_sec"] > 0
+
+    pg = client.post(
+        "/api/playground/complete",
+        json={"prompt": "Write SIMD neighbor loop", "compare_base": True},
+    ).json()
+    assert "PairLJCut" in pg["tuned_output"]
+    assert pg["base_output"] is not None
 
     probe = client.post("/api/firewall-probe", json={"inject_cpp_snippet": True}).json()
     assert probe["blocked"] is True

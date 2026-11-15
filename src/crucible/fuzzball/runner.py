@@ -52,11 +52,39 @@ def _parse_summary_from_logs(log_text: str) -> dict[str, Any] | None:
 
 def _parse_steps_from_logs(log_text: str) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
+    last_eval_loss: float | None = None
     for line in log_text.splitlines():
         if "CRUCIBLE_STEP_JSON=" in line:
             try:
                 _, rhs = line.split("CRUCIBLE_STEP_JSON=", 1)
                 steps.append(json.loads(rhs.strip()))
+            except Exception:
+                pass
+        elif "RESULT {" in line:
+            try:
+                _, rhs = line.split("RESULT ", 1)
+                rec = json.loads(rhs.strip())
+                kind = rec.get("kind")
+                if kind == "eval" and rec.get("eval_loss") is not None:
+                    last_eval_loss = float(rec["eval_loss"])
+                elif kind == "train":
+                    ar_s = float(rec.get("allreduce_s") or 0.0)
+                    steps.append(
+                        {
+                            "step": int(rec.get("step", len(steps) + 1)),
+                            "train_loss": float(rec.get("loss", 0.0)),
+                            "val_loss": last_eval_loss,
+                            "tokens_per_sec": float(rec.get("tok_s", 0.0)),
+                            "tokens_seen": int(rec.get("tokens", 0)),
+                            "lr": float(rec.get("lr", 0.0)),
+                            "grad_norm": float(rec.get("grad_norm", 0.0)),
+                            "step_time_ms": round(float(rec.get("step_s", 0.0)) * 1000.0, 1),
+                            "allreduce_ms": round(ar_s * 1000.0, 2),
+                            "peak_mem_gb": float(rec.get("peak_mem_gib", 0.0)),
+                            "world_size": int(rec.get("world_size", 1)),
+                            "router_entropy": rec.get("router_entropy_mean"),
+                        }
+                    )
             except Exception:
                 pass
     return steps
@@ -990,6 +1018,11 @@ class CalibratedSimulatorBackend:
         wf_id = self._sim_workflow_id(trial_id)
         nodes = _extract_placed_nodes("", self.cluster, perf.nodes, seq_idx)
         obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, trial_id)
+        comm_mode = (
+            "NCCL_FSDP_SHARDED"
+            if (perf.nodes > 1 and self.exp.model.min_nodes_required > 1)
+            else ("NCCL_DDP_ALLREDUCE" if perf.nodes > 1 else "INDEPENDENT_1GPU")
+        )
         self._emit(
             {
                 "type": "trial_started",
@@ -999,6 +1032,17 @@ class CalibratedSimulatorBackend:
                 "workflow_name": f"crucible-{trial_id}",
                 "definition_id": self.cluster.definition_id,
                 "nodes_assigned": nodes,
+                "world_size": perf.nodes,
+                "comm_mode": comm_mode,
+                "lora_rank": recipe.lora_rank,
+                "lr": recipe.lr,
+                "micro_batch_size": perf.micro_batch_size,
+                "grad_accum_steps": perf.grad_accum_steps,
+                "kernels_enabled": {
+                    "chunked_cross_entropy": perf.use_chunked_ce_kernel,
+                    "grouped_moe_gemm": perf.use_grouped_moe_kernel and (self.exp.model.num_experts > 1),
+                    "fused_lora_linear": perf.use_fused_lora_kernel,
+                },
                 "object_uri": obj_uri,
                 "fuzzfile": yaml_text,
             }
@@ -1107,7 +1151,10 @@ class CalibratedSimulatorBackend:
         metrics_path = trial_dir / "metrics.jsonl"
         tokens_per_step = perf.global_batch_sequences * recipe.seq_len
         cum_wall = 0.0
-        emit_every = max(1, max_steps // 4)
+        emit_every = max(1, max_steps // (10 if self.step_delay_s > 0 else 4))
+        warmup_steps = max(2, int(max_steps * recipe.warmup_ratio))
+        raw_logit_gb = round(1.85 * perf.micro_batch_size * (recipe.seq_len / 2048.0), 2)
+        saved_logit_gb = round(max(0.0, raw_logit_gb - logit_buffer_gb), 2)
 
         with metrics_path.open("w", encoding="utf-8") as fh:
             for step in range(1, max_steps + 1):
@@ -1128,7 +1175,43 @@ class CalibratedSimulatorBackend:
                 step_val = round(step_loss + val_gap, 5)
                 loss_curve.append(step_loss)
                 val_curve.append(step_val)
-                cum_wall += tokens_per_step / max(tok_s, 1.0)
+                step_dt_s = tokens_per_step / max(tok_s, 1.0)
+                cum_wall += step_dt_s
+
+                # Learning rate schedule (linear warmup + cosine decay, matching train_lora.py)
+                if step <= warmup_steps:
+                    cur_lr = recipe.lr * (step / float(warmup_steps))
+                else:
+                    prog = (step - warmup_steps) / float(max(1, max_steps - warmup_steps))
+                    cur_lr = recipe.lr * (0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * prog)))
+
+                # Gradient L2 norm & MoE router load-balancing entropy (matching RouterStats)
+                grad_spike = abs(0.35 * math.sin(step * 0.9)) if recipe.lr >= 7e-4 and step > 20 else 0.0
+                grad_norm = round(
+                    min(1.0, max(0.09, 0.36 * math.exp(-0.005 * step) + 0.14 + 0.03 * abs(math.sin(step * 0.5)) + grad_spike)),
+                    4,
+                )
+                router_ent = (
+                    round(min(0.994, 0.935 + 0.045 * (1.0 - math.exp(-0.02 * step)) - 0.015 * grad_spike), 4)
+                    if is_moe
+                    else 1.0
+                )
+
+                # Inter-GPU collective sync metrics calibrated to GB10 2-node RoCE / c10d probes
+                if perf.nodes > 1:
+                    adapter_mb = round(0.85 * recipe.lora_rank * len(recipe.target_modules) * (self.exp.model.num_layers / 48.0), 2)
+                    fsdp_shard_mb = round(self.exp.model.bf16_footprint_gb * 120.0, 1) if self.exp.model.min_nodes_required > 1 else 0.0
+                    payload_mb = round(adapter_mb * 2.0 + fsdp_shard_mb, 2)
+                    base_ar_ms = 53.2 + 0.38 * adapter_mb + (115.0 if fsdp_shard_mb > 0 else 0.0)
+                    allreduce_ms = round(base_ar_ms * (1.0 + 0.14 * abs(math.sin(step * 0.7))), 2)
+                    inter_gpu_gbps = round(min(192.0, max(12.4, (payload_mb * 8.0) / max(allreduce_ms / 1000.0, 0.004))), 2)
+                else:
+                    payload_mb = 0.0
+                    allreduce_ms = 0.0
+                    inter_gpu_gbps = 0.0
+
+                bf16_tflops = round(min(99.1 * perf.nodes, (tok_s * 4.0 * self.exp.model.active_params_b) / 1000.0 * 3.8), 2)
+
                 if step == 1 or step == max_steps or step % 15 == 0:
                     rec = StepMetricRecord(
                         step=step,
@@ -1140,7 +1223,7 @@ class CalibratedSimulatorBackend:
                         world_size=perf.nodes,
                     )
                     fh.write(json.dumps(asdict(rec), sort_keys=True) + "\n")
-                if self.step_delay_s > 0 and (step == 1 or step == max_steps or step % emit_every == 0):
+                if step == 1 or step == max_steps or step % emit_every == 0:
                     self._emit(
                         {
                             "type": "trial_step",
@@ -1149,12 +1232,29 @@ class CalibratedSimulatorBackend:
                             "max_steps": max_steps,
                             "train_loss": step_loss,
                             "val_loss": step_val,
+                            "perplexity": round(math.exp(min(step_val, 12.0)), 4),
+                            "lr": round(cur_lr, 7),
+                            "grad_norm": grad_norm,
+                            "router_entropy": router_ent,
                             "tokens_per_sec": tok_s,
+                            "tokens_seen": step * tokens_per_step,
+                            "step_time_ms": round(step_dt_s * 1000.0, 1),
+                            "allreduce_ms": allreduce_ms,
+                            "payload_mb": payload_mb,
+                            "inter_gpu_gbps": inter_gpu_gbps,
+                            "comm_mode": comm_mode,
+                            "peak_mem_gb": peak_mem_gb,
+                            "logit_mem_saved_gb": saved_logit_gb,
+                            "hw_util_pct": hw_util_pct,
+                            "bf16_tflops": bf16_tflops,
+                            "world_size": perf.nodes,
+                            "nodes_assigned": nodes,
                             "partial_curve": list(loss_curve),
                             "partial_val_curve": list(val_curve),
                         }
                     )
-                    time.sleep(min(0.03, self.step_delay_s * 0.4))
+                    if self.step_delay_s > 0:
+                        time.sleep(min(0.035, self.step_delay_s * 0.45))
 
         final_val = round(loss_curve[-1] + val_gap + self._jitter(recipe.short_id(), 0.002), 5)
         held_out = round(final_val + test_gap, 5)
@@ -1227,6 +1327,11 @@ class CalibratedSimulatorBackend:
         wf_id = self._sim_workflow_id(f"srv-{trial_id}")
         nodes = _extract_placed_nodes("", self.cluster, cand.total_gpus_required, seq_idx)
         srv_obj_uri = trial_metrics_object_uri(self.cluster, self.run_id, f"serving-{trial_id}")
+        srv_comm_mode = (
+            "VLLM_TP2_ALLREDUCE"
+            if cand.tensor_parallel > 1
+            else ("VLLM_DUAL_REPLICA" if cand.replicas > 1 else "VLLM_SINGLE_GPU")
+        )
         self._emit(
             {
                 "type": "trial_started",
@@ -1236,6 +1341,11 @@ class CalibratedSimulatorBackend:
                 "workflow_name": f"crucible-srv-{trial_id}",
                 "definition_id": self.cluster.definition_id,
                 "nodes_assigned": nodes,
+                "world_size": cand.total_gpus_required,
+                "comm_mode": srv_comm_mode,
+                "precision": cand.precision,
+                "tensor_parallel": cand.tensor_parallel,
+                "replicas": cand.replicas,
                 "object_uri": srv_obj_uri,
                 "fuzzfile": yaml_text,
             }
@@ -1259,6 +1369,31 @@ class CalibratedSimulatorBackend:
         loss_shift = {"BF16": 0.0, "FP8": 0.0055, "NVFP4": 0.0155}[cand.precision]
         kv_pressure_shift = 0.022 if cand.max_num_seqs >= 200 and cand.precision == "NVFP4" else 0.0
         srv_loss = baseline_finetuned_loss + loss_shift + kv_pressure_shift
+        tp_bw_gbps = round(min(184.0, (tok_s * 0.14)), 2) if cand.tensor_parallel > 1 else 0.0
+        self._emit(
+            {
+                "type": "trial_step",
+                "trial_id": trial_id,
+                "kind": "serve",
+                "step": 1,
+                "max_steps": 1,
+                "train_loss": round(baseline_finetuned_loss, 5),
+                "val_loss": round(srv_loss, 5),
+                "perplexity": round(math.exp(min(srv_loss, 12.0)), 4),
+                "tokens_per_sec": tok_s,
+                "ttft_ms": ttft_ms,
+                "p50_latency_ms": p50_ms,
+                "p99_latency_ms": p99_ms,
+                "allreduce_ms": tp_comm_overhead,
+                "inter_gpu_gbps": tp_bw_gbps,
+                "comm_mode": srv_comm_mode,
+                "precision": cand.precision,
+                "tensor_parallel": cand.tensor_parallel,
+                "replicas": cand.replicas,
+                "world_size": cand.total_gpus_required,
+                "nodes_assigned": nodes,
+            }
+        )
 
         completion_pass = {
             "BF16": 0.9167,

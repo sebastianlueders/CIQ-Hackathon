@@ -3,9 +3,11 @@ let latestLiveSnap = null;
 let buildArtifacts = {};
 let selectedArtifactKey = "fuzzfile.yaml";
 let activeDatasetId = "builtin-lammps-cpp-bench";
+let fullCatalog = [];
+let activeCategory = "Featured";
 
-async function fetchJson(url) {
-  const resp = await fetch(url);
+async function fetchJson(url, opts) {
+  const resp = await fetch(url, opts);
   return await resp.json();
 }
 
@@ -17,22 +19,98 @@ function currentTeamId() {
   return document.getElementById("team-input").value.trim() || "team3";
 }
 
+function currentClusterEndpoint() {
+  return document.getElementById("cluster-ep-input").value.trim() || "api.fb-hack.civilfritz.net:443";
+}
+
 async function refreshModelSpec(modelId) {
   try {
     const info = await fetchJson(`/api/models?probe_model=${encodeURIComponent(modelId)}`);
     const m = info.inferred;
     if (!m) return;
-    const kind = m.num_experts > 1 ? `MoE (${m.num_experts} experts, top-${m.top_k_experts})` : "Dense Transformer";
-    const kernels = m.num_experts > 1
-      ? "chunked CE + grouped MoE GEMM + fused LoRA + NVFP4"
-      : "chunked CE + fused LoRA + NVFP4";
-    document.getElementById("model-spec-line").textContent =
-      `Inferred: ${kind} · ${m.total_params_b}B total (${m.active_params_b}B active, ~${m.bf16_footprint_gb} GB BF16) · ` +
-      `${m.vocab_size.toLocaleString()} vocab · min ${m.min_nodes_required} GB10 node(s) · ${kernels}`;
-    document.querySelectorAll("#model-chips .chip").forEach((c) => {
-      c.classList.toggle("chip-active", c.dataset.modelId.toLowerCase() === modelId.toLowerCase());
+    const kind =
+      m.num_experts > 1 ? `MoE (${m.num_experts} experts, top-${m.top_k_experts})` : "Dense Transformer";
+    const kernels =
+      m.num_experts > 1
+        ? "Triton 152k Fused CE + Grouped MoE GEMM + Fused LoRA + NVFP4"
+        : "Triton Fused CE + Regional torch.compile + Fused LoRA + NVFP4";
+    const nodeFit =
+      m.min_nodes_required >= 2
+        ? "Requires 2× GB10 Nodes (FSDP + TP2)"
+        : m.total_params_b <= 4.5
+        ? "1× GB10 Tune → Runs Directly on Client Laptop (4–8 GB)"
+        : "1× GB10 Node Fit (2-Node DDP 1.98× Speedup Available)";
+    document.getElementById("model-spec-line").innerHTML =
+      `<strong>${m.name}</strong> &middot; ${kind} &middot; <strong>${m.total_params_b}B</strong> total ` +
+      `(<strong>${m.active_params_b}B</strong> active) &middot; BF16 <code>${m.bf16_footprint_gb} GB</code> / ` +
+      `FP8 <code>${m.fp8_footprint_gb} GB</code> / NVFP4 <code>${m.nvfp4_footprint_gb} GB</code> &middot; ` +
+      `${m.vocab_size.toLocaleString()} vocab &middot; <span style="color:#a3e635">${nodeFit}</span> &middot; ${kernels}`;
+
+    document.querySelectorAll("#model-chips .model-card").forEach((c) => {
+      c.classList.toggle("model-card-active", c.dataset.modelId.toLowerCase() === modelId.toLowerCase());
     });
   } catch (_) {}
+}
+
+function renderCatalogCards() {
+  const query = (document.getElementById("catalog-filter-input").value || "").trim().toLowerCase();
+  const currentId = currentModelId().toLowerCase();
+  const filtered = fullCatalog.filter((m) => {
+    const catOk =
+      activeCategory === "All Models" ||
+      (activeCategory === "Featured" ? Boolean(m.featured) : m.category === activeCategory);
+    if (!catOk) return false;
+    if (!query) return true;
+    const hay = `${m.id} ${m.label} ${m.provider} ${m.family} ${m.category} ${m.license} ${m.recommended_use}`.toLowerCase();
+    return hay.includes(query);
+  });
+
+  const wrap = document.getElementById("model-chips");
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="catalog-empty">No catalog preset matches "${query}" in ${activeCategory}. You can still paste ANY HuggingFace <code>org/model</code> ID above!</div>`;
+    return;
+  }
+
+  wrap.innerHTML = filtered
+    .map((m) => {
+      const isAct = m.id.toLowerCase() === currentId;
+      const archBadge = m.is_moe ? `MoE ${m.active_params_b}B/${m.total_params_b}B` : `${m.total_params_b}B Dense`;
+      const nodeBadge = m.min_nodes_required >= 2 ? "2×GB10" : m.total_params_b <= 4.5 ? "LaptopFit" : "1×GB10";
+      return `
+        <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" data-model-id="${m.id}" title="${m.id} — ${m.recommended_use}">
+          <div class="mc-top">
+            <span class="mc-label">${m.label}</span>
+            <span class="mc-node ${m.min_nodes_required >= 2 ? "mc-node-2" : ""}">${nodeBadge}</span>
+          </div>
+          <div class="mc-meta">${m.provider} &middot; ${archBadge} &middot; ${m.license}</div>
+        </button>
+      `;
+    })
+    .join("");
+
+  wrap.querySelectorAll(".model-card").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.getElementById("model-id-input").value = btn.dataset.modelId;
+      refreshModelSpec(btn.dataset.modelId);
+    });
+  });
+}
+
+function renderCategoryTabs(categories) {
+  const tabsWrap = document.getElementById("model-category-tabs");
+  tabsWrap.innerHTML = categories
+    .map(
+      (cat) =>
+        `<button type="button" class="cat-tab ${cat === activeCategory ? "cat-tab-active" : ""}" data-cat="${cat}">${cat}</button>`
+    )
+    .join("");
+  tabsWrap.querySelectorAll(".cat-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activeCategory = btn.dataset.cat;
+      tabsWrap.querySelectorAll(".cat-tab").forEach((b) => b.classList.toggle("cat-tab-active", b === btn));
+      renderCatalogCards();
+    });
+  });
 }
 
 function renderDatasetBanner(ds) {
@@ -40,13 +118,29 @@ function renderDatasetBanner(ds) {
   activeDatasetId = ds.dataset_id;
   const sc = ds.split_doc_counts || {};
   const cc = ds.split_chunk_counts || {};
-  const prefix = ds.is_preset ? "Preset Active" : "Custom Data Loaded";
+  const prefix = ds.is_preset ? "Preset Active" : "Private Corpus Staged";
   document.getElementById("dataset-status-bar").innerHTML =
     `${prefix}: <strong>${ds.display_name}</strong> (${ds.format_summary}) &middot; ` +
     `<strong>${(ds.total_tokens || 0).toLocaleString()} tokens</strong> &middot; ` +
-    `Train: <code>${sc.train || 0} docs (${cc.train || 0} chunks)</code> &middot; ` +
-    `Validation: <code>${sc.val || 0} docs (${cc.val || 0} chunks)</code> &middot; ` +
-    `Held-Out Test: <code>${sc.held_out || 0} docs (${cc.held_out || 0} chunks)</code>`;
+    `Train: <code>${sc.train || 0} docs (${cc.train || 0})</code> &middot; ` +
+    `Val: <code>${sc.val || 0} docs (${cc.val || 0})</code> &middot; ` +
+    `Sealed Test: <code>${sc.held_out || 0} docs (${cc.held_out || 0})</code>`;
+}
+
+function renderClientMachineBridge(clientInfo, clusterEp, teamId) {
+  if (clientInfo) {
+    document.getElementById("pill-client-host").textContent = clientInfo.hostname || "client.local";
+    document.getElementById("bridge-client-name").textContent =
+      `${clientInfo.hostname} (${clientInfo.os} · ${clientInfo.arch} · ${clientInfo.cpu_cores} cores)`;
+  }
+  if (clusterEp) {
+    document.getElementById("pill-cluster-ep").textContent = clusterEp;
+    document.getElementById("bridge-server-ep").textContent = clusterEp;
+  }
+  if (teamId) {
+    document.getElementById("pill-def-id").textContent = teamId;
+    document.getElementById("bridge-team-tag").textContent = teamId;
+  }
 }
 
 async function initStudio() {
@@ -57,19 +151,10 @@ async function initStudio() {
       fetchJson("/api/discover"),
     ]);
 
-    const chipsWrap = document.getElementById("model-chips");
-    chipsWrap.innerHTML = (modelsResp.catalog || [])
-      .map(
-        (m) =>
-          `<button type="button" class="chip" data-model-id="${m.id}" title="${m.id} (${m.family})">${m.label}</button>`
-      )
-      .join("");
-    chipsWrap.querySelectorAll(".chip").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.getElementById("model-id-input").value = btn.dataset.modelId;
-        refreshModelSpec(btn.dataset.modelId);
-      });
-    });
+    fullCatalog = modelsResp.catalog || [];
+    document.getElementById("catalog-count-badge").textContent = String(modelsResp.total_count || fullCatalog.length);
+    renderCategoryTabs(modelsResp.categories || ["Featured", "All Models"]);
+    renderCatalogCards();
 
     if (dsResp.preset) {
       renderDatasetBanner(dsResp.preset);
@@ -77,12 +162,10 @@ async function initStudio() {
     if (discResp.cluster_config && discResp.cluster_config.definition_id) {
       const team = discResp.cluster_config.definition_id;
       document.getElementById("team-input").value = team;
-      document.getElementById("pill-def-id").textContent = team;
-    }
-    if (discResp.discovery_report && discResp.discovery_report.fuzzball_cli_available) {
-      document.getElementById("backend-select").value = "fuzzball_mcp";
+      renderClientMachineBridge(discResp.client_machine, currentClusterEndpoint(), team);
     }
     await refreshModelSpec(currentModelId());
+    await runPlaygroundSample();
   } catch (_) {}
 }
 
@@ -100,7 +183,7 @@ async function uploadFileList(fileList) {
   const arr = Array.from(fileList || []);
   if (arr.length === 0) return;
   const bar = document.getElementById("dataset-status-bar");
-  bar.innerHTML = `Ingesting <strong>${arr.length}</strong> dropped file(s) locally into Train / Validation / Held-Out Test splits…`;
+  bar.innerHTML = `Ingesting <strong>${arr.length}</strong> local file(s) into leak-free Train / Val / Sealed Test splits…`;
 
   const encoded = [];
   for (const f of arr.slice(0, 250)) {
@@ -130,11 +213,11 @@ async function refreshBuildPreview() {
     buildArtifacts = prev.artifacts || {};
     const shortModel = String(prev.model_id || "").split("/").pop();
     const dsName = (prev.dataset && prev.dataset.display_name) || activeDatasetId;
-    document.getElementById("build-title").textContent = `Tuned Build Ready: ${shortModel}`;
+    document.getElementById("build-title").innerHTML = `Local LLM Package Ready: <code>${shortModel}</code>`;
     document.getElementById("build-subtitle").innerHTML =
-      `Configured for <code>${prev.model_id}</code> on <strong>${dsName}</strong> &mdash; ` +
-      `includes turnkey <code>fuzzfile.yaml</code>, LoRA &amp; vLLM configs, launcher, and split <code>train/val/test</code> data.`;
-    document.getElementById("inspector-model-label").textContent = prev.model_id;
+      `Tuned for <strong>${dsName}</strong> &mdash; ready for client Ollama / llama.cpp, vLLM, or 1-command Fuzzball deploy`;
+    const insp = document.getElementById("inspector-model-label");
+    if (insp) insp.textContent = prev.model_id;
     renderArtifactViewer();
   } catch (_) {}
 }
@@ -148,16 +231,153 @@ function renderArtifactViewer() {
   }
 }
 
+function updateSingleGpuSvg(idx, node) {
+  if (!node) return;
+  const pfx = `svg-gpu${idx}`;
+  const smPct = Number(node.sm_util_pct || 0);
+  const tcPct = Number(node.tensor_core_pct || 0);
+  const memUsed = Number(node.vram_used_gib || 0);
+  const memTot = Number(node.physical_memory_gib || 127.9);
+  const memPct = Math.min(100, (memUsed / Math.max(memTot, 1)) * 100);
+  const isRunning = String(node.state || "").includes("RUNNING");
+
+  document.getElementById(`${pfx}-host`).textContent = node.hostname || `gb10-node-0${idx + 1}`;
+  document.getElementById(`${pfx}-state`).textContent = node.state || "READY";
+  document.getElementById(`${pfx}-state`).setAttribute("fill", isRunning ? "#a3e635" : "#34d399");
+  document.getElementById(`${pfx}-border`).setAttribute("stroke", isRunning ? "#76b900" : "#2b3d5f");
+  document.getElementById(`${pfx}-role`).textContent = node.role || `${node.gpu_product} (${node.sm_arch || "sm_121"})`;
+
+  document.getElementById(`${pfx}-sm-txt`).textContent = `${smPct.toFixed(1)}%`;
+  document.getElementById(`${pfx}-sm-bar`).setAttribute("width", String(Math.max(4, Math.round((smPct / 100) * 292))));
+
+  document.getElementById(`${pfx}-tc-txt`).textContent = `${tcPct.toFixed(1)}%`;
+  document.getElementById(`${pfx}-tc-bar`).setAttribute("width", String(Math.max(4, Math.round((tcPct / 100) * 292))));
+
+  document.getElementById(`${pfx}-mem-txt`).textContent = `${memUsed.toFixed(1)} / ${memTot.toFixed(1)} GiB`;
+  document.getElementById(`${pfx}-mem-bar`).setAttribute("width", String(Math.max(6, Math.round((memPct / 100) * 292))));
+
+  document.getElementById(`${pfx}-tflops`).textContent =
+    `${Number(node.bf16_tflops || 0).toFixed(1)} TFLOP/s · ${Number(node.mem_bw_gbs || 0).toFixed(0)} GB/s`;
+  document.getElementById(`${pfx}-toks`).textContent =
+    `${Math.round(Number(node.tokens_per_sec || 0)).toLocaleString()} tok/s · ${node.power_w || 28}W · ${node.temp_c || 40}°C`;
+
+  const wfShort = node.active_workflow_id ? node.active_workflow_id.slice(0, 8) : "idle";
+  document.getElementById(`${pfx}-wf`).textContent =
+    `Workflow: ${wfShort} · Trial: ${node.active_trial_id || node.last_trial_id || "none"} · Done: ${node.trials_completed || 0}`;
+
+  // Light up mini SM die cells proportionally to SM utilization
+  const cells = document.querySelectorAll(`#${pfx}-cores .sm-cell`);
+  const litCount = Math.round((smPct / 100) * cells.length);
+  cells.forEach((cell, cIdx) => {
+    if (cIdx < litCount) {
+      cell.setAttribute("fill", isRunning ? "#84cc16" : "#38bdf8");
+    } else {
+      cell.setAttribute("fill", "#1d2c47");
+    }
+  });
+}
+
+function renderDualGpuFabric(snap) {
+  const nodes = snap.nodes || [];
+  if (nodes[0]) updateSingleGpuSvg(0, nodes[0]);
+  if (nodes[1]) updateSingleGpuSvg(1, nodes[1]);
+
+  const gt = snap.gpu_telemetry || {};
+  const active = Boolean(gt.link_active);
+  const bwGbps = Number(gt.inter_gpu_gbps || 0);
+  const arMs = Number(gt.allreduce_ms || 0);
+  const payMb = Number(gt.payload_mb || 0);
+  const mode = String(gt.comm_mode || "IDLE");
+
+  document.getElementById("fabric-mode-badge").textContent = mode.replace(/_/g, " ");
+  document.getElementById("fabric-bw-badge").textContent =
+    bwGbps > 0 ? `NCCL RoCE · ${bwGbps.toFixed(1)} Gbps (${arMs.toFixed(1)} ms sync)` : "NCCL RoCE 200GbE · Standby";
+
+  document.getElementById("svg-comm-proto").textContent = gt.protocol || "NCCL RoCE v2 · 200GbE RDMA";
+  document.getElementById("svg-comm-bw").textContent =
+    bwGbps > 0
+      ? `Active Collective: ${bwGbps.toFixed(1)} Gbps (${gt.link_utilization_pct || 0}% Link)`
+      : mode === "SINGLE_GPU_LOCAL_BUS"
+      ? "Single-Node Execution · 0ms Cross-Node Sync"
+      : "Dual-GPU Link Ready";
+
+  document.getElementById("svg-allreduce-txt").textContent =
+    arMs > 0
+      ? `AllReduce Sync: ${arMs.toFixed(1)} ms · Grad Payload: ${payMb.toFixed(1)} MB`
+      : `VAST Read: ${Number(gt.vast_read_gbs || 1.64).toFixed(2)} GB/s · Packets: ${gt.packets_synced || 0}`;
+  document.getElementById("svg-collective-op").textContent =
+    gt.collective_op || `2-Node Scaling Efficiency: ${gt.scaling_efficiency_pct || 99.2}%`;
+
+  const fwd = document.getElementById("svg-link-fwd");
+  const rev = document.getElementById("svg-link-rev");
+  fwd.classList.toggle("flow-fast", active);
+  rev.classList.toggle("flow-fast", active);
+  fwd.setAttribute("opacity", active ? "1" : "0.35");
+  rev.setAttribute("opacity", active ? "1" : "0.35");
+
+  if (mode === "NCCL_FSDP_SHARDED") {
+    document.getElementById("svg-fwd-label").textContent = "FSDP AllGather Shards →";
+    document.getElementById("svg-rev-label").textContent = "← ReduceScatter Grads";
+  } else if (mode === "VLLM_TP2_ALLREDUCE") {
+    document.getElementById("svg-fwd-label").textContent = "vLLM TP2 Activations →";
+    document.getElementById("svg-rev-label").textContent = "← TP2 AllReduce Sync";
+  } else if (mode === "PARALLEL_TRIALS_VAST_SHARED") {
+    document.getElementById("svg-fwd-label").textContent = "Independent Recipe Rung GPU 0 →";
+    document.getElementById("svg-rev-label").textContent = "← Independent Recipe Rung GPU 1";
+  } else {
+    document.getElementById("svg-fwd-label").textContent = "NCCL Ring AllReduce Rank 0 → 1";
+    document.getElementById("svg-rev-label").textContent = "← NCCL Ring AllReduce Rank 1 → 0";
+  }
+
+  const team = snap.definition_id || currentTeamId();
+  document.getElementById("svg-vast-title").textContent =
+    `VAST Data Shared Persistent Volume (/vast · use: ${team}) — Zero-Copy Weights, Tokenized Splits & LoRA Checkpoints`;
+}
+
+function renderRealtimeAnalysis(snap) {
+  const m = snap.live_step_metrics || {};
+  if (m && m.trial_id) {
+    document.getElementById("rt-step").textContent = `${m.trial_id.slice(0, 18)} [${m.step}/${m.max_steps || m.step}]`;
+    const vTxt = m.val_loss != null ? Number(m.val_loss).toFixed(4) : "—";
+    document.getElementById("rt-loss").textContent = `${Number(m.train_loss || 0).toFixed(4)} / ${vTxt}`;
+    document.getElementById("rt-ppl").textContent = m.perplexity != null ? Number(m.perplexity).toFixed(3) : "—";
+    document.getElementById("rt-lr").textContent = m.lr != null ? Number(m.lr).toExponential(2) : "—";
+    document.getElementById("rt-grad").textContent = m.grad_norm != null ? Number(m.grad_norm).toFixed(3) : "—";
+    document.getElementById("rt-entropy").textContent = m.router_entropy != null ? Number(m.router_entropy).toFixed(3) : "1.000";
+    document.getElementById("rt-memsave").textContent =
+      m.logit_mem_saved_gb > 0 ? `-${Number(m.logit_mem_saved_gb).toFixed(2)} GiB` : "Baseline";
+    document.getElementById("rt-toks").textContent = `${Math.round(Number(m.tokens_per_sec || 0)).toLocaleString()} tok/s`;
+  }
+
+  const ledgerBody = document.querySelector("#live-trial-ledger tbody");
+  if (ledgerBody) {
+    const rows = (snap.completed_trials || []).slice().reverse().slice(0, 8);
+    ledgerBody.innerHTML = rows
+      .map(
+        (t) => `
+        <tr>
+          <td><code>${t.trial_id}</code></td>
+          <td>${t.world_size || 1}&times;GB10</td>
+          <td><strong>${Math.round(Number(t.tokens_per_sec || 0)).toLocaleString()}</strong></td>
+          <td>${t.val_loss != null ? Number(t.val_loss).toFixed(4) : "—"}</td>
+          <td>${t.held_out_perplexity ? Number(t.held_out_perplexity).toFixed(3) : "—"}</td>
+        </tr>
+      `
+      )
+      .join("");
+  }
+}
+
 function renderLiveTelemetry(snap) {
   latestLiveSnap = snap;
-  document.getElementById("pill-def-id").textContent = snap.definition_id || currentTeamId();
+  renderClientMachineBridge(snap.client_machine, snap.cluster_endpoint, snap.definition_id || currentTeamId());
   document.getElementById("live-stage-label").textContent = snap.stage_label || "Ready";
 
   const stBadge = document.getElementById("live-run-state");
   const st = String(snap.state || "idle");
   stBadge.textContent =
     st === "queued_for_gpu"
-      ? `QUEUED FOR GPU · ${snap.backend}`
+      ? `QUEUED ON FUZZBALL · ${snap.backend}`
       : `${st.toUpperCase()} · ${snap.backend}`;
   stBadge.className =
     st === "queued_for_gpu"
@@ -183,6 +403,9 @@ function renderLiveTelemetry(snap) {
     .map((ev) => `<div class="event-line"><span class="ev-ts">[${ev.time_utc}]</span>${ev.message}</div>`)
     .join("");
 
+  renderDualGpuFabric(snap);
+  renderRealtimeAnalysis(snap);
+
   if ((st === "running" || st === "queued_for_gpu") && snap.live_curves && Object.keys(snap.live_curves).length > 0) {
     renderLossSvg(snap.live_curves, snap.live_val_curves || {});
   }
@@ -199,10 +422,12 @@ function renderLossSvg(curves, valCurves = {}) {
 
   const active = seriesDefs.filter((s) => Array.isArray(s.src[s.key]) && s.src[s.key].length > 1);
   if (active.length === 0) {
-    const keys = Object.keys(curves).slice(-2);
-    const palette = ["#38bdf8", "#a3e635"];
+    const keys = Object.keys(curves).slice(-3);
+    const palette = ["#38bdf8", "#a3e635", "#c084fc"];
     keys.forEach((k, idx) => {
-      active.push({ key: k, label: `${k} (train)`, color: palette[idx % palette.length], dash: "", src: curves });
+      if (Array.isArray(curves[k]) && curves[k].length > 1) {
+        active.push({ key: k, label: `${k} (train)`, color: palette[idx % palette.length], dash: "", src: curves });
+      }
       if (Array.isArray(valCurves[k]) && valCurves[k].length > 1) {
         active.push({ key: k, label: `${k} (val)`, color: "#fbbf24", dash: "4,3", src: valCurves });
       }
@@ -243,7 +468,7 @@ function renderLossSvg(curves, valCurves = {}) {
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="none">
       ${gridLines}
       ${polylines}
-      <text x="${(width + pad.left) / 2}" y="${height - 5}" fill="#7f91ad" font-size="10.5" text-anchor="middle">Training &amp; Validation Evaluation Step</text>
+      <text x="${(width + pad.left) / 2}" y="${height - 5}" fill="#7f91ad" font-size="10.5" text-anchor="middle">Optimization Step (Train &amp; Validation Split Evaluation)</text>
     </svg>
   `;
 
@@ -267,7 +492,7 @@ function renderDashboard(data) {
   const tunedPpl = sa.winning_summary.held_out_perplexity.toFixed(3);
   document.getElementById("kpi-ppl").textContent = `${sa.base_held_out_perplexity.toFixed(3)} → ${tunedPpl}`;
   document.getElementById("meta-stage-a").textContent =
-    `Winner: ${sa.winning_label} · Val loss ${sa.winning_summary.final_val_loss.toFixed(3)} · Test loss ${sa.winning_summary.held_out_eval_loss.toFixed(3)} (${sa.early_stopped_count} pruned)`;
+    `Winner: ${sa.winning_label} · Val ${sa.winning_summary.final_val_loss.toFixed(3)} · Test ${sa.winning_summary.held_out_eval_loss.toFixed(3)} (${sa.early_stopped_count} pruned)`;
 
   const baseTrainTok = sb.outcomes[0].summary.mean_tokens_per_sec;
   const winTrainOut = sb.outcomes.find((o) => o.label === sb.winning_label) || sb.outcomes[0];
@@ -275,7 +500,7 @@ function renderDashboard(data) {
   document.getElementById("kpi-train-speed").textContent =
     `${Math.round(bestTrainTok).toLocaleString()} tok/s (${sb.overall_speedup_x}x)`;
   document.getElementById("meta-stage-b").textContent =
-    `${Math.round(baseTrainTok).toLocaleString()} → ${Math.round(bestTrainTok).toLocaleString()} tok/s · 1-node sm_121 speedup: ${sb.single_node_kernel_speedup_x}x`;
+    `${Math.round(baseTrainTok).toLocaleString()} → ${Math.round(bestTrainTok).toLocaleString()} tok/s · 1-node sm_121: ${sb.single_node_kernel_speedup_x}x`;
 
   const winServeOut = sc.outcomes.find((o) => o.label === sc.winning_label) || sc.outcomes[0];
   document.getElementById("kpi-serve-speed").textContent =
@@ -285,7 +510,7 @@ function renderDashboard(data) {
 
   const scs = data.dataset_manifest.split_file_counts || {};
   document.getElementById("meta-stage-d").textContent =
-    `Dataset '${data.dataset_manifest.dataset_name}' (Train ${scs.train || 0} / Val ${scs.val || 0} / Test ${scs.held_out || 0}) · use: ${data.cluster.vast.provisioner}`;
+    `Split (${scs.train || 0}T / ${scs.val || 0}V / ${scs.held_out || 0}Test) · VAST use: ${data.cluster.vast.provisioner}`;
 
   document.getElementById("curve-badge").textContent =
     `Winner Δ = ${winTrainOut.max_loss_curve_delta.toFixed(4)} (≤ 0.025)`;
@@ -309,7 +534,7 @@ function renderDashboard(data) {
       return `
         <div class="bar-row">
           <div class="bar-top">
-            <span><code>${o.label}</code> (${o.summary.world_size}N · ${o.summary.peak_mem_gb.toFixed(0)} GiB)</span>
+            <span><code>${o.label}</code> (${o.summary.world_size}×GB10 · ${o.summary.peak_mem_gb.toFixed(0)} GiB)</span>
             <span><strong>${Math.round(tok).toLocaleString()} tok/s</strong> &nbsp;${statusTag}</span>
           </div>
           <div class="bar-track"><div class="${cls}" style="width:${pct}%"></div></div>
@@ -360,8 +585,21 @@ function renderDashboard(data) {
   const fwBox = document.getElementById("firewall-audit-box");
   fwBox.classList.remove("blocked-alert");
   fwBox.innerHTML =
-    `<strong>Privacy Schema Firewall Verified:</strong> ${audits.length} advisor payloads inspected · ` +
-    `<code>contains_raw_data=false</code> on all outbound requests · Latest SHA-256: <code>${lastDigest}…</code>`;
+    `<strong>Client &harr; Fuzzball Privacy Firewall Verified:</strong> ${audits.length} payloads audited &middot; ` +
+    `<code>contains_raw_data=false</code> &middot; SHA-256: <code>${lastDigest}…</code>`;
+}
+
+async function runPlaygroundSample() {
+  try {
+    const prompt = document.getElementById("playground-prompt").value;
+    const res = await fetchJson("/api/playground/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, compare_base: true }),
+    });
+    document.getElementById("pg-base-out").textContent = res.base_output || "";
+    document.getElementById("pg-tuned-out").textContent = res.tuned_output || "";
+  } catch (_) {}
 }
 
 function connectLiveStream() {
@@ -374,19 +612,46 @@ function connectLiveStream() {
       const summary = await fetchJson("/api/summary");
       renderDashboard(summary);
       await refreshBuildPreview();
+      await runPlaygroundSample();
       document.getElementById("btn-run").disabled = false;
-      document.getElementById("btn-run").textContent = "Optimize Model & Generate Build";
+      document.getElementById("btn-run").textContent = "Tune on Fuzzball & Generate Local LLM";
     } else if (snap.state === "failed") {
       document.getElementById("btn-run").disabled = false;
-      document.getElementById("btn-run").textContent = "Optimize Model & Generate Build";
+      document.getElementById("btn-run").textContent = "Tune on Fuzzball & Generate Local LLM";
     }
     prevState = snap.state;
   };
 }
 
-// Model input & drag-and-drop wiring
-document.getElementById("model-id-input").addEventListener("change", (e) => refreshModelSpec(e.target.value));
+// Event bindings
+document.getElementById("model-id-input").addEventListener("change", (e) => {
+  refreshModelSpec(e.target.value);
+  renderCatalogCards();
+});
 document.getElementById("model-id-input").addEventListener("blur", (e) => refreshModelSpec(e.target.value));
+document.getElementById("catalog-filter-input").addEventListener("input", () => renderCatalogCards());
+
+document.getElementById("btn-connect-cluster").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-connect-cluster");
+  btn.textContent = "Probing…";
+  try {
+    const res = await fetchJson("/api/cluster/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cluster_endpoint: currentClusterEndpoint(),
+        definition_id: currentTeamId(),
+        vast_volume: "runs",
+        fuzzfile_version: "v4",
+      }),
+    });
+    renderClientMachineBridge(null, res.cluster_endpoint, res.cluster_config.definition_id);
+    const statusEl = document.getElementById("bridge-conn-status");
+    const pingTxt = res.ping_ms != null ? ` (${res.ping_ms} ms)` : "";
+    statusEl.innerHTML = `<strong>${res.execution_mode_hint}</strong>${pingTxt} &middot; VAST volume <code>${res.cluster_config.vast.persistent_volume_name}</code> (<code>use: ${res.cluster_config.vast.provisioner}</code>)`;
+  } catch (_) {}
+  btn.textContent = "Probe Server";
+});
 
 const dz = document.getElementById("dropzone");
 dz.addEventListener("dragover", (e) => {
@@ -418,8 +683,9 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   const modelId = currentModelId();
   const backend = document.getElementById("backend-select").value;
   const teamId = currentTeamId();
+  const clusterEp = currentClusterEndpoint();
   btn.disabled = true;
-  btn.textContent = `Optimizing (${backend})…`;
+  btn.textContent = `Tuning on Fuzzball (${backend})…`;
   const resp = await fetch("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -429,18 +695,21 @@ document.getElementById("btn-run").addEventListener("click", async () => {
       backend,
       fuzzfile_version: "v4",
       definition_id: teamId,
+      cluster_endpoint: clusterEp,
       async_mode: true,
     }),
   });
   if (!resp.ok) {
     btn.disabled = false;
-    btn.textContent = "Optimize Model & Generate Build";
+    btn.textContent = "Tune on Fuzzball & Generate Local LLM";
     const err = await resp.json();
     const errBanner = document.getElementById("live-error-banner");
     errBanner.textContent = err.detail || "Failed to start optimization";
     errBanner.classList.remove("hidden");
   }
 });
+
+document.getElementById("btn-run-playground").addEventListener("click", runPlaygroundSample);
 
 document.getElementById("btn-probe").addEventListener("click", async () => {
   const resp = await fetch("/api/firewall-probe", {
@@ -453,8 +722,8 @@ document.getElementById("btn-probe").addEventListener("click", async () => {
   if (res.blocked) {
     fwBox.classList.add("blocked-alert");
     fwBox.innerHTML =
-      `<strong>Firewall Guard Triggered (Zero Egress):</strong> Blocked simulated C++ code injection before serialization — ` +
-      `<code>${res.violation}</code> (Audit SHA-256: <code>${res.record.payload_sha256.slice(0, 16)}…</code>)`;
+      `<strong>Zero-Leak Firewall Guard Triggered:</strong> Blocked raw C++ snippet from leaving client/VAST boundary — ` +
+      `<code>${res.violation}</code> (SHA-256: <code>${res.record.payload_sha256.slice(0, 16)}…</code>)`;
   }
 });
 
@@ -472,7 +741,7 @@ document.getElementById("btn-copy-yaml").addEventListener("click", async () => {
   await navigator.clipboard.writeText(text);
   const btn = document.getElementById("btn-copy-yaml");
   btn.textContent = "Copied!";
-  setTimeout(() => (btn.textContent = "Copy File"), 1400);
+  setTimeout(() => (btn.textContent = "Copy"), 1400);
 });
 
 (async () => {
@@ -484,5 +753,5 @@ document.getElementById("btn-copy-yaml").addEventListener("click", async () => {
   renderDashboard(summary);
   renderLiveTelemetry(liveSnap);
   await refreshBuildPreview();
-  setTimeout(connectLiveStream, 600);
+  setTimeout(connectLiveStream, 350);
 })();

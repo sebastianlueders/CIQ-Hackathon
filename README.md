@@ -1,7 +1,7 @@
-# Crucible — Local Autoresearch & `sm_121` Performance-Engineering Agent (Team 20)
+# Crucible — Enterprise Client Studio & Fuzzball Remote GPU Local LLM Forge
 
-> **Bring your private codebase, your base model, and your hardware.**  
-> Crucible runs the ML research, training-systems, and inference-serving experiments directly on your own **CIQ Fuzzball** cluster over **VAST Data** shared volumes on **NVIDIA GB10 (`sm_121`)** nodes — and hands back **one reproducible Fuzzball workflow** (`ingest -> train -> eval -> serve`). **Your raw data never leaves the room.**
+> **Run the Studio on your client business machine. Dispatch private tuning to your CIQ Fuzzball 2xGB10 GPU server. Receive a turnkey local LLM.**  
+> Crucible runs its client-facing UI on a thin business workstation (`http://127.0.0.1:8000`), stages proprietary corpora into leak-free Train / Validation / Sealed Test splits, dispatches 4-stage ML recipe, `sm_121` kernel, and vLLM serving optimization to a remote **CIQ Fuzzball** cluster (`api.fb-hack.civilfritz.net:443`) over **VAST Data** shared volumes on **2x NVIDIA GB10 (`sm_121`)** nodes — and packages a ready-to-run local LLM build (`Modelfile.ollama` + Python Client SDK + `fuzzfile.yaml`). **Zero raw bytes ever leave your local/VAST boundary.**
 
 **Team 20**: Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania · **Track**: Multi-Node Training
 
