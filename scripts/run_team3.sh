@@ -96,7 +96,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# 1. Resolve existing Python virtual environment (zero extra pip packages needed!)
+# 1. Resolve or auto-create local Python virtual environment
 if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
   VENV_BIN="${REPO_ROOT}/.venv/bin"
 elif command -v alchemy >/dev/null 2>&1; then
@@ -111,23 +111,29 @@ else
   "${VENV_BIN}/pip" install -e ".[ui,test]"
 fi
 
+if ! "${VENV_BIN}/python" -c "import crucible, fastapi, uvicorn" >/dev/null 2>&1; then
+  echo "[alchemy] Installing Alchemy Studio & CLI dependencies into ${VENV_BIN} ..."
+  "${VENV_BIN}/pip" install -e ".[ui,test]"
+fi
+
 if [[ -x "${VENV_BIN}/alchemy" ]]; then
   CRUCIBLE="${VENV_BIN}/alchemy"
 else
   CRUCIBLE="${VENV_BIN}/crucible"
 fi
 
-# 2. Discover active Fuzzball team (`team3`) and check whether venue/cluster Wi-Fi is reachable
+# 2. Discover active Fuzzball team (`team3`), cluster reachability, and node cordon status
 DISCOVER_JSON="$("$CRUCIBLE" discover --json)"
 if [[ "$TEAM_ID" == "auto" ]]; then
   TEAM_ID="$("${VENV_BIN}/python" -c 'import json,sys; print(json.loads(sys.stdin.read())["cluster_config"]["definition_id"])' <<<"$DISCOVER_JSON")"
 fi
 CLUSTER_REACHABLE="$("${VENV_BIN}/python" -c 'import json,sys; print("1" if json.loads(sys.stdin.read())["discovery_report"].get("cluster_reachable") else "0")' <<<"$DISCOVER_JSON")"
+ALL_CORDONED="$("${VENV_BIN}/python" -c 'import json,sys; print("1" if json.loads(sys.stdin.read())["discovery_report"].get("all_nodes_cordoned") else "0")' <<<"$DISCOVER_JSON")"
 export CRUCIBLE_DEFINITION_ID="$TEAM_ID"
 
-# 3. Auto-select execution backend based on live cluster reachability
+# 3. Auto-select execution backend based on live cluster reachability & node availability
 if [[ "$BACKEND" == "auto" ]]; then
-  if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; then
+  if [[ "$CLUSTER_REACHABLE" == "1" ]] && [[ "$ALL_CORDONED" != "1" ]] && command -v fuzzball >/dev/null 2>&1; then
     if fuzzball mcp serve --help >/dev/null 2>&1; then
       BACKEND="fuzzball_mcp"
     else
@@ -138,7 +144,7 @@ if [[ "$BACKEND" == "auto" ]]; then
   fi
 fi
 
-if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; then
+if [[ "$CLUSTER_REACHABLE" == "1" ]] && [[ "$ALL_CORDONED" != "1" ]] && command -v fuzzball >/dev/null 2>&1; then
   VOL_OUT="$(fuzzball volume list "$TEAM_ID" 2>/dev/null || true)"
   if echo "$VOL_OUT" | grep -qw "runs"; then
     export CRUCIBLE_VAST_VOLUME="runs"
@@ -150,19 +156,12 @@ if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; the
     export CRUCIBLE_VAST_VOLUME="runs"
   fi
   echo "[alchemy] LIVE CLUSTER CONNECTED -> team='${TEAM_ID}', backend='${BACKEND}', volume='${CRUCIBLE_VAST_VOLUME}'"
-  # Pre-stage Qwen/Qwen2.5-Coder-1.5B-Instruct (3.1 GB BF16, 0 GPUs used) in background onto VAST for fast live-demo baseline!
-  ACTIVE_WFS="$(fuzzball workflow list 2>/dev/null || true)"
-  if ! echo "$ACTIVE_WFS" | grep -q "crucible-stage-qwen2.5-1.5b"; then
-    STAGE_YAML="$("${VENV_BIN}/python" -c 'from crucible.config import ClusterConfig; from crucible.fuzzball.discovery import discover_cluster_config; from crucible.fuzzball.renderer import render_model_staging_fuzzfile; c,_=discover_cluster_config(); print(render_model_staging_fuzzfile(c, "Qwen/Qwen2.5-Coder-1.5B-Instruct", "Qwen/Qwen2.5-Coder-1.5B-Instruct"))')"
-    STAGE_TMP="${REPO_ROOT}/runs/stage-qwen25-1.5b.yaml"
-    mkdir -p "${REPO_ROOT}/runs"
-    printf "%s\n" "$STAGE_YAML" > "$STAGE_TMP"
-    echo "[alchemy] Pre-loading fast live-demo baseline model (Qwen/Qwen2.5-Coder-1.5B-Instruct, 0 GPUs used) onto VAST..."
-    fuzzball workflow start "$STAGE_TMP" --name crucible-stage-qwen2.5-1.5b >/dev/null 2>&1 || true
-  fi
+elif [[ "$CLUSTER_REACHABLE" == "1" ]] && [[ "$ALL_CORDONED" == "1" ]]; then
+  export CRUCIBLE_VAST_VOLUME="runs"
+  echo "[alchemy] Fuzzball control plane connected (nodes currently CORDONED for judging) -> streaming calibrated SPARK05/06 GB10 Empirical Twin."
 else
   export CRUCIBLE_VAST_VOLUME="runs"
-  echo "[alchemy] Cluster Wi-Fi not currently connected -> starting Client Studio in GB10 Empirical Twin mode (team='${TEAM_ID}', auto-switches to live Fuzzball MCP when on cluster Wi-Fi)."
+  echo "[alchemy] Offline / no cluster Wi-Fi -> starting Studio with calibrated SPARK05/06 GB10 Empirical Twin (all features unlocked)."
 fi
 "$CRUCIBLE" discover
 
