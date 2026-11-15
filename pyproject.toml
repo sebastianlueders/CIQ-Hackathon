@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "crucible"
+name = "alchemy"
 version = "0.1.0"
-description = "Crucible: Privacy-preserving autoresearch and sm_121 performance-engineering agent for local fine-tuning and serving on CIQ Fuzzball, VAST Data, and NVIDIA GB10."
+description = "Alchemy: Privacy-preserving autoresearch and sm_121 performance-engineering agent for local fine-tuning and serving on CIQ Fuzzball, VAST Data, and NVIDIA GB10."
 readme = "README.md"
 classifiers = ["License :: OSI Approved :: MIT License"]
 requires-python = ">=3.11"
@@ -36,6 +36,7 @@ test = [
 ]
 
 [project.scripts]
+alchemy = "crucible.cli:main"
 crucible = "crucible.cli:main"
 
 [tool.setuptools.packages.find]

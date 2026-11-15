@@ -75,7 +75,7 @@ def _require_torch():
         raise RuntimeError(
             "PyTorch is not installed in this Python environment. "
             "Install 'pip install -e \".[gpu]\"' for local_torch execution, or use "
-            "'--backend fuzzball_mcp' / '--backend fuzzball' / '--backend simulator' to run on Team 20."
+            "'--backend fuzzball_mcp' / '--backend fuzzball' / '--backend simulator' to run on Team 3."
         ) from exc
 
 

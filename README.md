@@ -1,67 +1,63 @@
-# Crucible — Enterprise Client Studio & Fuzzball Remote GPU Local LLM Forge
+# Alchemy — Enterprise Client Studio & Fuzzball Remote GPU Local LLM Forge (Team 3)
 
-> **Run the Studio on your client business machine. Dispatch private tuning to your CIQ Fuzzball 2xGB10 GPU server. Receive a turnkey local LLM.**  
-> Crucible runs its client-facing UI on a thin business workstation (`http://127.0.0.1:8000`), stages proprietary corpora into leak-free Train / Validation / Sealed Test splits, dispatches 4-stage ML recipe, `sm_121` kernel, and vLLM serving optimization to a remote **CIQ Fuzzball** cluster (`api.fb-hack.civilfritz.net:443`) over **VAST Data** shared volumes on **2x NVIDIA GB10 (`sm_121`)** nodes — and packages a ready-to-run local LLM build (`Modelfile.ollama` + Python Client SDK + `fuzzfile.yaml`). **Zero raw bytes ever leave your local/VAST boundary.**
+> **Run Alchemy Studio on your client business machine. Dispatch private tuning to your CIQ Fuzzball 2xGB10 GPU server. Receive a turnkey local LLM & branded copilot app.**  
+> Alchemy runs its client-facing UI on a thin business workstation (`http://127.0.0.1:8000`), stages proprietary corpora into leak-free Train / Validation / Sealed Test splits, dispatches 4-stage + Continuous Remote-Teacher LoRA, `sm_121` kernel, and vLLM serving optimization to a remote **CIQ Fuzzball** cluster (`api.fb-hack.civilfritz.net:443`, `team3@fb-hack.local`) over **VAST Data** shared volumes on **2x NVIDIA GB10 (`sm_121`)** nodes — and packages a ready-to-run local LLM build (`scripts/run_company_app.py` + `Modelfile.ollama` + Python Client SDK + `fuzzfile.yaml`). **Zero raw bytes ever leave your local/VAST boundary.**
 
-**Team 20**: Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania · **Track**: Multi-Node Training
+**Team 3**: Tushar Sonthalia, Kunlin Han, Sebastian Lueders, Akshat Singhania · **Track**: Multi-Node Training (NVIDIA GB10 · CIQ Fuzzball · VAST Data)
 
 ---
 
-## Live Team 20 Cluster Target (`definitionId: team20`)
+## Live Team 3 Cluster Target (`definitionId: team3`)
 
-Crucible is pre-configured out of the box for Team 20's live Grace Blackwell DGX Spark nodes:
+Alchemy is pre-configured out of the box for **Team 3** (`team3@fb-hack.local`) on Grace Blackwell DGX Spark nodes:
 
-| Node | Substrate ID | GPU (`sm_121`) | CPU (`cpu/arm64/sve`) | Unified RAM | Safe Container Alloc |
+| Node | Substrate ID | GPU (`sm_121`) | CPU (`cpu/arm64/sve`) | Unified RAM | Fast-Schedule Container Alloc |
 | --- | --- | --- | --- | --- | --- |
-| `CIQ-CHI-SPARK39` | `192.168.99.48/7331` | `1x NVIDIA-GB10` (`nvidia.com/gpu: 1`) | 20 cores | 127.9 GiB | `16 cores / 112GiB` |
-| `CIQ-CHI-SPARK40` | `192.168.99.49/7331` | `1x NVIDIA-GB10` (`nvidia.com/gpu: 1`) | 20 cores | 127.9 GiB | `16 cores / 112GiB` |
-| **Team 20 Total** | `definitionId: team20` | **2x `nvidia.com/gpu`** | **40 cores** | **255.8 GiB** | Pinned via `fuzzball.io/provisioner_definition_id: team20` |
+| `CIQ-CHI-SPARK05` | `192.168.99.14/7331` | `1x NVIDIA-GB10` (`nvidia.com/gpu: 1`) | 20 cores | 127.9 GiB | `8–16 cores / 80–96GiB` |
+| `CIQ-CHI-SPARK06` | `192.168.99.15/7331` | `1x NVIDIA-GB10` (`nvidia.com/gpu: 1`) | 20 cores | 127.9 GiB | `8–16 cores / 80–96GiB` |
+| **Team 3 Total** | `use: team3` | **2x `nvidia.com/gpu`** | **40 cores** | **255.8 GiB** | Shared VAST volumes: `runs`, `models`, `data`, `envs` |
 
-- **ARM64 + `sm_121` Multi-Arch NGC Images**: `nvcr.io/nvidia/pytorch:26.03-py3` (CUDA 13.2 + PyTorch 2.11 verified on GB10) and `nvcr.io/nvidia/vllm:26.04-py3` (`--attention-backend TRITON_ATTN`).
-
----
-
-## One-Command Launch on Team 20 + Live Web Studio (`http://127.0.0.1:8000`)
-
-```bash
-# Installs Crucible, auto-discovers Team 20 resources, validates Fuzzfiles, starts the Live UI
-# at http://127.0.0.1:8000, and launches the 4-stage autoresearch loop!
-./scripts/run_team20.sh
-
-# Force live CIQ Fuzzball 4.2 MCP (`fuzzball mcp serve --allow-write --allow-exec`) on team20:
-./scripts/run_team20.sh --backend fuzzball_mcp
-
-# Or start the Live Studio UI directly and trigger runs from your browser:
-crucible serve --port 8000
-```
-
-From `http://127.0.0.1:8000`, pick **`Fuzzball 4.2 MCP · team20 Live`** (or `Fuzzball CLI`, `Team 20 GB10 Calibrated Sim`, or `Local PyTorch Kernels`) and click **`Launch on team20`** to watch live Fuzzball workflow UUIDs, node placement across `CIQ-CHI-SPARK39` and `CIQ-CHI-SPARK40`, trial loss curves, privacy firewall SHA-256 audits, and the emitted Fuzzfile stream in real time.
-
-### Running the Bootstrap & Optional Cluster-Hosted Studio on Fuzzball
-
-```bash
-# 1. Populate /vast/models/Qwen3-Coder-30B-A3B and /vast/data/lammps on VAST (once)
-fuzzball workflow validate workflows/00-fetch.yaml
-fuzzball workflow start workflows/00-fetch.yaml -n crucible-00-fetch
-
-# 2. (Optional) Host Crucible Live Studio as a Fuzzball HTTP endpoint on team20 (0 GPUs used)
-fuzzball workflow validate workflows/crucible-studio.yaml
-fuzzball workflow start workflows/crucible-studio.yaml -n crucible-team20-studio
-
-# 3. Launch the emitted turnkey production workflow end-to-end
-fuzzball workflow start runs/team20-live/final-crucible-workflow.yaml -n lammps-qwen3-30b-team20
-```
+- **Pre-Cached ARM64 + `sm_121` Container Images**: `docker://nvcr.io/nvidia/pytorch:26.10-py3` (CUDA 13.4 + Triton 3.8 + `sm_121` verified on GB10; `99.1` BF16 / `198.6` FP8 TFLOP/s) and `docker://vllm/vllm-openai:v0.33.0`.
+- **Pre-Loaded Team 3 VAST Models (`/models`)**: `Qwen/Qwen3-Coder-30B-A3B-Instruct` (`56.9 GiB`), `Qwen/Qwen3-4B`, and `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`3.1 GiB`), plus 52 catalog presets across 6 categories and 1-click VAST staging for any HuggingFace ID.
 
 ---
 
-## 4-Stage Autoresearch Loop & Privacy Schema Firewall
+## One-Command Launch on Team 3 (`http://127.0.0.1:8000`)
 
-1. **Stage A — ML Recipe Search**: Parallel short LoRA trials across `CIQ-CHI-SPARK39` and `CIQ-CHI-SPARK40` scheduled by deterministic **Successive Halving**, selecting the winner by **sealed whole-file held-out evaluation loss**.
-2. **Stage B — Training Performance Search**: Sweeps micro-batching, activation checkpointing, 1- vs. 2-node `torchrun`/NCCL DDP, and 3 custom `sm_121` training kernels — accepted **only when the loss curve matches within `Δ <= 0.025`**.
-3. **Stage C — Inference Performance Search**: Sweeps vLLM precision (`BF16`, `FP8`, Blackwell `NVFP4`), data replicas vs. tensor parallelism (`2xTP1` vs. `1xTP2`), and concurrency — gated on the **held-out C++ quality floor** and P99 ceiling.
-4. **Stage D — Turnkey Emission**: Emits one commented CIQ Fuzzball `v4` workflow (`final-crucible-workflow.yaml`) + `run_report.md`.
+```bash
+# Start the interactive Enterprise Client Studio at http://127.0.0.1:8000 (auto-detects team3 & live Wi-Fi):
+./scripts/run_team3.sh --studio-only
 
-All LLM advisor calls pass through `PrivacySchemaFirewall` (`src/crucible/firewall.py`), proving `0` raw code/dataset bytes ever leave `/vast`.
+# Or launch AND immediately run live Fuzzball MCP optimization on Team 3 GPUs:
+./scripts/run_team3.sh --model Qwen/Qwen2.5-Coder-1.5B-Instruct --backend fuzzball_mcp --time-budget 5 --cost-budget 3.50
+
+# Or start the FastAPI Studio directly via the CLI:
+alchemy serve --port 8000
+```
+
+From `http://127.0.0.1:8000`:
+1. **Pick Any Base Model**: Filter 52 open-weight presets (`Min: 1 GPU` / `Min: 2 GPUs`, `Pre-Loaded`, `Preset Opt` with company `sm_121` warm-start dollar savings) or paste any HuggingFace `org/model` ID.
+2. **Company Workspace & Private Corpus**: Set your enterprise copilot brand (default: **`Apex Dynamics`**) and drop proprietary code/JSONL/docs (or use the built-in LAMMPS C++ benchmark) for deterministic local Train / Validation / Sealed Test splitting.
+3. **Continuous Remote-Teacher & Budget**: Set your Time Budget (minutes) and Cost Cap (`$ USD`), dispatch to **`CIQ Fuzzball 4.2 MCP Server · Live Hardware`**, watch the **Live Dual-GPU Usage & 200GbE RoCE NCCL Fabric**, real-time loss-curve equivalence (`Δ <= 0.025`), and Teacher rounds stream live, then test your tuned LLM side-by-side or download the turnkey `.zip`!
+
+### Unzip & Launch the Built Company Copilot App Locally
+
+```bash
+cd ~/Downloads
+unzip -o apex-dynamics-private-llm-*.zip -d apex-ai && python3 apex-ai/scripts/run_company_app.py
+```
+Opens a standalone, zero-dependency **`Apex Dynamics — Private Engineering Copilot`** web app at `http://127.0.0.1:8765` on the client laptop that executes prompts directly on your private Team 3 Fuzzball GB10 cluster (alongside `fuzzfile.yaml`, `Modelfile.ollama`, `scripts/launch_fuzzball.sh`, `scripts/client_query_llm.py`, `BUILD_REPORT.md`, and `privacy_audit.jsonl`).
+
+---
+
+## 4-Stage + Continuous Remote-Teacher Loop & Privacy Schema Firewall
+
+1. **Stage A — ML Recipe Search**: Parallel LoRA trials across `CIQ-CHI-SPARK05` and `CIQ-CHI-SPARK06` scheduled by deterministic **Successive Halving**, pruned by Validation loss and ranked by **Sealed Held-Out Test perplexity**.
+2. **Stage B — Training Performance Search**: Warm-starts from verified company `sm_121` hardware presets or sweeps micro-batching, activation checkpointing, 1- vs. 2-node `torchrun`/NCCL DDP (`1,011 -> 2,006 tok/s`, `99.2%` scaling efficiency), and custom `sm_121` kernels — accepted **only when the loss curve matches within `Δ <= 0.025`**.
+3. **Stage C — Inference Performance Search**: Sweeps vLLM precision (`BF16`, `FP8`, Blackwell `NVFP4`), data replicas vs. tensor parallelism (`2xTP1` vs. `1xTP2`), and concurrency — gated on the **Held-Out Test quality floor** and P99 ceiling.
+4. **Continuous Remote-Teacher Rounds + Turnkey Emission**: Iteratively proposes firewalled joint intelligence + throughput mutations within your Time & `$` Cost budgets, then emits `final-crucible-workflow.yaml` + the downloadable client `.zip`.
+
+All Remote Teacher / Advisor requests pass through `PrivacySchemaFirewall` (`src/crucible/firewall.py`), proving with SHA-256 audit records that `0` raw code/dataset bytes ever leave `/vast`.
 
 ---
 
@@ -69,7 +65,7 @@ All LLM advisor calls pass through `PrivacySchemaFirewall` (`src/crucible/firewa
 
 | Kernel | Hardware Bottleneck Solved on GB10 `sm_121` | Verification |
 | --- | --- | --- |
-| `chunked_cross_entropy` | Eliminates `~4.9 GB` FP32 `[B*T, 151936]` logit materialization via tiled online log-sum-exp | Forward + backward parity (`< 1e-4`) |
-| `grouped_moe_gemm` | Coalesces ragged top-8-of-128 expert projections in `Qwen3-Coder-30B-A3B` | Numerical parity vs. per-expert loop |
+| `chunked_cross_entropy` | Eliminates `~6.96 GB -> 0.34 GB` FP32 `[B*T, 151936]` logit temporary via tiled online log-sum-exp (`2.35x` faster) | Forward + backward parity (`< 1e-4`) |
+| `grouped_moe_gemm` | Coalesces ragged top-8-of-128 expert projections in `Qwen3-Coder-30B-A3B` (`1.90x` step speedup) | Numerical parity vs. per-expert loop |
 | `fused_lora` | Fuses frozen BF16 base projection + scaled low-rank adapter `Wx + (alpha/r) B(Ax)` | Exact `dX, dA, dB` autograd parity |
 | `low_prec_decode` | Block-scaled FP8 & Blackwell NVFP4 (`E2M1` 16-element micro-blocks) decode dequant-GEMV | `3.2x` weight compression + quality floor |

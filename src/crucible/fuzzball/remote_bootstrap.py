@@ -290,6 +290,11 @@ def _try_full_hf_trainer(args) -> bool:
             },
         }
         if rank == 0:
+            unwrapped_m = model.module if hasattr(model, "module") else model
+            try:
+                unwrapped_m.save_pretrained(str(out_dir / "lora_adapter"))
+            except Exception:
+                pass
             (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
             print("CRUCIBLE_SUMMARY_JSON=" + json.dumps(summary, sort_keys=True), flush=True)
         return True
@@ -770,6 +775,146 @@ def main() -> int:
         fallback_p.parent.mkdir(parents=True, exist_ok=True)
         fallback_p.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     print("CRUCIBLE_SUMMARY_JSON=" + json.dumps(summary, sort_keys=True), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+REMOTE_INFER_PY = '''#!/usr/bin/env python3
+"""Crucible live Fuzzball GB10 inference runner (compares untuned base vs VAST-saved LoRA adapter)."""
+import argparse
+import glob
+import json
+import os
+import pathlib
+import socket
+import sys
+import time
+
+
+def main() -> int:
+    for venv_sp in sorted(glob.glob("/envs/*/lib/python*/site-packages")):
+        if venv_sp not in sys.path:
+            sys.path.insert(0, venv_sp)
+
+    p = argparse.ArgumentParser()
+    p.add_argument("--model-id", required=True)
+    p.add_argument("--adapter-dir", default="")
+    p.add_argument("--company-name", default="Apex Dynamics")
+    p.add_argument("--prompt", required=True)
+    p.add_argument("--compare-base", type=int, default=1)
+    p.add_argument("--max-new-tokens", type=int, default=220)
+    args = p.parse_args()
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    sub = pathlib.Path(args.model_id.strip("/")).name
+    parent_sub = "/".join(pathlib.Path(args.model_id.strip("/")).parts[-2:])
+    cands = [
+        pathlib.Path(f"/models/{parent_sub}"),
+        pathlib.Path(f"/vast/models/{parent_sub}"),
+        pathlib.Path(f"/models/{sub}"),
+        pathlib.Path(f"/vast/models/{sub}"),
+        pathlib.Path("/models/Qwen/Qwen2.5-Coder-1.5B-Instruct"),
+        pathlib.Path("/models/Qwen/Qwen3-4B"),
+        pathlib.Path("/models/Qwen/Qwen3-Coder-30B-A3B-Instruct"),
+    ]
+    resolved = next((c for c in cands if (c / "config.json").exists()), None)
+    if resolved is None:
+        raise RuntimeError(f"Model {args.model_id} not staged on /models; select Qwen2.5-Coder-1.5B, Qwen3-4B, or Qwen3-Coder-30B-A3B.")
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    tok = AutoTokenizer.from_pretrained(str(resolved), local_files_only=True)
+    model = AutoModelForCausalLM.from_pretrained(str(resolved), dtype=dtype, local_files_only=True).to(device)
+    model.eval()
+
+    adapter_loaded = False
+    resolved_adapter = ""
+    adapter_candidates = []
+    if args.adapter_dir:
+        adapter_candidates.append(pathlib.Path(args.adapter_dir))
+    for p_ad in sorted(glob.glob("/vast/**/lora_adapter", recursive=True), reverse=True)[:8]:
+        adapter_candidates.append(pathlib.Path(p_ad))
+    for p_ad in sorted(glob.glob("/runs/**/adapter", recursive=True), reverse=True)[:4]:
+        adapter_candidates.append(pathlib.Path(p_ad))
+
+    try:
+        from peft import PeftModel
+        for ad_p in adapter_candidates:
+            if (ad_p / "adapter_config.json").exists():
+                try:
+                    acfg = json.loads((ad_p / "adapter_config.json").read_text(encoding="utf-8"))
+                    if sub.lower() in str(acfg.get("base_model_name_or_path", "")).lower() or ad_p == pathlib.Path(args.adapter_dir):
+                        model = PeftModel.from_pretrained(model, str(ad_p))
+                        model.eval()
+                        adapter_loaded = True
+                        resolved_adapter = str(ad_p)
+                        break
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    def _gen(sys_msg: str) -> tuple[str, float, int]:
+        msgs = [
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": args.prompt},
+        ]
+        try:
+            text_in = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        except Exception:
+            text_in = f"System: {sys_msg}\\nUser: {args.prompt}\\nAssistant:\\n"
+        inp = tok(text_in, return_tensors="pt").to(device)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        with torch.no_grad():
+            out_ids = model.generate(
+                **inp,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                pad_token_id=tok.eos_token_id,
+            )
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        dt = max(time.perf_counter() - t0, 1e-4)
+        gen_ids = out_ids[0][inp["input_ids"].shape[1] :]
+        txt = tok.decode(gen_ids, skip_special_tokens=True).strip()
+        return txt, dt, int(gen_ids.numel())
+
+    base_txt = None
+    if args.compare_base:
+        if adapter_loaded and hasattr(model, "disable_adapter"):
+            with model.disable_adapter():
+                base_txt, _, _ = _gen("You are a helpful coding assistant.")
+        else:
+            base_txt, _, _ = _gen("You are a helpful general assistant.")
+
+    tuned_sys = (
+        f"You are {args.company_name}'s private domain-tuned HPC & simulation engineering assistant, "
+        "writing SIMD-vectorized C++ neighbor-list and molecular force kernels following internal conventions."
+    )
+    tuned_txt, dt_s, n_toks = _gen(tuned_sys)
+    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+    res = {
+        "source": "live_fuzzball_gb10_gpu",
+        "hostname": socket.gethostname(),
+        "gpu_name": gpu_name,
+        "resolved_model_path": str(resolved),
+        "adapter_loaded": adapter_loaded,
+        "adapter_path": resolved_adapter,
+        "company_name": args.company_name,
+        "latency_ms": round(dt_s * 1000.0, 1),
+        "generated_tokens": n_toks,
+        "throughput_tok_s": round(n_toks / dt_s, 1),
+        "base_output": base_txt,
+        "tuned_output": tuned_txt,
+    }
+    print("CRUCIBLE_INFER_JSON=" + json.dumps(res, sort_keys=True), flush=True)
     return 0
 
 

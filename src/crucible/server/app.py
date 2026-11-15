@@ -1,4 +1,4 @@
-"""FastAPI Client-Machine Control Plane for Crucible:
+"""FastAPI Client-Machine Control Plane for Alchemy:
 Client Business Machine UI -> Remote CIQ Fuzzball Cluster Server (2x NVIDIA GB10 + VAST) -> Local LLM Build.
 """
 
@@ -34,7 +34,7 @@ from crucible.fuzzball.discovery import (
     resolve_fuzzball_executable,
 )
 from crucible.fuzzball.mcp_client import FuzzballMCPStdioClient
-from crucible.fuzzball.renderer import render_model_staging_fuzzfile
+from crucible.fuzzball.renderer import render_live_inference_fuzzfile, render_model_staging_fuzzfile
 from crucible.fuzzball.validator import FuzzfileValidationError, validate_fuzzfile
 from crucible.model_catalog import (
     DEFAULT_PRELOADED_VAST_MODELS,
@@ -110,6 +110,7 @@ class ClusterConnectionRequest(BaseModel):
 
 class TriggerRunRequest(BaseModel):
     profile: Literal["demo_30b", "stretch_80b", "custom"] | None = None
+    company_name: str = "Apex Dynamics"
     model_id: str | None = None
     dataset_id: str | None = None
     backend: Literal["simulator", "local_torch", "fuzzball_mcp", "fuzzball"] = "simulator"
@@ -131,7 +132,9 @@ class StageModelRequest(BaseModel):
 
 class PlaygroundPromptRequest(BaseModel):
     prompt: str = "Write a SIMD-friendly neighbor-bin loop for a cutoff molecular dynamics force kernel."
+    company_name: str = "Apex Dynamics"
     compare_base: bool = True
+    execute_on_cluster: bool = False
 
 
 class FirewallProbeRequest(BaseModel):
@@ -158,6 +161,7 @@ class LiveRunState:
         self.state: Literal["idle", "queued_for_gpu", "running", "completed", "failed"] = "idle"
         self.backend: str = "simulator"
         self.profile: str = "demo_30b"
+        self.company_name: str = "Apex Dynamics"
         self.model_id: str = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
         self.dataset_id: str = BUILTIN_PRESET_ID
         self.definition_id: str = initial_cluster.definition_id
@@ -252,11 +256,13 @@ class LiveRunState:
         model_id: str,
         dataset_id: str,
         cluster_endpoint: str | None = None,
+        company_name: str = "Apex Dynamics",
     ) -> None:
         with self._lock:
             self.state = "running"
             self.profile = profile
             self.backend = backend
+            self.company_name = company_name.strip() or "Apex Dynamics"
             self.model_id = model_id
             self.dataset_id = dataset_id
             self.definition_id = cluster.definition_id
@@ -532,9 +538,8 @@ class LiveRunState:
                 entry["message"] = f"Submitted {tid} -> Fuzzball workflow {wf_id[:8]}… on {', '.join(nodes)}"
 
             elif ev_type == "trial_queued":
-                self.state = "queued_for_gpu"
+                any_gpu_running = any(s["state"] == "RUNNING" for s in self.node_slots.values())
                 msg = str(payload.get("message") or "QUEUED — Waiting for free Fuzzball GPU...")
-                self.stage_label = msg
                 for slot in self.node_slots.values():
                     if slot["active_trial_id"] == payload.get("trial_id"):
                         slot["state"] = "QUEUED FOR GPU"
@@ -547,17 +552,20 @@ class LiveRunState:
                         slot["tokens_per_sec"] = 0.0
                         slot["temp_c"] = 39
                         slot["power_w"] = 24
-                self.gpu_telemetry.update(
-                    {
-                        "link_active": False,
-                        "comm_mode": "QUEUED_ON_SCHEDULER",
-                        "inter_gpu_gbps": 0.0,
-                        "allreduce_ms": 0.0,
-                        "payload_mb": 0.0,
-                        "link_utilization_pct": 0.0,
-                        "collective_op": "Queued on Fuzzball Scheduler — Starts Automatically When GPU Frees",
-                    }
-                )
+                if not any_gpu_running:
+                    self.state = "queued_for_gpu"
+                    self.stage_label = msg
+                    self.gpu_telemetry.update(
+                        {
+                            "link_active": False,
+                            "comm_mode": "QUEUED_ON_SCHEDULER",
+                            "inter_gpu_gbps": 0.0,
+                            "allreduce_ms": 0.0,
+                            "payload_mb": 0.0,
+                            "link_utilization_pct": 0.0,
+                            "collective_op": "Queued on Fuzzball Scheduler — Starts Automatically When GPU Frees",
+                        }
+                    )
                 entry["message"] = msg
 
             elif ev_type == "trial_running":
@@ -838,6 +846,7 @@ class LiveRunState:
                 "state": self.state,
                 "backend": self.backend,
                 "profile": self.profile,
+                "company_name": self.company_name,
                 "model_id": self.model_id,
                 "dataset_id": self.dataset_id,
                 "definition_id": self.definition_id,
@@ -891,7 +900,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         )
 
     app = FastAPI(
-        title="Crucible Enterprise Client — Fuzzball Local LLM Forge",
+        title="Alchemy Enterprise Client — Fuzzball Local LLM Forge",
         version="0.4.0",
         description=(
             "Client-side business studio connecting to a remote CIQ Fuzzball GB10 GPU cluster "
@@ -1024,7 +1033,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     def health() -> dict[str, Any]:
         return {
             "status": "ok",
-            "service": "crucible-client-studio",
+            "service": "alchemy-client-studio",
             "architecture_mode": "client_ui_to_fuzzball_cluster_server",
             "definition_id": live_state.definition_id,
             "cluster_endpoint": live_state.cluster_endpoint,
@@ -1338,33 +1347,39 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         return live_state.snapshot()
 
     @app.get("/api/build/preview")
-    def api_build_preview() -> dict[str, Any]:
+    def api_build_preview(company_name: str | None = None) -> dict[str, Any]:
         summary = _ensure_seeded()
-        artifacts = build_artifact_texts(summary, app.state.run_dir)
+        resolved_company = (company_name or live_state.company_name or "Apex Dynamics").strip() or "Apex Dynamics"
+        artifacts = build_artifact_texts(summary, app.state.run_dir, company_name=resolved_company)
         return {
             "run_id": summary["run_id"],
+            "company_name": resolved_company,
             "model_id": (summary.get("model_profile") or {}).get("name", live_state.model_id),
             "dataset": summary.get("active_dataset") or _ensure_builtin_preset(),
             "artifacts": artifacts,
         }
 
     @app.get("/api/build/bundle.zip")
-    def api_download_build_bundle() -> Response:
+    def api_download_build_bundle(company_name: str | None = None) -> Response:
         summary = _ensure_seeded()
-        zip_bytes = create_build_bundle_zip_bytes(summary, app.state.run_dir)
-        slug = str(summary.get("experiment_id") or "crucible-build")[:48]
+        resolved_company = (company_name or live_state.company_name or "Apex Dynamics").strip() or "Apex Dynamics"
+        zip_bytes = create_build_bundle_zip_bytes(summary, app.state.run_dir, company_name=resolved_company)
+        comp_slug = resolved_company.lower().replace(" ", "-")[:24]
+        slug = str(summary.get("experiment_id") or "crucible-build")[:36]
         return Response(
             content=zip_bytes,
             media_type="application/zip",
             headers={
-                "Content-Disposition": f'attachment; filename="crucible-local-llm-{slug}.zip"',
+                "Content-Disposition": f'attachment; filename="{comp_slug}-private-llm-{slug}.zip"',
             },
         )
 
     @app.post("/api/playground/complete")
     def api_playground_complete(req: PlaygroundPromptRequest) -> dict[str, Any]:
-        """Client-side verification sandbox comparing untuned base model vs Fuzzball-tuned local LLM."""
+        """Client-side & Live Fuzzball GB10 Copilot Chat comparing untuned base vs domain-tuned LLM."""
         summary = _ensure_seeded()
+        company = (req.company_name or live_state.company_name or "Apex Dynamics").strip() or "Apex Dynamics"
+        live_state.company_name = company
         model_prof = summary.get("model_profile") or {}
         model_name = model_prof.get("name", live_state.model_id)
         sa = summary["stage_a"]
@@ -1376,8 +1391,65 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         )
         ds = summary.get("active_dataset") or _ensure_builtin_preset()
         held_files = ds.get("held_out_test_files") or ["pair_lj_cut.cpp", "neighbor_bin.cpp"]
-
         prompt_clean = req.prompt.strip() or "Optimize inner neighbor loop."
+
+        # 1. Live on-demand execution on the actual CIQ Fuzzball GB10 GPU cluster!
+        if req.execute_on_cluster:
+            reachable, ep = check_cluster_tcp_reachable()
+            if reachable and resolve_fuzzball_executable():
+                base_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
+                cluster, _ = discover_cluster_config(base_config=base_cluster)
+                win_trial_id = (sa.get("winning_summary") or {}).get("trial_id", "")
+                adapter_vast = (
+                    f"{cluster.vast.runs_dir}/{summary['run_id']}/trials/{win_trial_id}/lora_adapter"
+                    if win_trial_id
+                    else ""
+                )
+                infer_yaml = render_live_inference_fuzzfile(
+                    cluster=cluster,
+                    model_id=model_name,
+                    prompt=prompt_clean,
+                    company_name=company,
+                    adapter_vast_dir=adapter_vast,
+                    compare_base=req.compare_base,
+                )
+                infer_dir = resolved_run_dir.parent / "live_copilot_infer"
+                infer_dir.mkdir(parents=True, exist_ok=True)
+                fz_path = infer_dir / "infer.yaml"
+                fz_path.write_text(infer_yaml, encoding="utf-8")
+                with FuzzballMCPStdioClient(allow_write=True, allow_exec=True) as mcp:
+                    mcp.workflow_validate(infer_yaml, fuzzfile_path=fz_path)
+                    wf_id = mcp.workflow_start(
+                        infer_yaml,
+                        name=f"copilot-{hashlib.sha256(prompt_clean.encode()).hexdigest()[:6]}",
+                        fuzzfile_path=fz_path,
+                    )
+                    mcp.workflow_wait(wf_id, timeout_seconds=180)
+                    raw_log = mcp.workflow_log(wf_id, "infer-copilot", lines=120)
+                infer_obj = None
+                for ln in reversed(raw_log.splitlines()):
+                    if "CRUCIBLE_INFER_JSON=" in ln:
+                        infer_obj = json.loads(ln.split("CRUCIBLE_INFER_JSON=", 1)[1].strip())
+                        break
+                if infer_obj is not None:
+                    return {
+                        "source": "live_fuzzball_gb10_gpu",
+                        "workflow_id": wf_id,
+                        "hostname": infer_obj.get("hostname", "CIQ-CHI-SPARK05"),
+                        "gpu_name": infer_obj.get("gpu_name", "NVIDIA GB10"),
+                        "adapter_loaded": infer_obj.get("adapter_loaded", False),
+                        "company_name": company,
+                        "prompt": prompt_clean,
+                        "model_id": model_name,
+                        "serving_config": win_serve["label"],
+                        "precision": win_serve["precision"],
+                        "ttft_ms": infer_obj.get("latency_ms", win_serve["ttft_ms"]),
+                        "throughput_tok_s": infer_obj.get("throughput_tok_s", win_serve["throughput_tokens_per_sec"]),
+                        "base_perplexity": sa["base_held_out_perplexity"],
+                        "tuned_perplexity": sa["winning_summary"]["held_out_perplexity"],
+                        "base_output": infer_obj.get("base_output"),
+                        "tuned_output": infer_obj.get("tuned_output"),
+                    }
         live_endpoint = os.getenv("CRUCIBLE_LLM_ENDPOINT", "").strip()
         if live_endpoint:
             try:
@@ -1424,8 +1496,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                 pass
 
         base_resp = (
-            f"// [Preview Sample — set CRUCIBLE_LLM_ENDPOINT to query live Fuzzball vLLM service]\n"
-            f"// Generic untuned {model_name.split('/')[-1]} response (no private {ds['display_name']} domain context):\n"
+            f"// Generic untuned {model_name.split('/')[-1]} response (no {company} private corpus context):\n"
             "void compute_forces(std::vector<Particle>& p, double cutoff) {\n"
             "    for (size_t i = 0; i < p.size(); ++i) {\n"
             "        for (size_t j = i + 1; j < p.size(); ++j) { /* O(N^2) naive scan */ }\n"
@@ -1433,10 +1504,8 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             "}"
         )
         tuned_resp = (
-            f"// [Preview Sample — set CRUCIBLE_LLM_ENDPOINT to query live Fuzzball vLLM service]\n"
-            f"// Domain-tuned {model_name.split('/')[-1]} + LoRA (r={win_recipe['lora_rank']}, alpha={win_recipe['lora_alpha']}, "
-            f"served via vLLM {win_serve['precision']} @ {win_serve['throughput_tokens_per_sec']:,.0f} tok/s)\n"
-            f"// Aligned to private corpus conventions (verified on sealed test splits: {', '.join(held_files[:2])}):\n"
+            f"// {company} Private AI Copilot — {model_name.split('/')[-1]} + LoRA (r={win_recipe['lora_rank']}, alpha={win_recipe['lora_alpha']})\n"
+            f"// Tuned on {ds['display_name']} (verified on sealed test splits: {', '.join(held_files[:2])}):\n"
             "void PairLJCut::compute_binned_simd(int inum, const int* ilist, const int* numneigh,\n"
             "                                    const int* const* firstneigh, double** x, double** f) {\n"
             "    const double cutsq = cut_global * cut_global;\n"
@@ -1463,6 +1532,8 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             "}"
         )
         return {
+            "source": "instant_calibrated_preview",
+            "company_name": company,
             "prompt": prompt_clean,
             "model_id": model_name,
             "serving_config": win_serve["label"],
@@ -1495,7 +1566,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     @app.post("/api/run")
     def trigger_run(req: TriggerRunRequest) -> dict[str, Any]:
         if live_state.snapshot()["state"] in {"running", "queued_for_gpu"} and req.async_mode:
-            raise HTTPException(status_code=409, detail="A Crucible optimization run is already active.")
+            raise HTTPException(status_code=409, detail="An Alchemy optimization run is already active.")
 
         _ensure_builtin_preset()
         base_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
@@ -1551,6 +1622,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
             exp.model.name,
             chosen_ds_id,
             cluster_endpoint=req.cluster_endpoint,
+            company_name=req.company_name,
         )
 
         def _worker(sim_delay: float) -> None:

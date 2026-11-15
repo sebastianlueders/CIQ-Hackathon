@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/run_team3.sh
-# Turnkey launcher for Crucible Studio (Pick Any Model -> Drop Data -> Optimize -> Download Build).
+# Turnkey launcher for Alchemy Studio (Pick Any Model -> Drop Data -> Optimize -> Download Build).
 #
 # Default: ensures the `team3` VAST volume exists, opens http://127.0.0.1:8000 with the built-in
 # Train / Validation / Held-Out Test benchmark pre-loaded so you can pick any model, drop files,
@@ -99,17 +99,23 @@ done
 # 1. Resolve existing Python virtual environment (zero extra pip packages needed!)
 if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
   VENV_BIN="${REPO_ROOT}/.venv/bin"
+elif command -v alchemy >/dev/null 2>&1; then
+  VENV_BIN="$(dirname "$(command -v alchemy)")"
 elif command -v crucible >/dev/null 2>&1; then
   VENV_BIN="$(dirname "$(command -v crucible)")"
 else
-  echo "[crucible] Creating local Python virtual environment at ${REPO_ROOT}/.venv ..."
+  echo "[alchemy] Creating local Python virtual environment at ${REPO_ROOT}/.venv ..."
   python3 -m venv "${REPO_ROOT}/.venv"
   VENV_BIN="${REPO_ROOT}/.venv/bin"
   "${VENV_BIN}/pip" install --upgrade pip
   "${VENV_BIN}/pip" install -e ".[ui,test]"
 fi
 
-CRUCIBLE="${VENV_BIN}/crucible"
+if [[ -x "${VENV_BIN}/alchemy" ]]; then
+  CRUCIBLE="${VENV_BIN}/alchemy"
+else
+  CRUCIBLE="${VENV_BIN}/crucible"
+fi
 
 # 2. Discover active Fuzzball team (`team3`) and check whether venue/cluster Wi-Fi is reachable
 DISCOVER_JSON="$("$CRUCIBLE" discover --json)"
@@ -139,11 +145,11 @@ if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; the
   elif echo "$VOL_OUT" | grep -qw "crucible-vast"; then
     export CRUCIBLE_VAST_VOLUME="crucible-vast"
   else
-    echo "[crucible] Ensuring persistent volume 'runs' exists on provisioner '${TEAM_ID}' ..."
+    echo "[alchemy] Ensuring persistent volume 'runs' exists on provisioner '${TEAM_ID}' ..."
     fuzzball volume create "$TEAM_ID" runs >/dev/null 2>&1 || fuzzball volume provisioner scan "$TEAM_ID" >/dev/null 2>&1 || true
     export CRUCIBLE_VAST_VOLUME="runs"
   fi
-  echo "[crucible] LIVE CLUSTER CONNECTED -> team='${TEAM_ID}', backend='${BACKEND}', volume='${CRUCIBLE_VAST_VOLUME}'"
+  echo "[alchemy] LIVE CLUSTER CONNECTED -> team='${TEAM_ID}', backend='${BACKEND}', volume='${CRUCIBLE_VAST_VOLUME}'"
   # Pre-stage Qwen/Qwen2.5-Coder-1.5B-Instruct (3.1 GB BF16, 0 GPUs used) in background onto VAST for fast live-demo baseline!
   ACTIVE_WFS="$(fuzzball workflow list 2>/dev/null || true)"
   if ! echo "$ACTIVE_WFS" | grep -q "crucible-stage-qwen2.5-1.5b"; then
@@ -151,12 +157,12 @@ if [[ "$CLUSTER_REACHABLE" == "1" ]] && command -v fuzzball >/dev/null 2>&1; the
     STAGE_TMP="${REPO_ROOT}/runs/stage-qwen25-1.5b.yaml"
     mkdir -p "${REPO_ROOT}/runs"
     printf "%s\n" "$STAGE_YAML" > "$STAGE_TMP"
-    echo "[crucible] Pre-loading fast live-demo baseline model (Qwen/Qwen2.5-Coder-1.5B-Instruct, 0 GPUs used) onto VAST..."
+    echo "[alchemy] Pre-loading fast live-demo baseline model (Qwen/Qwen2.5-Coder-1.5B-Instruct, 0 GPUs used) onto VAST..."
     fuzzball workflow start "$STAGE_TMP" --name crucible-stage-qwen2.5-1.5b >/dev/null 2>&1 || true
   fi
 else
   export CRUCIBLE_VAST_VOLUME="runs"
-  echo "[crucible] Cluster Wi-Fi not currently connected -> starting Client Studio in GB10 Empirical Twin mode (team='${TEAM_ID}', auto-switches to live Fuzzball MCP when on cluster Wi-Fi)."
+  echo "[alchemy] Cluster Wi-Fi not currently connected -> starting Client Studio in GB10 Empirical Twin mode (team='${TEAM_ID}', auto-switches to live Fuzzball MCP when on cluster Wi-Fi)."
 fi
 "$CRUCIBLE" discover
 
@@ -164,7 +170,7 @@ fi
 if command -v lsof >/dev/null 2>&1; then
   STALE_PIDS="$(lsof -ti ":${PORT}" 2>/dev/null || true)"
   if [[ -n "$STALE_PIDS" ]]; then
-    echo "[crucible] Stopping previous server on port ${PORT} ..."
+    echo "[alchemy] Stopping previous server on port ${PORT} ..."
     kill $STALE_PIDS 2>/dev/null || true
     sleep 0.4
   fi
@@ -173,7 +179,7 @@ fi
 RUN_DIR="${REPO_ROOT}/runs/${TEAM_ID}-live"
 mkdir -p "$RUN_DIR"
 
-echo "[crucible] Starting Crucible Studio at http://${HOST}:${PORT} ..."
+echo "[alchemy] Starting Alchemy Studio at http://${HOST}:${PORT} ..."
 "$CRUCIBLE" serve --run-dir "$RUN_DIR" --host "$HOST" --port "$PORT" >"${RUN_DIR}/studio.log" 2>&1 &
 SERVER_PID=$!
 cleanup() {
@@ -200,7 +206,7 @@ fi
 
 # 5. Optional auto-run when `--auto-run` / `--backend` / `--exit-after-run` is passed
 if [[ "$AUTO_RUN" -eq 1 ]]; then
-  echo "[crucible] Launching optimization (team=${TEAM_ID}, backend=${BACKEND}, time=${TIME_BUDGET}m, cost=\$${COST_BUDGET}) ..."
+  echo "[alchemy] Launching optimization (team=${TEAM_ID}, backend=${BACKEND}, time=${TIME_BUDGET}m, cost=\$${COST_BUDGET}) ..."
   PAYLOAD="$("${VENV_BIN}/python" -c 'import json,sys; print(json.dumps({"profile":sys.argv[1],"model_id":sys.argv[2] or None,"backend":sys.argv[3],"fuzzfile_version":"v4","definition_id":sys.argv[4],"time_budget_minutes":float(sys.argv[5]),"cost_budget_usd":float(sys.argv[6]),"use_company_presets":sys.argv[7]=="1","continuous_mode":sys.argv[8]=="1","async_mode":True}))' "$PROFILE" "$MODEL_ID" "$BACKEND" "$TEAM_ID" "$TIME_BUDGET" "$COST_BUDGET" "$USE_PRESETS" "$CONTINUOUS")"
   curl -fsS -X POST "http://${HOST}:${PORT}/api/run" -H "Content-Type: application/json" -d "$PAYLOAD" >/dev/null
 
@@ -214,7 +220,7 @@ if [[ "$AUTO_RUN" -eq 1 ]]; then
     fi
     if [[ "$STATE" == "failed" ]]; then
       ERR="$("${VENV_BIN}/python" -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("error") or "")' <<<"$STATUS_JSON")"
-      echo "[crucible] Run stopped with error: ${ERR}" >&2
+      echo "[alchemy] Run stopped with error: ${ERR}" >&2
       break
     fi
     sleep 1
@@ -222,9 +228,9 @@ if [[ "$AUTO_RUN" -eq 1 ]]; then
 fi
 
 echo ""
-echo "[crucible] Studio ready at: http://${HOST}:${PORT}"
-echo "[crucible] Pick any model, drop files (or use the pre-loaded benchmark), click Optimize, and download your .zip build!"
+echo "[alchemy] Studio ready at: http://${HOST}:${PORT}"
+echo "[alchemy] Pick any model, drop files (or use the pre-loaded benchmark), click Optimize, and download your .zip build!"
 if [[ "$KEEP_SERVING" -eq 1 ]]; then
-  echo "[crucible] Press Ctrl+C to stop Crucible Studio."
+  echo "[alchemy] Press Ctrl+C to stop Alchemy Studio."
   wait "$SERVER_PID"
 fi

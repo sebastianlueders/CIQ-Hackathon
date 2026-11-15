@@ -589,7 +589,7 @@ def run_autoresearch_pipeline(
             stop_reason = f"completed_{cont_cfg.max_teacher_rounds}_teacher_rounds"
 
     # 7. Stage D: Emit Turnkey Fuzzball Workflow + Measured Report
-    _emit({"type": "stage_started", "stage": "stage_d_emit", "label": "Stage D: Emitting Turnkey Team 20 Fuzzfile"})
+    _emit({"type": "stage_started", "stage": "stage_d_emit", "label": f"Stage D: Emitting Turnkey {cluster.definition_id.upper()} Fuzzfile"})
     win_serve_cand = next(
         c for c in exp.stage_c_inference_perf.candidates if c.label == stage_c.winning_candidate_label
     )

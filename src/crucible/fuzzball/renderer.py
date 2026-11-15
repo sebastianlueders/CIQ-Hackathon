@@ -1,8 +1,8 @@
 """Renders trials and the final turnkey workflow into CIQ Fuzzball YAML (`v4` and `v1`).
 
-Aligned with the live CIQ Hackathon Grace Blackwell GB10 cluster (`CIQ-CHI-SPARK39` &
-`CIQ-CHI-SPARK40`, VAST storage provisioner `use: team20`):
-- `volumes: { vast: { name: crucible-vast, use: team20 } }`
+Aligned with the live CIQ Hackathon Grace Blackwell GB10 cluster (`CIQ-CHI-SPARK05` &
+`CIQ-CHI-SPARK06`, VAST storage provisioner `use: team3`):
+- `volumes: { vast: { name: runs, use: team3 } }`
 - `mounts: { /vast: { volume: vast } }` (Fuzzball v4 object mount syntax)
 - `resource: { cpu: { cores: 16 }, memory: { size: 112GiB }, devices: { nvidia.com/gpu: 1 } }`
   (no `cpu/arm64/sve` device plugin constraint, no `affinity`, no `fuzzball.io/*` compute annotation)
@@ -27,6 +27,7 @@ from crucible.config import (
     TrainingPerfCandidate,
 )
 from crucible.fuzzball.remote_bootstrap import (
+    REMOTE_INFER_PY,
     REMOTE_SERVE_BENCH_PY,
     REMOTE_TRAIN_RUNNER_PY,
 )
@@ -290,7 +291,7 @@ def render_training_trial_fuzzfile(
         "jobs": {f"train-{trial_id}": job_spec},
     }
     header = (
-        f"# Crucible Autoresearch Trial Fuzzfile: {trial_id}\n"
+        f"# Alchemy Autoresearch Trial Fuzzfile: {trial_id}\n"
         f"# VAST Storage Provisioner: use={cluster.vast.provisioner or cluster.definition_id} | Nodes: {_team_nodes_comment(cluster)}\n"
         f"# Model: {exp.model.name} | Target Hardware: {cluster.nodes.gpu_product} ({cluster.nodes.sm_arch})\n"
         f"# Recipe: rank={recipe.lora_rank}, alpha={recipe.lora_alpha}, lr={recipe.lr}\n"
@@ -377,7 +378,7 @@ def render_serving_trial_fuzzfile(
         "jobs": {bench_job_name: bench_job},
     }
     header = (
-        f"# Crucible Inference Search Fuzzfile: {trial_id}\n"
+        f"# Alchemy Inference Search Fuzzfile: {trial_id}\n"
         f"# VAST Storage Provisioner: use={cluster.vast.provisioner or cluster.definition_id} | Nodes: {_team_nodes_comment(cluster)}\n"
         f"# Precision: {cand.precision} | TP={cand.tensor_parallel} | Replicas={cand.replicas} | "
         f"MaxSeqs={cand.max_num_seqs}\n\n"
@@ -596,7 +597,7 @@ def render_final_turnkey_fuzzfile(
     }
 
     comment_header = f"""# ==============================================================================
-# Crucible Turnkey Autoresearch Workflow (ingest -> train -> eval -> serve)
+# Alchemy Turnkey Autoresearch Workflow (ingest -> train -> eval -> serve)
 # ==============================================================================
 # Cluster        : {cluster.cluster_name} | VAST Storage Provisioner: use={cluster.vast.provisioner or cluster.definition_id}
 # Nodes          : {_team_nodes_comment(cluster)}
@@ -676,8 +677,56 @@ def render_model_staging_fuzzfile(
         "jobs": {"stage-model-vast": job_spec},
     }
     header = (
-        f"# Crucible On-Demand VAST Model Staging Workflow\n"
+        f"# Alchemy On-Demand VAST Model Staging Workflow\n"
         f"# Model: {clean_repo} -> {dest_dir} (0 GPUs consumed)\n\n"
     )
     return header + yaml.safe_dump(doc, sort_keys=False)
+
+
+def render_live_inference_fuzzfile(
+    cluster: ClusterConfig,
+    model_id: str,
+    prompt: str,
+    company_name: str = "Apex Dynamics",
+    adapter_vast_dir: str = "",
+    compare_base: bool = True,
+) -> str:
+    """Render a fast (~10s) Fuzzball GB10 GPU job executing live generation on the tuned adapter + base model."""
+    prompt_b64 = base64.b64encode(prompt.encode("utf-8")).decode("ascii")
+    company_b64 = base64.b64encode(company_name.encode("utf-8")).decode("ascii")
+    job_spec: dict[str, Any] = {
+        "image": {"uri": cluster.images.train},
+        "mounts": _mounts_section(cluster),
+        "files": {"/opt/crucible_infer.py": "file://crucible-infer-runner"},
+        "env": [
+            "HOME=/tmp/home",
+            "PYTHONUNBUFFERED=1",
+        ],
+        "resource": _gpu_resource_block(cluster, gpus_per_node=1, multinode=False),
+        "policy": {"timeout": {"execute": "10m"}},
+        "script": "\n".join(
+            [
+                "#!/bin/bash",
+                "set -euo pipefail",
+                "mkdir -p /tmp/home",
+                f"PROMPT_TXT=\"$(echo '{prompt_b64}' | base64 -d)\"",
+                f"COMPANY_TXT=\"$(echo '{company_b64}' | base64 -d)\"",
+                "python3 /opt/crucible_infer.py \\",
+                f"  --model-id '{model_id.strip()}' \\",
+                f"  --adapter-dir '{adapter_vast_dir}' \\",
+                '  --company-name "$COMPANY_TXT" \\',
+                '  --prompt "$PROMPT_TXT" \\',
+                f"  --compare-base {1 if compare_base else 0}",
+            ]
+        )
+        + "\n",
+    }
+    doc: dict[str, Any] = {
+        "version": cluster.fuzzfile_version,
+        **_workflow_annotations_section(cluster),
+        "files": {"crucible-infer-runner": REMOTE_INFER_PY},
+        "volumes": _volume_section(cluster),
+        "jobs": {"infer-copilot": job_spec},
+    }
+    return yaml.safe_dump(doc, sort_keys=False)
 

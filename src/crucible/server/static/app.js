@@ -1,7 +1,7 @@
 let latestSummary = null;
 let latestLiveSnap = null;
 let buildArtifacts = {};
-let selectedArtifactKey = "fuzzfile.yaml";
+let selectedArtifactKey = "scripts/run_company_app.py";
 let activeDatasetId = "builtin-lammps-cpp-bench";
 let fullCatalog = [];
 let activeCategory = "Featured";
@@ -12,6 +12,37 @@ let userPickedBackend = false;
 async function fetchJson(url, opts) {
   const resp = await fetch(url, opts);
   return await resp.json();
+}
+
+function currentCompanyName() {
+  const el = document.getElementById("company-name-input");
+  return (el && el.value.trim()) || "Apex Dynamics";
+}
+
+function syncCompanyBranding() {
+  const comp = currentCompanyName();
+  const initials = comp
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("") || "AI";
+  const slug = comp.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "company";
+  const av = document.getElementById("copilot-avatar");
+  if (av) av.textContent = initials;
+  const hd = document.getElementById("copilot-brand-heading");
+  if (hd) hd.textContent = `${comp} — Private Engineering Copilot`;
+  const kk = document.getElementById("pg-tuned-kicker");
+  if (kk) kk.textContent = `${comp.toUpperCase()} TUNED PRIVATE COPILOT`;
+  const dlHref = `/api/build/bundle.zip?company_name=${encodeURIComponent(comp)}`;
+  const topDl = document.getElementById("btn-top-download");
+  if (topDl) topDl.href = dlHref;
+  const cardDl = document.getElementById("btn-card-download");
+  if (cardDl) cardDl.href = dlHref;
+  const uz = document.getElementById("unzip-cmd-line");
+  if (uz) {
+    uz.textContent = `unzip ${slug}-private-llm-*.zip -d ${slug}-ai && python3 ${slug}-ai/scripts/run_company_app.py`;
+  }
 }
 
 function currentModelId() {
@@ -112,7 +143,7 @@ function renderCatalogCards() {
       const nodeTip =
         m.min_nodes_required >= 2
           ? "Hardware Requirement: Minimum 2x GB10 GPUs required to fit BF16 weights"
-          : "Hardware Requirement: Fits on 1 GPU minimum (Crucible still scales across all 2 cluster GPUs for speed)";
+          : "Hardware Requirement: Fits on 1 GPU minimum (Alchemy still scales across all 2 cluster GPUs for speed)";
       const loadBadge =
         m.vast_state === "preloaded"
           ? `<span class="mc-status mc-preloaded">Pre-Loaded</span>`
@@ -290,13 +321,18 @@ async function uploadFileList(fileList) {
 
 async function refreshBuildPreview() {
   try {
-    const prev = await fetchJson("/api/build/preview");
+    syncCompanyBranding();
+    const comp = currentCompanyName();
+    const prev = await fetchJson(`/api/build/preview?company_name=${encodeURIComponent(comp)}`);
     buildArtifacts = prev.artifacts || {};
     const shortModel = String(prev.model_id || "").split("/").pop();
-    const dsName = (prev.dataset && prev.dataset.display_name) || activeDatasetId;
-    document.getElementById("build-title").innerHTML = `Local LLM Package Ready: <code>${shortModel}</code>`;
+    document.getElementById("build-title").innerHTML = `${comp} LLM Package: <code>${shortModel}</code>`;
     document.getElementById("build-subtitle").innerHTML =
-      `Tuned for <strong>${dsName}</strong> &mdash; ready for client Ollama / llama.cpp, vLLM, or 1-command Fuzzball deploy`;
+      `Unzip &amp; run <code>python3 scripts/run_company_app.py</code> on your laptop to launch <strong>${comp}'s</strong> branded app backed by Fuzzball GPUs!`;
+    const subModel = document.getElementById("copilot-model-sub");
+    if (subModel) {
+      subModel.innerHTML = `Powered by <code>${shortModel}</code> + Tuned LoRA &middot; Zero Cloud Data Egress`;
+    }
     const insp = document.getElementById("inspector-model-label");
     if (insp) insp.textContent = prev.model_id;
     renderArtifactViewer();
@@ -888,17 +924,57 @@ function renderDashboard(data) {
     `<code>contains_raw_data=false</code> &middot; SHA-256: <code>${lastDigest}…</code>`;
 }
 
-async function runPlaygroundSample() {
+async function runPlaygroundSample(executeOnCluster = false) {
+  const badge = document.getElementById("copilot-exec-badge");
+  const liveBtn = document.getElementById("btn-run-cluster-copilot");
   try {
+    syncCompanyBranding();
     const prompt = document.getElementById("playground-prompt").value;
+    const companyName = currentCompanyName();
+    if (executeOnCluster) {
+      if (liveBtn) {
+        liveBtn.disabled = true;
+        liveBtn.textContent = "Running on Fuzzball GB10…";
+      }
+      if (badge) {
+        badge.className = "badge badge-amber";
+        badge.textContent = "RUNNING ON FUZZBALL GB10 GPU…";
+      }
+      document.getElementById("pg-tuned-out").textContent =
+        `Submitting prompt to live CIQ Fuzzball GB10 GPU (${currentTeamId()}) for ${companyName}…`;
+    }
     const res = await fetchJson("/api/playground/complete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, compare_base: true }),
+      body: JSON.stringify({
+        prompt,
+        company_name: companyName,
+        compare_base: true,
+        execute_on_cluster: Boolean(executeOnCluster),
+      }),
     });
     document.getElementById("pg-base-out").textContent = res.base_output || "";
     document.getElementById("pg-tuned-out").textContent = res.tuned_output || "";
-  } catch (_) {}
+    if (badge) {
+      if (res.source === "live_fuzzball_gb10_gpu") {
+        badge.className = "badge badge-accent";
+        badge.textContent = `LIVE GB10 (${res.hostname || "SPARK"}) · ${res.throughput_tok_s} tok/s`;
+      } else {
+        badge.className = "badge badge-green";
+        badge.textContent = `PREVIEW READY · ${Math.round(res.throughput_tok_s || 0)} tok/s`;
+      }
+    }
+  } catch (_) {
+    if (badge) {
+      badge.className = "badge";
+      badge.textContent = "READY";
+    }
+  } finally {
+    if (liveBtn) {
+      liveBtn.disabled = false;
+      liveBtn.textContent = "Run Live on Fuzzball GPU";
+    }
+  }
 }
 
 function connectLiveStream() {
@@ -923,6 +999,14 @@ function connectLiveStream() {
 }
 
 // Event bindings
+document.getElementById("company-name-input").addEventListener("input", () => {
+  syncCompanyBranding();
+});
+document.getElementById("company-name-input").addEventListener("change", () => {
+  refreshBuildPreview();
+  runPlaygroundSample(false);
+});
+
 document.getElementById("model-id-input").addEventListener("change", (e) => {
   refreshModelSpec(e.target.value);
   renderCatalogCards();
@@ -1020,6 +1104,7 @@ document.getElementById("btn-run").addEventListener("click", async () => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      company_name: currentCompanyName(),
       model_id: modelId,
       dataset_id: activeDatasetId,
       backend,
@@ -1043,7 +1128,8 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("btn-run-playground").addEventListener("click", runPlaygroundSample);
+document.getElementById("btn-run-playground").addEventListener("click", () => runPlaygroundSample(false));
+document.getElementById("btn-run-cluster-copilot").addEventListener("click", () => runPlaygroundSample(true));
 
 document.getElementById("btn-probe").addEventListener("click", async () => {
   const resp = await fetch("/api/firewall-probe", {

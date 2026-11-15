@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crucible Client Studio — Fuzzball Remote GPU Server &amp; Local LLM Forge</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261115d" />
+  <title>Alchemy Client Studio — Fuzzball Remote GPU Server &amp; Local LLM Forge</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20261115f" />
 </head>
 <body>
   <!-- ENTERPRISE CLIENT WORKSTATION HEADER -->
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">C</div>
+      <div class="brand-mark">A</div>
       <div>
         <div class="brand-title-row">
-          <h1>Crucible</h1>
+          <h1>Alchemy</h1>
           <span class="badge badge-accent">Enterprise Client Studio</span>
           <span class="badge">Client UI &harr; Fuzzball GPU Server</span>
         </div>
@@ -101,9 +101,13 @@
           </div>
         </div>
 
-        <!-- 2. PRIVATE BUSINESS DATA INGESTION -->
+        <!-- 2. ENTERPRISE TENANT & PRIVATE BUSINESS DATA INGESTION -->
         <div class="builder-col">
-          <div class="step-kicker">2. PRIVATE BUSINESS CORPUS (LOCAL SPLIT STAGING &rarr; VAST VOLUME)</div>
+          <div class="step-kicker">2. COMPANY WORKSPACE &amp; PRIVATE CORPUS (LOCAL SPLIT &rarr; VAST)</div>
+          <label class="field-row">
+            <span>Enterprise Organization / Copilot Brand</span>
+            <input id="company-name-input" class="team-text" type="text" value="Apex Dynamics" placeholder="e.g. Apex Dynamics, Meridian Labs…" spellcheck="false" aria-label="Company Name" />
+          </label>
           <div class="dropzone" id="dropzone">
             <div class="dropzone-main">
               <strong>Drop proprietary codebases, <code>.jsonl</code>/<code>.json</code>/<code>.csv</code>, SOP docs (<code>.md</code>/<code>.txt</code>), or <code>.zip</code></strong>
@@ -545,31 +549,40 @@
       </div>
     </section>
 
-    <!-- CLIENT-SIDE TUNED LOCAL LLM SANDBOX & DELIVERABLE BUNDLE INSPECTOR -->
-    <section class="grid-two">
+    <!-- FINAL RESULT: BRANDED ENTERPRISE PRIVATE AI COPILOT + DEPLOYABLE .ZIP INSPECTOR -->
+    <section class="grid-two" id="final-copilot-section">
       <div class="panel playground-panel">
-        <div class="panel-header">
-          <div>
-            <span class="stage-tag">CLIENT BUSINESS WORKSTATION SANDBOX</span>
-            <h2>Test Your Newly Generated Local LLM (Base vs. Fuzzball-Tuned)</h2>
-            <p class="panel-sub">Verify domain adaptation side-by-side before deploying locally via Ollama / vLLM or as a private Fuzzball service</p>
+        <div class="copilot-brand-bar">
+          <div class="copilot-brand-left">
+            <div class="copilot-avatar" id="copilot-avatar">AD</div>
+            <div>
+              <span class="stage-tag">FINAL CLIENT APPLICATION &middot; PRIVATE DOMAIN LLM</span>
+              <h2 id="copilot-brand-heading">Apex Dynamics &mdash; Private Engineering Copilot</h2>
+              <p class="panel-sub" id="copilot-model-sub">Powered by <code>Qwen3-Coder-30B-A3B</code> + Tuned LoRA &middot; Zero Cloud Data Egress</p>
+            </div>
           </div>
-          <button id="btn-run-playground" class="btn btn-primary btn-sm">Run Side-by-Side Test</button>
+          <span class="badge badge-green" id="copilot-exec-badge">READY</span>
         </div>
-        <input
-          id="playground-prompt"
-          class="model-input"
-          type="text"
-          value="Write a SIMD-friendly neighbor-bin loop for a cutoff molecular dynamics force kernel."
-          aria-label="Test Prompt"
-        />
+
+        <div class="copilot-prompt-bar">
+          <input
+            id="playground-prompt"
+            class="model-input"
+            type="text"
+            value="Write a SIMD-friendly neighbor-bin loop for a cutoff molecular dynamics force kernel."
+            aria-label="Test Prompt"
+          />
+          <button id="btn-run-cluster-copilot" class="btn btn-primary btn-sm" title="Submit prompt to your live CIQ Fuzzball GB10 GPU and compare untuned vs tuned output">Run Live on Fuzzball GPU</button>
+          <button id="btn-run-playground" class="btn btn-outline btn-sm" title="Instant preview comparison">Instant Preview</button>
+        </div>
+
         <div class="playground-compare">
           <div class="pg-col">
             <div class="sub-kicker">UNTUNED BASE MODEL</div>
-            <pre class="pg-code" id="pg-base-out">Click "Run Side-by-Side Test" to compare base vs. domain-tuned output…</pre>
+            <pre class="pg-code" id="pg-base-out">Click "Run Live on Fuzzball GPU" (or "Instant Preview") to compare base vs. tuned output…</pre>
           </div>
           <div class="pg-col pg-col-tuned">
-            <div class="sub-kicker" style="color:#a3e635;">YOUR FUZZBALL-TUNED LOCAL LLM</div>
+            <div class="sub-kicker" style="color:#a3e635;" id="pg-tuned-kicker">APEX DYNAMICS TUNED PRIVATE COPILOT</div>
             <pre class="pg-code" id="pg-tuned-out">Ready to query tuned adapter…</pre>
           </div>
         </div>
@@ -579,18 +592,22 @@
       <div class="panel yaml-panel">
         <div class="panel-header">
           <div>
-            <span class="stage-tag">TURNKEY LOCAL &amp; CLUSTER DEPLOYMENT BUNDLE</span>
-            <h2 id="build-title">Generated Local LLM Package (<code id="inspector-model-label">Qwen/Qwen3-Coder-30B-A3B-Instruct</code>)</h2>
-            <p class="panel-sub" id="build-subtitle">Includes <code>fuzzfile.yaml</code>, <code>Modelfile.ollama</code>, Python Client SDK, LoRA &amp; vLLM configs, and split data</p>
+            <span class="stage-tag">TURNKEY UNZIP-AND-RUN CLIENT BUNDLE</span>
+            <h2 id="build-title">Apex Dynamics LLM Package (<code id="inspector-model-label">Qwen/Qwen3-Coder-30B-A3B-Instruct</code>)</h2>
+            <p class="panel-sub" id="build-subtitle">Unzip &amp; run <code>python3 scripts/run_company_app.py</code> on your laptop to launch this exact branded app backed by Fuzzball GPUs!</p>
           </div>
           <a href="/api/build/bundle.zip" id="btn-card-download" class="btn btn-download btn-sm" download>Download .zip</a>
         </div>
+        <div class="unzip-quickstart">
+          <span>Unzip &amp; Launch Locally:</span>
+          <code id="unzip-cmd-line">unzip apex-dynamics-private-llm-*.zip -d apex-ai &amp;&amp; python3 apex-ai/scripts/run_company_app.py</code>
+        </div>
         <div class="yaml-controls">
-          <button data-artifact="fuzzfile.yaml" class="btn btn-outline btn-sm artifact-tab active-tab">fuzzfile.yaml</button>
+          <button data-artifact="scripts/run_company_app.py" class="btn btn-outline btn-sm artifact-tab active-tab">run_company_app.py</button>
+          <button data-artifact="fuzzfile.yaml" class="btn btn-outline btn-sm artifact-tab">fuzzfile.yaml</button>
           <button data-artifact="Modelfile.ollama" class="btn btn-outline btn-sm artifact-tab">Modelfile.ollama</button>
           <button data-artifact="scripts/client_query_llm.py" class="btn btn-outline btn-sm artifact-tab">client_query_llm.py</button>
           <button data-artifact="configs/train_recipe.yaml" class="btn btn-outline btn-sm artifact-tab">train_recipe.yaml</button>
-          <button data-artifact="configs/vllm_serve.yaml" class="btn btn-outline btn-sm artifact-tab">vllm_serve.yaml</button>
           <button data-artifact="BUILD_REPORT.md" class="btn btn-outline btn-sm artifact-tab">BUILD_REPORT.md</button>
           <button id="btn-copy-yaml" class="btn btn-outline btn-sm">Copy</button>
         </div>
@@ -599,6 +616,6 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=20261115d"></script>
+  <script src="/static/app.js?v=20261115f"></script>
 </body>
 </html>

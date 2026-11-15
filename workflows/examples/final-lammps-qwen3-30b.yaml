@@ -26,9 +26,9 @@
 #     max_num_seqs=96, low_prec_decode_kernel=True
 #     Serving throughput: 401.8 -> 3460.3 tok/s
 #
-# Launch end-to-end on CIQ Fuzzball (Team 20):
+# Launch end-to-end on CIQ Fuzzball (Team 3):
 #   fuzzball workflow validate final-crucible-workflow.yaml
-#   fuzzball workflow start final-crucible-workflow.yaml --name lammps-qwen3-coder-30b-team20
+#   fuzzball workflow start final-crucible-workflow.yaml --name lammps-qwen3-coder-30b-team3
 # ==============================================================================
 
 version: v4

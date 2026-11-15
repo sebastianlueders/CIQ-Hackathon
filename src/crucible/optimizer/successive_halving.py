@@ -76,10 +76,10 @@ def run_stage_a_recipe_search(
             )
             return idx, trial_id, summary
 
-        # On live Fuzzball backends, submit the rung's candidate workflows concurrently so
-        # Fuzzball queues all candidates in line when GPUs are busy and executes them in parallel!
+        # On live Fuzzball backends, submit the rung's candidate workflows concurrently across
+        # `cfg.parallel_nodes` (2 GPUs) so GPU 0 and GPU 1 run in parallel without false "QUEUED" flicker!
         if getattr(backend, "backend_name", "") in {"fuzzball_mcp", "fuzzball"} and len(survivor_indices) > 1:
-            workers = min(len(survivor_indices), max(cfg.parallel_nodes, 2))
+            workers = min(len(survivor_indices), max(1, cfg.parallel_nodes))
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 launched = list(pool.map(_launch_one, survivor_indices))
         else:

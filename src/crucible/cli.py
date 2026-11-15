@@ -1,4 +1,4 @@
-"""Crucible command-line interface (`crucible`)."""
+"""Alchemy command-line interface (`alchemy`)."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ def _cmd_discover(args: argparse.Namespace) -> int:
         return 0
 
     print(
-        f"Crucible Cluster Discovery -> cluster='{discovered_cfg.cluster_name}' "
+        f"Alchemy Cluster Discovery -> cluster='{discovered_cfg.cluster_name}' "
         f"| definitionId='{discovered_cfg.definition_id}' (Fuzzfile {discovered_cfg.fuzzfile_version})"
     )
     print(f"  fuzzball CLI on PATH : {report.fuzzball_cli_available}")
@@ -144,7 +144,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         backend_kind=args.backend,
         source_data_dir=args.source_data_dir,
     )
-    print(f"Crucible 4-stage run complete -> {result.output_dir}")
+    print(f"Alchemy 4-stage run complete -> {result.output_dir}")
     print(
         f"  Stage A (Recipe)       : {result.stage_a.winning_label} | "
         f"Held-out PPL {result.stage_a.base_held_out_perplexity:.3f} -> "
@@ -194,15 +194,15 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from crucible.server.app import create_app
 
     app = create_app(run_dir=args.run_dir)
-    print(f"Crucible Team 20 Live Studio -> http://{args.host}:{args.port}")
+    print(f"Alchemy Team 3 Live Studio -> http://{args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="crucible",
-        description="Crucible: Privacy-preserving autoresearch & sm_121 performance agent for CIQ Fuzzball.",
+        prog="alchemy",
+        description="Alchemy: Privacy-preserving autoresearch & sm_121 performance agent for CIQ Fuzzball.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -271,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--output-dir", type=Path, default=Path("runs/latest"))
     p_run.set_defaults(func=_cmd_run)
 
-    p_ins = sub.add_parser("inspect", help="Inspect results of a completed Crucible run directory")
+    p_ins = sub.add_parser("inspect", help="Inspect results of a completed Alchemy run directory")
     p_ins.add_argument("run_dir", type=Path)
     p_ins.set_defaults(func=_cmd_inspect)
 
@@ -286,15 +286,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_srv = sub.add_parser(
         "serve",
-        help="Launch the Crucible Team 20 Live Web Studio (default http://127.0.0.1:8000)",
+        help="Launch the Alchemy Team 3 Live Web Studio (default http://127.0.0.1:8000)",
     )
-    p_srv.add_argument("--run-dir", type=Path, default=Path("runs/team20-live"))
+    p_srv.add_argument("--run-dir", type=Path, default=Path("runs/team3-live"))
     p_srv.add_argument("--host", default="127.0.0.1")
     p_srv.add_argument("--port", type=int, default=8000)
     p_srv.set_defaults(func=_cmd_serve)
 
-    p_ui = sub.add_parser("ui", help="Alias for 'crucible serve'")
-    p_ui.add_argument("--run-dir", type=Path, default=Path("runs/team20-live"))
+    p_ui = sub.add_parser("ui", help="Alias for 'alchemy serve'")
+    p_ui.add_argument("--run-dir", type=Path, default=Path("runs/team3-live"))
     p_ui.add_argument("--host", default="127.0.0.1")
     p_ui.add_argument("--port", type=int, default=8000)
     p_ui.set_defaults(func=_cmd_serve)

@@ -42,7 +42,7 @@ def render_markdown_run_report(
     )
 
     lines = [
-        f"# Crucible Autoresearch Measured Report — `{exp.experiment_id}`",
+        f"# Alchemy Autoresearch Measured Report — `{exp.experiment_id}`",
         "",
         f"- **Cluster**: `{cluster.cluster_name}` · `definitionId: {cluster.definition_id}` ({cluster.nodes.count}x `{cluster.nodes.gpu_product}`, `{cluster.nodes.sm_arch}`, `{cluster.nodes.arch_device}`)",
         f"- **Compute Nodes**: {inv_summary}",

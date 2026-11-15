@@ -118,7 +118,7 @@ class FirewalledLLMAdvisor:
             return None
 
         system_prompt = (
-            "You are Crucible's Remote Teacher Optimizer for NVIDIA GB10 (sm_121). You receive ONLY "
+            "You are Alchemy's Remote Teacher Optimizer for NVIDIA GB10 (sm_121). You receive ONLY "
             "firewalled numeric metrics and hyperparameter IDs (0 raw code/data). Propose the next trial "
             "as strict JSON with keys: lr (float), lora_rank (int: 8|16|32|64), micro_batch_size (int: 2..8), "
             "nodes (int: 1|2), activation_checkpointing (bool), rationale (string, <=2 sentences)."
@@ -297,7 +297,7 @@ class FirewalledLLMAdvisor:
             return None, "none"
 
         system_prompt = (
-            "You are Crucible's autoresearch performance-engineering advisor. You receive ONLY "
+            "You are Alchemy's autoresearch performance-engineering advisor. You receive ONLY "
             "hyperparameter identifiers and numeric metrics (zero raw code or dataset content). "
             "In 2-3 concise sentences, explain why the winning configuration outperformed alternatives."
         )

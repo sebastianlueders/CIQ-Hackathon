@@ -539,8 +539,8 @@ def apply_mcp_discovery_payload(
                     f"Ignored {len(parsed_vols)} volume(s) not scoped to provisioner '{active_prov}'."
                 )
         elif cfg_data.get("definition_id"):
-            # On CIQ hackathon clusters, `definition_id` (`team20`) is the VAST volume storage provisioner;
-            # Fuzzball auto-provisions named volumes under `use: team20` — never switch to `ephemeral`!
+            # On CIQ hackathon clusters, `definition_id` (`team3`) is the VAST volume storage provisioner;
+            # Fuzzball auto-provisions named volumes under `use: team3` — never switch to `ephemeral`!
             cfg_data["vast"]["ephemeral"] = False
             if not cfg_data["vast"].get("provisioner"):
                 cfg_data["vast"]["provisioner"] = cfg_data["definition_id"]

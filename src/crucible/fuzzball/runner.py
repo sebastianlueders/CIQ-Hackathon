@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -209,14 +210,16 @@ def _compact_splits_json(processed_data_dir: Path | None, max_seqs_per_split: in
 
 def _extract_placed_nodes(raw_describe: Any, cluster: ClusterConfig, requested_nodes: int, seq_idx: int) -> list[str]:
     """Extract live Fuzzball node hostnames/IDs from `workflow_describe` output, falling back to
-    round-robin placement over `cluster.nodes.inventory` (`CIQ-CHI-SPARK39`, `CIQ-CHI-SPARK40`)."""
+    round-robin placement over `cluster.nodes.inventory` (`CIQ-CHI-SPARK05`, `CIQ-CHI-SPARK06`)."""
     text_blob = json.dumps(raw_describe) if not isinstance(raw_describe, str) else raw_describe
     matched: list[str] = []
     for inv in cluster.nodes.inventory:
+        ip_colon = f"{inv.address}:"
         if (
             inv.hostname in text_blob
             or inv.node_id in text_blob
-            or inv.address in text_blob
+            or ip_colon in text_blob
+            or f'"{inv.address}"' in text_blob
         ) and inv.hostname not in matched:
             matched.append(inv.hostname)
     if matched:
@@ -549,7 +552,7 @@ class FuzzballMCPBackend:
 
     Follows CIQ's Fuzzball 4.2 MCP agent contract:
     1. `workflow_validate` -> checks rendered Fuzzfile server-side
-    2. `workflow_start`    -> launches trial workflow on `team20` and obtains `workflowId`
+    2. `workflow_start`    -> launches trial workflow on `team3` and obtains `workflowId`
     3. `workflow_wait`     -> waits until terminal workflow state (`finished` / `STAGE_STATUS_FINISHED`)
     4. `object_get`        -> fetches compact numeric `metrics.json` egressed to the Fuzzball object cache
                               (never reading or egressing raw training data off VAST)
@@ -583,7 +586,7 @@ class FuzzballMCPBackend:
         self.processed_data_dir = processed_data_dir
         self.event_hook = event_hook
         self._trial_counter = 0
-        self._counter_lock = os.getpid()
+        self._counter_lock = threading.Lock()
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self.event_hook is not None:
@@ -599,8 +602,9 @@ class FuzzballMCPBackend:
         requested_nodes: int,
         object_uri: str,
     ) -> tuple[dict[str, object], str, list[str]]:
-        seq_idx = self._trial_counter
-        self._trial_counter += 1
+        with self._counter_lock:
+            seq_idx = self._trial_counter
+            self._trial_counter += 1
         yaml_text = render_fn(self.cluster)
         fz_path.write_text(yaml_text, encoding="utf-8")
         validate_fuzzfile(yaml_text, cluster=self.cluster)
@@ -745,6 +749,7 @@ class FuzzballMCPBackend:
             if init_info["has_status"] and "workflow_describe" in mcp.advertised_tools:
                 # Non-blocking live queue & GPU execution polling (supports multi-hour GPU queues cleanly!)
                 t_wait0 = time.monotonic()
+                t_run0 = t_wait0
                 last_phase = ""
                 seen_steps = 0
                 while True:
@@ -787,6 +792,7 @@ class FuzzballMCPBackend:
                         )
                     elif st_info["phase"] == "RUNNING":
                         if last_phase != "RUNNING":
+                            t_run0 = time.monotonic()
                             self._emit(
                                 {
                                     "type": "trial_running",
@@ -796,6 +802,7 @@ class FuzzballMCPBackend:
                                     "message": f"RUNNING ON GPU — {trial_id} executing on {', '.join(nodes)}",
                                 }
                             )
+                        run_elapsed_s = int(time.monotonic() - t_run0)
                         new_steps_emitted = 0
                         if "workflow_log" in mcp.advertised_tools:
                             try:
@@ -813,7 +820,7 @@ class FuzzballMCPBackend:
                                     "type": "trial_heartbeat",
                                     "trial_id": trial_id,
                                     "workflow_id": wf_id,
-                                    "elapsed_s": elapsed_s,
+                                    "elapsed_s": run_elapsed_s,
                                     "seen_steps": seen_steps,
                                     "nodes_assigned": nodes,
                                 }

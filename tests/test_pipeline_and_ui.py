@@ -227,9 +227,10 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
     import io
     import zipfile
 
-    bundle_resp = client.get("/api/build/bundle.zip")
+    bundle_resp = client.get("/api/build/bundle.zip?company_name=Apex%20Dynamics")
     assert bundle_resp.status_code == 200
     assert bundle_resp.headers["content-type"] == "application/zip"
+    assert "apex-dynamics-private-llm-" in bundle_resp.headers.get("content-disposition", "")
     with zipfile.ZipFile(io.BytesIO(bundle_resp.content)) as zf:
         names = set(zf.namelist())
         expected_files = {
@@ -237,6 +238,7 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
             "Modelfile.ollama",
             "configs/train_recipe.yaml",
             "configs/vllm_serve.yaml",
+            "scripts/run_company_app.py",
             "scripts/launch_fuzzball.sh",
             "scripts/train_and_serve_local.py",
             "scripts/client_query_llm.py",
@@ -252,6 +254,9 @@ def test_fastapi_dashboard_endpoints_and_firewall_probe(tmp_path: Path) -> None:
         assert "team3" in zf.read("fuzzfile.yaml").decode()
         assert "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("configs/train_recipe.yaml").decode()
         assert "FROM deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct" in zf.read("Modelfile.ollama").decode()
+        company_app_code = zf.read("scripts/run_company_app.py").decode()
+        assert "Apex Dynamics" in company_app_code
+        compile(company_app_code, "run_company_app.py", "exec")
 
     # Verify live dual-GPU telemetry & step diagnostics populated after run
     post_live = client.get("/api/live-status").json()
