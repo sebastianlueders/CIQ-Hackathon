@@ -1,0 +1,60 @@
+{
+  "cluster_name": "ciq-gb10-team3",
+  "definition_id": "team3",
+  "fuzzfile_version": "v4",
+  "provisioners": ["team3"],
+  "volumes": [
+    {
+      "name": "runs",
+      "provisioner": "team3",
+      "mount_path": "/vast",
+      "selected": true
+    }
+  ],
+  "images": {
+    "fetch": "docker://python:3.12-slim",
+    "train": "docker://nvcr.io/nvidia/pytorch:26.10-py3",
+    "serve": "docker://vllm/vllm-openai:v0.33.0"
+  },
+  "nodes": [
+    {
+      "node": {
+        "id": "gb10-01",
+        "hostname": "gb10-node-01",
+        "status": 2
+      },
+      "resource": {
+        "total": {
+          "cpu": { "cores": 20, "sockets": 1 },
+          "mem": { "bytes": 137331589120 },
+          "devices": {
+            "nvidia.com/gpu": 1
+          }
+        }
+      }
+    },
+    {
+      "node": {
+        "id": "gb10-02",
+        "hostname": "gb10-node-02",
+        "status": 2
+      },
+      "resource": {
+        "total": {
+          "cpu": { "cores": 20, "sockets": 1 },
+          "mem": { "bytes": 137331589120 },
+          "devices": {
+            "nvidia.com/gpu": 1
+          }
+        }
+      }
+    }
+  ],
+  "workflows": [
+    {
+      "id": "eba24c59-ab6b-42b5-83f8-4c2900266070",
+      "name": "crucible-00-fetch",
+      "status": "finished"
+    }
+  ]
+}

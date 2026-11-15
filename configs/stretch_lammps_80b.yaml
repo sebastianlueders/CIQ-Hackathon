@@ -1,0 +1,91 @@
+experiment_id: lammps-qwen3-coder-next-80b
+description: "Team 3 Stretch Goal: Multi-node 80B Qwen3-Coder-Next across 2x NVIDIA-GB10 nodes (255.8 GiB total)"
+target_definition_id: team3
+
+model:
+  name: "Qwen/Qwen3-Coder-Next-80B"
+  weights_subpath: "Qwen3-Coder-Next-80B"
+  architecture: "qwen3_moe"
+  total_params_b: 80.0
+  active_params_b: 8.0
+  vocab_size: 151936
+  hidden_size: 4096
+  num_layers: 64
+  num_experts: 128
+  top_k_experts: 8
+  bf16_footprint_gb: 154.0
+  min_nodes_required: 2
+
+dataset:
+  name: "lammps-cpp"
+  raw_subpath: "lammps"
+  processed_subpath: "lammps-packed-80b"
+  chunk_seq_len: 2048
+  chunk_overlap: 128
+  train_ratio: 0.80
+  val_ratio: 0.10
+  held_out_ratio: 0.10
+  split_salt: "crucible-lammps-v1"
+
+stage_a_recipe:
+  parallel_nodes: 2
+  reduction_factor: 2
+  rung_steps: [40, 120, 320]
+  candidates:
+    - lr: 0.0001
+      lora_rank: 32
+      lora_alpha: 64
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+      warmup_ratio: 0.06
+      seq_len: 2048
+    - lr: 0.00015
+      lora_rank: 16
+      lora_alpha: 32
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+      warmup_ratio: 0.05
+      seq_len: 2048
+
+stage_b_training_perf:
+  loss_curve_tolerance_abs: 0.025
+  verify_steps: 120
+  candidates:
+    - label: "pytorch-fsdp-2node"
+      nodes: 2
+      micro_batch_size: 2
+      grad_accum_steps: 4
+      activation_checkpointing: true
+      use_chunked_ce_kernel: false
+      use_grouped_moe_kernel: false
+      use_fused_lora_kernel: false
+    - label: "sm121-all-kernels-fsdp-2node"
+      nodes: 2
+      micro_batch_size: 4
+      grad_accum_steps: 2
+      activation_checkpointing: true
+      use_chunked_ce_kernel: true
+      use_grouped_moe_kernel: true
+      use_fused_lora_kernel: true
+
+stage_c_inference_perf:
+  max_perplexity_regression_pct: 2.5
+  min_completion_pass_rate: 0.86
+  p99_latency_ceiling_ms: 550.0
+  candidates:
+    - label: "bf16-1replica-tp2"
+      precision: "BF16"
+      tensor_parallel: 2
+      replicas: 1
+      max_num_seqs: 32
+      use_low_prec_decode_kernel: false
+    - label: "fp8-1replica-tp2"
+      precision: "FP8"
+      tensor_parallel: 2
+      replicas: 1
+      max_num_seqs: 64
+      use_low_prec_decode_kernel: true
+    - label: "nvfp4-2replicas-tp1"
+      precision: "NVFP4"
+      tensor_parallel: 1
+      replicas: 2
+      max_num_seqs: 64
+      use_low_prec_decode_kernel: true

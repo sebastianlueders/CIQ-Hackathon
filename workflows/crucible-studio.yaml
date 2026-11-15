@@ -1,0 +1,60 @@
+# workflows/crucible-studio.yaml
+# Optional CIQ Fuzzball v4 persistent service workflow hosting the Crucible Studio UI
+# on Team 3 (`use: team3`) with an HTTP endpoint (0 GPUs consumed).
+#
+# Launch with:
+#   fuzzball workflow validate workflows/crucible-studio.yaml
+#   fuzzball workflow start workflows/crucible-studio.yaml --name crucible-team3-studio
+
+version: v4
+
+volumes:
+  vast:
+    name: runs
+    use: team3
+
+services:
+  crucible-studio:
+    image:
+      uri: docker://python:3.12-slim
+    mounts:
+      /vast:
+        volume: vast
+    env:
+      - HOME=/tmp/home
+      - PYTHONUNBUFFERED=1
+      - CRUCIBLE_DEFINITION_ID=team3
+    resource:
+      cpu:
+        cores: 2
+      memory:
+        size: 8GiB
+    persist: true
+    network:
+      ports:
+        - name: http
+          port: 8000
+      endpoints:
+        - name: crucible-team3-studio
+          port-name: http
+          protocol: http
+          type: path
+          scope: group
+    readiness-probe:
+      http-get:
+        path: /api/health
+        port: 8000
+      initial-delay-seconds: 5
+      period-seconds: 10
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      mkdir -p /tmp/home
+      pip install --quiet --no-cache-dir pyyaml pydantic numpy httpx fastapi uvicorn
+      if [ ! -d /vast/crucible-src/src/crucible ]; then
+        mkdir -p /vast/crucible-src
+        python3 -c "import urllib.request; urllib.request.urlretrieve('https://codeload.github.com/sebastianlueders/CIQ-Hackathon/tar.gz/seb-branch','/tmp/c.tgz')"
+        tar -xzf /tmp/c.tgz -C /vast/crucible-src --strip-components=1
+      fi
+      export PYTHONPATH="/vast/crucible-src/src"
+      exec python3 -m crucible.cli serve --run-dir /vast/runs/team3-live --host 0.0.0.0 --port 8000
