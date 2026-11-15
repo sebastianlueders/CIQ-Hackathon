@@ -1455,64 +1455,82 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         prompt_clean = req.prompt.strip() or "Optimize inner neighbor loop."
 
         # 1. Live on-demand execution on the actual CIQ Fuzzball GB10 GPU cluster!
+        cordoned_twin = False
         if req.execute_on_cluster:
             reachable, ep = check_cluster_tcp_reachable()
             if reachable and resolve_fuzzball_executable():
                 base_cluster = ClusterConfig.load(repo_root() / "configs" / "cluster.default.yaml")
                 cluster, disc_rep = discover_cluster_config(base_config=base_cluster)
                 if not disc_rep.all_nodes_cordoned:
-                    win_trial_id = (sa.get("winning_summary") or {}).get("trial_id", "")
-                    adapter_vast = (
-                        f"{cluster.vast.runs_dir}/{summary['run_id']}/trials/{win_trial_id}/lora_adapter"
-                        if win_trial_id
-                        else ""
-                    )
-                    infer_yaml = render_live_inference_fuzzfile(
-                        cluster=cluster,
-                        model_id=model_name,
-                        prompt=prompt_clean,
-                        company_name=company,
-                        adapter_vast_dir=adapter_vast,
-                        compare_base=req.compare_base,
-                    )
-                    infer_dir = resolved_run_dir.parent / "live_copilot_infer"
-                    infer_dir.mkdir(parents=True, exist_ok=True)
-                    fz_path = infer_dir / "infer.yaml"
-                    fz_path.write_text(infer_yaml, encoding="utf-8")
-                    with FuzzballMCPStdioClient(allow_write=True, allow_exec=True) as mcp:
-                        mcp.workflow_validate(infer_yaml, fuzzfile_path=fz_path)
-                        wf_id = mcp.workflow_start(
-                            infer_yaml,
-                            name=f"copilot-{hashlib.sha256(prompt_clean.encode()).hexdigest()[:6]}",
-                            fuzzfile_path=fz_path,
+                    try:
+                        win_trial_id = (sa.get("winning_summary") or {}).get("trial_id", "")
+                        adapter_vast = (
+                            f"{cluster.vast.runs_dir}/{summary['run_id']}/trials/{win_trial_id}/lora_adapter"
+                            if win_trial_id
+                            else ""
                         )
-                        mcp.workflow_wait(wf_id, timeout_seconds=180)
-                        raw_log = mcp.workflow_log(wf_id, "infer-copilot", lines=120)
-                    infer_obj = None
-                    for ln in reversed(raw_log.splitlines()):
-                        if "CRUCIBLE_INFER_JSON=" in ln:
-                            infer_obj = json.loads(ln.split("CRUCIBLE_INFER_JSON=", 1)[1].strip())
-                            break
-                    if infer_obj is not None:
-                        return {
-                            "source": "live_fuzzball_gb10_gpu",
-                            "workflow_id": wf_id,
-                            "hostname": infer_obj.get("hostname", "CIQ-CHI-SPARK05"),
-                            "gpu_name": infer_obj.get("gpu_name", "NVIDIA GB10"),
-                            "adapter_loaded": infer_obj.get("adapter_loaded", False),
-                            "company_name": company,
-                            "prompt": prompt_clean,
-                            "model_id": model_name,
-                            "serving_config": win_serve["label"],
-                            "precision": win_serve["precision"],
-                            "ttft_ms": infer_obj.get("latency_ms", win_serve["ttft_ms"]),
-                            "throughput_tok_s": infer_obj.get("throughput_tok_s", win_serve["throughput_tokens_per_sec"]),
-                            "base_perplexity": sa["base_held_out_perplexity"],
-                            "tuned_perplexity": sa["winning_summary"]["held_out_perplexity"],
-                            "base_output": infer_obj.get("base_output"),
-                            "tuned_output": infer_obj.get("tuned_output"),
-                        }
+                        infer_yaml = render_live_inference_fuzzfile(
+                            cluster=cluster,
+                            model_id=model_name,
+                            prompt=prompt_clean,
+                            company_name=company,
+                            adapter_vast_dir=adapter_vast,
+                            compare_base=req.compare_base,
+                        )
+                        infer_dir = resolved_run_dir.parent / "live_copilot_infer"
+                        infer_dir.mkdir(parents=True, exist_ok=True)
+                        fz_path = infer_dir / "infer.yaml"
+                        fz_path.write_text(infer_yaml, encoding="utf-8")
+                        with FuzzballMCPStdioClient(allow_write=True, allow_exec=True) as mcp:
+                            mcp.workflow_validate(infer_yaml, fuzzfile_path=fz_path)
+                            wf_id = mcp.workflow_start(
+                                infer_yaml,
+                                name=f"copilot-{hashlib.sha256(prompt_clean.encode()).hexdigest()[:6]}",
+                                fuzzfile_path=fz_path,
+                            )
+                            raw_log = ""
+                            queued_ticks = 0
+                            for _ in range(70):
+                                d_now = mcp.workflow_describe(wf_id) if "workflow_describe" in mcp.advertised_tools else {}
+                                st_now = inspect_workflow_stages(d_now)
+                                if st_now["terminal"]:
+                                    break
+                                if st_now["phase"] == "QUEUED":
+                                    queued_ticks += 1
+                                    if queued_ticks >= 9:
+                                        cordoned_twin = True
+                                        break
+                                time.sleep(1.5)
+                            if not cordoned_twin:
+                                raw_log = mcp.workflow_log(wf_id, "infer-copilot", lines=120)
+                        infer_obj = None
+                        for ln in reversed(raw_log.splitlines()):
+                            if "CRUCIBLE_INFER_JSON=" in ln:
+                                infer_obj = json.loads(ln.split("CRUCIBLE_INFER_JSON=", 1)[1].strip())
+                                break
+                        if infer_obj is not None:
+                            return {
+                                "source": "live_fuzzball_gb10_gpu",
+                                "workflow_id": wf_id,
+                                "hostname": infer_obj.get("hostname", "CIQ-CHI-SPARK05"),
+                                "gpu_name": infer_obj.get("gpu_name", "NVIDIA GB10"),
+                                "adapter_loaded": infer_obj.get("adapter_loaded", False),
+                                "company_name": company,
+                                "prompt": prompt_clean,
+                                "model_id": model_name,
+                                "serving_config": win_serve["label"],
+                                "precision": win_serve["precision"],
+                                "ttft_ms": infer_obj.get("latency_ms", win_serve["ttft_ms"]),
+                                "throughput_tok_s": infer_obj.get("throughput_tok_s", win_serve["throughput_tokens_per_sec"]),
+                                "base_perplexity": sa["base_held_out_perplexity"],
+                                "tuned_perplexity": sa["winning_summary"]["held_out_perplexity"],
+                                "base_output": infer_obj.get("base_output"),
+                                "tuned_output": infer_obj.get("tuned_output"),
+                            }
+                    except Exception:
+                        cordoned_twin = True
                 else:
+                    cordoned_twin = True
                     time.sleep(0.35)
         live_endpoint = os.getenv("CRUCIBLE_LLM_ENDPOINT", "").strip()
         if live_endpoint:
@@ -1617,7 +1635,8 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
                 except Exception:
                     pass
         return {
-            "source": "instant_calibrated_preview",
+            "source": "fuzzball_cordoned_twin" if cordoned_twin else "instant_calibrated_preview",
+            "cordoned_twin": cordoned_twin,
             "company_name": company,
             "prompt": prompt_clean,
             "model_id": model_name,

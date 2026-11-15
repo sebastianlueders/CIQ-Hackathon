@@ -357,7 +357,12 @@ document.getElementById("send").onclick = async () => {{
 
 
 def _find_fuzzball() -> str | None:
-    return shutil.which("fuzzball") or (str(pathlib.Path.home() / "bin" / "fuzzball") if (pathlib.Path.home() / "bin" / "fuzzball").is_file() else None)
+    if shutil.which("fuzzball"):
+        return shutil.which("fuzzball")
+    for cand in (pathlib.Path.home() / "bin" / "fuzzball", pathlib.Path("./fuzzball")):
+        if cand.is_file():
+            return str(cand.resolve())
+    return None
 
 
 def _run_on_fuzzball_gpu(prompt: str) -> dict:
@@ -434,10 +439,15 @@ def _run_on_fuzzball_gpu(prompt: str) -> dict:
     try:
         st = subprocess.run([fb, "workflow", "start", tpath, "--name", "apex-copilot-chat"], capture_output=True, text=True, check=True)
         wf_id = st.stdout.strip().splitlines()[-1].strip()
+        queued_ticks = 0
         for _ in range(90):
             desc = subprocess.run([fb, "workflow", "describe", wf_id], capture_output=True, text=True).stdout
             if "FINISHED" in desc.upper() or "Finished" in desc:
                 break
+            if "PENDING" in desc.upper() or "UNSPECIFIED" in desc.upper():
+                queued_ticks += 1
+                if queued_ticks >= 9:
+                    return {{"badge": f"Fuzzball Connected ({{TEAM_PROV}} · Cluster Queue Full · GB10 Twin)", "answer": fallback_ans}}
             time.sleep(1.5)
         lg = subprocess.run([fb, "workflow", "log", wf_id, "copilot-infer"], capture_output=True, text=True).stdout
         for ln in reversed(lg.splitlines()):
@@ -462,11 +472,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(out).encode("utf-8"))
 
 
+class ReusableThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 if __name__ == "__main__":
-    url = f"http://127.0.0.1:{{PORT}}"
+    chosen_port = PORT
+    srv = None
+    for candidate_port in range(PORT, PORT + 12):
+        try:
+            srv = ReusableThreadingHTTPServer(("127.0.0.1", candidate_port), Handler)
+            chosen_port = candidate_port
+            break
+        except OSError:
+            continue
+    if srv is None:
+        raise SystemExit(f"Could not bind local port in range {{PORT}}..{{PORT + 11}}")
+    url = f"http://127.0.0.1:{{chosen_port}}"
     print(f"[{{COMPANY_NAME}}] Launching Private AI Copilot at {{url}} (connected to Fuzzball '{{TEAM_PROV}}')...")
-    webbrowser.open(url)
-    http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    if os.getenv("COPILOT_NO_BROWSER") != "1":
+        webbrowser.open(url)
+    srv.serve_forever()
 '''
 
     teacher_sft_preview = "# Teacher SFT training split preview will populate during dataset ingestion.\n"

@@ -67,6 +67,7 @@ def _build_backend(
     processed_data_dir: Path,
     event_hook: EventCallback | None = None,
     sim_step_delay_s: float = 0.0,
+    stop_event: threading.Event | None = None,
 ) -> ExecutionBackend:
     if backend_kind == "fuzzball_mcp":
         return FuzzballMCPBackend(
@@ -76,6 +77,7 @@ def _build_backend(
             local_run_dir=output_dir,
             processed_data_dir=processed_data_dir,
             event_hook=event_hook,
+            stop_event=stop_event,
         )
     if backend_kind == "fuzzball":
         return FuzzballCLIBackend(
@@ -103,6 +105,7 @@ def _build_backend(
         processed_data_dir=processed_data_dir,
         event_hook=event_hook,
         step_delay_s=sim_step_delay_s,
+        stop_event=stop_event,
     )
 
 
@@ -230,7 +233,7 @@ def run_autoresearch_pipeline(
             "teacher_curriculum": teacher_curriculum,
         }
     )
-    if sim_step_delay_s > 0:
+    if sim_step_delay_s > 0 and not (stop_event is not None and stop_event.is_set()):
         time.sleep(min(0.35, sim_step_delay_s * 2.0))
 
     # 2. Custom sm_121 Kernel Correctness & Microbenchmark Suite
@@ -258,6 +261,7 @@ def run_autoresearch_pipeline(
         processed_data_dir=processed_dir,
         event_hook=_emit,
         sim_step_delay_s=sim_step_delay_s,
+        stop_event=stop_event,
     )
 
     # 4. Stage A: Parallel LoRA Recipe Search with Successive Halving

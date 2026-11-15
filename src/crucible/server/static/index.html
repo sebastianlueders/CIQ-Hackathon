@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Alchemy Client Studio — Fuzzball Remote GPU Server &amp; Local LLM Forge</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261115j" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261115k" />
 </head>
 <body>
   <!-- ENTERPRISE CLIENT WORKSTATION HEADER -->
@@ -650,7 +650,7 @@
         </div>
         <div class="unzip-quickstart">
           <span>Unzip &amp; Launch Locally:</span>
-          <code id="unzip-cmd-line">unzip apex-dynamics-private-llm-*.zip -d apex-ai &amp;&amp; python3 apex-ai/scripts/run_company_app.py</code>
+          <code id="unzip-cmd-line">cd ~/Downloads &amp;&amp; unzip -o &quot;$(ls -t apex-dynamics-private-llm-*.zip | head -1)&quot; -d apex-ai &amp;&amp; python3 apex-ai/scripts/run_company_app.py</code>
         </div>
         <div class="yaml-controls">
           <button data-artifact="scripts/run_company_app.py" class="btn btn-outline btn-sm artifact-tab active-tab">run_company_app.py</button>
@@ -667,6 +667,6 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=20261115j" ></script>
+  <script src="/static/app.js?v=20261115k" ></script>
 </body>
 </html>
