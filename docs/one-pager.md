@@ -17,7 +17,7 @@ An agent that does all three as experiments on the customer's own cluster. **Eve
 
 A deterministic optimizer decides which experiments run and a measured adoption rule decides which optimizations stick, so the loop always completes; an LLM layer that explains each decision from configs and metrics only is next.
 
-**Custom kernels are part of the search, not a side project.** Each optimization is an option the agent benchmarks against the PyTorch default as a Fuzzball experiment: torch.compile first (1.49×, adopted), the MoE expert implementation (1.90×), our Triton fused linear + cross-entropy over the 152k vocabulary (verified against PyTorch), and next a grouped expert GEMM tuned for sm_121. Each kernel has a correctness test against PyTorch.
+**Custom kernels are part of the search, not a side project.** Each optimization is an option the agent benchmarks against the PyTorch default as a Fuzzball experiment: torch.compile first (1.49×, adopted), the MoE expert implementation (1.90×), our Triton fused linear + cross-entropy over the 152k vocabulary (verified against PyTorch), and a grouped expert GEMM written for sm_121 (being measured). Each kernel has a correctness test against PyTorch.
 
 ### Demo: a coding assistant for a private HPC codebase
 **LAMMPS**, a large public C++ simulation code, stands in for a lab's private code. The base model is **Qwen3-Coder-30B-A3B** (MoE, BF16), with whole LAMMPS files held out for evaluation.
@@ -25,12 +25,12 @@ A deterministic optimizer decides which experiments run and a measured adoption 
 | Result (all measured on GB10, logged in `results/`) | Value |
 |----------------------------|------------------------------------------|
 | Held-out LAMMPS loss (perplexity), base → fine-tuned | 1.175 (3.24) → **1.037 (2.82)**, −11.7%, after 750k tokens; 4 → 2 → 1 configs by successive halving |
-| Training throughput: stock → grouped experts → + torch.compile → 2 nodes | 356 → 675 → 1,011 → **~2,000 tokens/s (5.6×)**, loss unchanged; on 1 node, no activation checkpointing 1,366 (+35%), micro-batch 2 1,140 (+13%) |
+| Training throughput (stock → best) | 356 → **2,807 tokens/s (7.9×)**: grouped experts 1.9×, torch.compile 1.5×, no activation checkpointing 1.35×, 2 nodes 1.98×; loss unchanged. **~19% of measured BF16 peak** (2 × 99 TFLOP/s; 4 × active params per token) |
 | `pipeline.yaml` end to end | ran in ~35 min: ingest → train → FP8 + LoRA serving in vLLM |
 | Custom Triton fused linear + cross-entropy (152k vocab) | 2.1–2.35× faster and 7.0 → 0.34 GiB alone; in training −6.2 GiB peak memory, exact loss |
 | Serving (vLLM): base BF16 → FP8; fine-tuned FP8 + LoRA | 113 → 203 tokens/s at 16 concurrent (1.79×, loss +0.2%); fine-tuned: 188 at 16, **441 at 64 concurrent**, held-out loss 1.293 → **1.168** |
 
-**What did the second node unlock?** Data-parallel training across both GB10 nodes as one Fuzzball multinode job: 1,011 → ~2,000 tokens/s (1.98×, 99% scaling efficiency; gradient sync 0.05–0.5 s of a 33 s step), plus parallel search trials sharing one copy of weights and data on VAST.
+**What did the second node unlock?** Data-parallel training across both GB10 nodes as one Fuzzball multinode job: 1,011 → 1,998 tokens/s on the same config (1.98×, 99% scaling efficiency; gradient sync 0.05–0.5 s of a 33 s step), and 2,807 tokens/s with all adopted optimizations; plus parallel search trials sharing one copy of weights and data on VAST.
 
 ### Built on NVIDIA, CIQ, and VAST Data
 **CIQ Fuzzball:** the agent's entire experiment loop runs as Fuzzball workflows, and its deliverable *is* a Fuzzball workflow. **VAST Data:** Fuzzball volumes on VAST hold the weights, dataset, adapters, checkpoints, and results, shared by every trial on every node with no copying. That shared storage is what makes a parallel search cheap. **NVIDIA:** GB10 Grace Blackwell nodes, custom kernels written for sm_121, NCCL, and FP8 serving on Blackwell. **Next:** the agent generates and validates new kernels for hardware it hasn't seen.
