@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Alchemy Studio</title>
   <link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/styles.css?v=20261117p" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261117r" />
 </head>
 <body data-phase="pre_run">
   <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
@@ -239,8 +239,8 @@
             <label class="field">Time budget (minutes)
               <input id="time-budget-input" class="input" type="number" min="1" max="120" step="1" value="8" />
             </label>
-            <label class="field">Cost cap (USD)
-              <input id="cost-budget-input" class="input" type="number" min="0.5" max="200" step="0.5" value="5.00" />
+            <label class="field">Token budget (millions)
+              <input id="token-budget-input" class="input" type="number" min="1" max="100" step="1" value="10" />
             </label>
             <label class="check"><input id="chk-continuous" type="checkbox" checked /> Keep improving with the remote teacher until the budget runs out</label>
             <label class="check"><input id="chk-company-presets" type="checkbox" checked /> Start from saved GB10 kernel presets</label>
@@ -271,7 +271,7 @@
           <div><dt>Trial · step</dt><dd id="rt-step">Idle</dd></div>
           <div><dt>Train / val loss</dt><dd id="rt-loss">— / —</dd></div>
           <div><dt>Throughput</dt><dd id="rt-toks">—</dd></div>
-          <div><dt>Teacher round · spent</dt><dd id="rt-memsave">R0 · $0.00</dd></div>
+          <div><dt>Teacher round · tokens</dt><dd id="rt-memsave">R0 · 0.0M tokens</dd></div>
         </dl>
 
         <div id="live-error-banner" class="error hidden" role="alert"></div>
@@ -495,6 +495,6 @@
     </div>
   </dialog>
 
-  <script src="/static/app.js?v=20261117p"></script>
+  <script src="/static/app.js?v=20261117r"></script>
 </body>
 </html>
