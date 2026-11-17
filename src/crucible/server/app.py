@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from crucible.build_bundle import build_artifact_texts, create_build_bundle_zip_bytes
+from crucible.build_bundle import build_artifact_texts, clean_company_name, create_build_bundle_zip_bytes
 from crucible.config import ClusterConfig, DatasetSplitConfig, ExperimentConfig, repo_root
 from crucible.data.custom_ingest import ingest_universal_dataset, stage_uploaded_files
 from crucible.firewall import DataIsolationViolation, PrivacySchemaFirewall
@@ -267,7 +267,7 @@ class LiveRunState:
             self.state = "running"
             self.profile = profile
             self.backend = backend
-            self.company_name = company_name.strip() or "Apex Dynamics"
+            self.company_name = clean_company_name(company_name)
             self.model_id = model_id
             self.dataset_id = dataset_id
             self.definition_id = cluster.definition_id
@@ -1410,7 +1410,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     @app.get("/api/build/preview")
     def api_build_preview(company_name: str | None = None) -> dict[str, Any]:
         summary = _ensure_seeded()
-        resolved_company = (company_name or live_state.company_name or "Apex Dynamics").strip() or "Apex Dynamics"
+        resolved_company = clean_company_name(company_name or live_state.company_name)
         artifacts = build_artifact_texts(summary, app.state.run_dir, company_name=resolved_company)
         return {
             "run_id": summary["run_id"],
@@ -1423,7 +1423,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     @app.get("/api/build/bundle.zip")
     def api_download_build_bundle(company_name: str | None = None) -> Response:
         summary = _ensure_seeded()
-        resolved_company = (company_name or live_state.company_name or "Apex Dynamics").strip() or "Apex Dynamics"
+        resolved_company = clean_company_name(company_name or live_state.company_name)
         zip_bytes = create_build_bundle_zip_bytes(summary, app.state.run_dir, company_name=resolved_company)
         comp_slug = resolved_company.lower().replace(" ", "-")[:24]
         slug = str(summary.get("experiment_id") or "crucible-build")[:36]
@@ -1439,7 +1439,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
     def api_playground_complete(req: PlaygroundPromptRequest) -> dict[str, Any]:
         """Client-side & Live Fuzzball GB10 Copilot Chat comparing untuned base vs domain-tuned LLM."""
         summary = _ensure_seeded()
-        company = (req.company_name or live_state.company_name or "Apex Dynamics").strip() or "Apex Dynamics"
+        company = clean_company_name(req.company_name or live_state.company_name)
         live_state.company_name = company
         model_prof = summary.get("model_profile") or {}
         model_name = model_prof.get("name", live_state.model_id)

@@ -15,11 +15,23 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import zipfile
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+_COMPANY_UNSAFE = re.compile(r"[^\w &.,'()-]")
+
+
+def clean_company_name(name: str | None) -> str:
+    """The company name is pasted into generated Python, a Modelfile, HTML and an HTTP header.
+
+    Keep only characters that are inert in all of them (no quotes, braces, backslashes,
+    angle brackets or newlines), so a hostile name cannot inject code into the download.
+    """
+    return _COMPANY_UNSAFE.sub("", name or "").strip()[:60].strip() or "Apex Dynamics"
 
 
 def build_artifact_texts(
@@ -27,7 +39,7 @@ def build_artifact_texts(
     run_dir: Path,
     company_name: str = "Apex Dynamics",
 ) -> dict[str, str]:
-    clean_company = company_name.strip() or "Apex Dynamics"
+    clean_company = clean_company_name(company_name)
     cluster = summary["cluster"]
     team_prov = cluster["vast"].get("provisioner") or cluster.get("definition_id") or "team3"
     vol_name = cluster["vast"].get("persistent_volume_name") or "runs"

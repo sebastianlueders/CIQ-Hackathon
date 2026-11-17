@@ -18,6 +18,10 @@ async function fetchJson(url, opts) {
   return await resp.json();
 }
 
+// Anything a person can type (filter, company, model ID) can come back through innerHTML. Escape it.
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
+
 function currentCompanyName() {
   const el = document.getElementById("company-name-input");
   return (el && el.value.trim()) || "Apex Dynamics";
@@ -131,7 +135,7 @@ function renderCatalogCards() {
 
   const wrap = document.getElementById("model-chips");
   if (filtered.length === 0) {
-    wrap.innerHTML = `<div class="catalog-empty">Nothing matches "${query}" in ${activeCategory}. You can still paste any Hugging Face <code>org/model</code> ID above.</div>`;
+    wrap.innerHTML = `<div class="catalog-empty">Nothing matches "${esc(query)}" in ${esc(activeCategory)}. You can still paste any Hugging Face <code>org/model</code> ID above.</div>`;
     return;
   }
 
@@ -144,12 +148,12 @@ function renderCatalogCards() {
         .filter(Boolean)
         .join(" · ");
       return `
-        <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" aria-pressed="${isAct}" data-model-id="${m.id}" title="${m.id} — ${m.recommended_use}">
+        <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" aria-pressed="${isAct}" data-model-id="${esc(m.id)}" title="${esc(m.id)} — ${esc(m.recommended_use)}">
           <span class="mc-top">
-            <span class="mc-label">${m.label}</span>
+            <span class="mc-label">${esc(m.label)}</span>
             <span class="mc-node ${twoGpu ? "mc-node-2" : ""}">${twoGpu ? "2 GPUs" : "1 GPU"}</span>
           </span>
-          <span class="mc-meta">${m.provider} · ${arch} · ${m.license}${extras ? ` · ${extras}` : ""}</span>
+          <span class="mc-meta">${esc(m.provider)} · ${arch} · ${esc(m.license)}${extras ? ` · ${extras}` : ""}</span>
         </button>
       `;
     })
@@ -262,11 +266,8 @@ function renderNetworkBridgeState(discReport, clusterCfg) {
 
 async function initStudio() {
   try {
-    const [modelsResp, dsResp, discResp] = await Promise.all([
-      fetchJson("/api/models"),
-      fetchJson("/api/datasets"),
-      fetchJson("/api/discover"),
-    ]);
+    fetchJson("/api/discover").then(applyDiscovery).catch(() => {});
+    const [modelsResp, dsResp] = await Promise.all([fetchJson("/api/models"), fetchJson("/api/datasets")]);
 
     fullCatalog = modelsResp.catalog || [];
     document.getElementById("catalog-count-badge").textContent = String(modelsResp.total_count || fullCatalog.length);
@@ -276,17 +277,20 @@ async function initStudio() {
     if (dsResp.preset) {
       renderDatasetBanner(dsResp.preset);
     }
-    if (discResp.discovery_report && discResp.discovery_report.cluster_endpoint) {
-      resolvedClusterEndpoint = discResp.discovery_report.cluster_endpoint;
-    }
-    if (discResp.cluster_config && discResp.cluster_config.definition_id) {
-      resolvedTeamId = discResp.cluster_config.definition_id;
-      renderClientMachineBridge(discResp.client_machine, currentClusterEndpoint(), resolvedTeamId);
-    }
-    renderNetworkBridgeState(discResp.discovery_report, discResp.cluster_config);
     await refreshModelSpec(currentModelId());
     await runPlaygroundSample();
   } catch (_) {}
+}
+
+function applyDiscovery(discResp) {
+  if (discResp.discovery_report && discResp.discovery_report.cluster_endpoint) {
+    resolvedClusterEndpoint = discResp.discovery_report.cluster_endpoint;
+  }
+  if (discResp.cluster_config && discResp.cluster_config.definition_id) {
+    resolvedTeamId = discResp.cluster_config.definition_id;
+    renderClientMachineBridge(discResp.client_machine, currentClusterEndpoint(), resolvedTeamId);
+  }
+  renderNetworkBridgeState(discResp.discovery_report, discResp.cluster_config);
 }
 
 function arrayBufferToBase64(buf) {
@@ -336,7 +340,7 @@ async function refreshBuildPreview() {
     const shortModel = String(prev.model_id || "").split("/").pop();
     document.getElementById("build-title").textContent = `${comp} package for ${shortModel}`;
     document.getElementById("build-subtitle").innerHTML =
-      `Unzip it and run <code>python3 scripts/run_company_app.py</code> to start ${comp}'s copilot on this machine.`;
+      `Unzip it and run <code>python3 scripts/run_company_app.py</code> to start ${esc(comp)}'s copilot on this machine.`;
     const subModel = document.getElementById("copilot-model-sub");
     if (subModel) {
       subModel.textContent = `${shortModel} with the tuned LoRA adapter · raw data never left this machine or VAST`;
@@ -404,6 +408,8 @@ function renderStageTracker(phase, curStage) {
   items.forEach((li, i) => {
     li.classList.toggle("is-done", i < active);
     li.classList.toggle("is-active", i === active);
+    if (i === active) li.setAttribute("aria-current", "step");
+    else li.removeAttribute("aria-current");
   });
 }
 
@@ -424,7 +430,14 @@ function renderLifecycleState(phase, snap = null, summary = null) {
   const finished = phase === "finished";
 
   byId("run-status").dataset.phase = phase;
+  document.body.dataset.phase = phase;
   renderStageTracker(phase, curStage);
+  const running = phase === "running";
+  byId("run-fields").disabled = running;
+  if (!runStarting) {
+    byId("btn-run").disabled = running;
+    byId("btn-run").textContent = running ? "Tuning…" : RUN_LABEL;
+  }
   setDownloadReady(byId("btn-top-download"), finished);
   setDownloadReady(byId("btn-card-download"), finished);
   byId("top-download-hint").textContent = finished ? "Ready" : "After a run";
@@ -749,11 +762,11 @@ function renderLiveTelemetry(snap) {
     feed.innerHTML = (snap.events || [])
       .slice()
       .reverse()
-      .map((ev) => `<div class="event-line"><span class="ev-ts">[${ev.time_utc}]</span>${ev.message}</div>`)
+      .map((ev) => `<div class="event-line"><span class="ev-ts">[${esc(ev.time_utc)}]</span>${esc(ev.message)}</div>`)
       .join("");
   }
 
-  renderDualGpuFabric(snap);
+  if (snap.user_triggered) renderDualGpuFabric(snap);
   renderRealtimeAnalysis(snap);
 
   const stopBtn = document.getElementById("btn-stop-run");
@@ -1279,9 +1292,20 @@ async function runPlaygroundSample(executeOnCluster = false) {
   }
 }
 
+let lastRenderedSeq = null;
 async function handleLiveSnapUpdate(snap) {
+  // The event stream and the poll loop both deliver snapshots; render each one once.
+  if (snap.seq != null && snap.seq === lastRenderedSeq) return;
+  lastRenderedSeq = snap.seq;
   renderLiveTelemetry(snap);
   const wasActive = lastObservedRunState === "running" || lastObservedRunState === "queued_for_gpu";
+  if (wasActive && !snap.user_triggered) {
+    // The server restarted and lost the run: go back to a clean pre-run screen.
+    lastObservedRunState = "idle";
+    stopActivePollLoop();
+    renderLifecycleState("pre_run", snap, null);
+    return;
+  }
   if (wasActive && snap.state === "completed") {
     lastObservedRunState = snap.state;
     stopActivePollLoop();
@@ -1290,16 +1314,12 @@ async function handleLiveSnapUpdate(snap) {
     renderLifecycleState("finished", snap, summary);
     await refreshBuildPreview();
     await runPlaygroundSample(false);
-    document.getElementById("btn-run").disabled = false;
-    document.getElementById("btn-run").textContent = RUN_LABEL;
     return;
   }
   if (snap.state === "failed") {
     lastObservedRunState = snap.state;
     stopActivePollLoop();
     renderLifecycleState("failed", snap, latestSummary);
-    document.getElementById("btn-run").disabled = false;
-    document.getElementById("btn-run").textContent = RUN_LABEL;
     return;
   }
   if (snap.state === "running" || snap.state === "queued_for_gpu") {
@@ -1308,13 +1328,32 @@ async function handleLiveSnapUpdate(snap) {
   lastObservedRunState = snap.state;
 }
 
+let pollFailures = 0;
+const SERVER_DOWN = "Lost connection to the Alchemy server on this machine. If it stopped, restart it with ./scripts/run_team3.sh and reload this page.";
+
+function showDisconnected() {
+  const pill = document.getElementById("header-lifecycle-pill");
+  pill.className = "chip chip-failed";
+  pill.textContent = "Disconnected";
+  document.getElementById("lifecycle-headline").textContent = "Lost connection to the server";
+  const err = document.getElementById("live-error-banner");
+  err.textContent = SERVER_DOWN;
+  err.classList.remove("hidden");
+}
+
 function ensureActivePollLoop() {
   if (activePollTimer) return;
   activePollTimer = setInterval(async () => {
+    let snap;
     try {
-      const snap = await fetchJson("/api/live-status");
-      await handleLiveSnapUpdate(snap);
-    } catch (_) {}
+      snap = await fetchJson("/api/live-status");
+    } catch (_) {
+      // Re-assert on every miss: a late snapshot from the event stream can repaint "Running".
+      if (++pollFailures >= 3) showDisconnected();
+      return;
+    }
+    pollFailures = 0;
+    await handleLiveSnapUpdate(snap);
   }, 650);
 }
 
@@ -1365,6 +1404,8 @@ dz.addEventListener("drop", async (e) => {
   }
 });
 
+document.getElementById("btn-upload").addEventListener("click", () => document.getElementById("file-picker").click());
+document.getElementById("btn-upload-folder").addEventListener("click", () => document.getElementById("folder-picker").click());
 document.getElementById("file-picker").addEventListener("change", (e) => uploadFileList(e.target.files));
 document.getElementById("folder-picker").addEventListener("change", (e) => uploadFileList(e.target.files));
 document.getElementById("btn-use-preset").addEventListener("click", async () => {
@@ -1417,16 +1458,17 @@ document.getElementById("btn-stop-run").addEventListener("click", async () => {
   }, 1200);
 });
 
+let runStarting = false;
 document.getElementById("btn-run").addEventListener("click", async () => {
   const btn = document.getElementById("btn-run");
+  if (runStarting || btn.disabled || currentLifecyclePhase === "running") return;
+  runStarting = true;
+  btn.disabled = true;
+  btn.textContent = "Checking the cluster…";
   const modelId = currentModelId();
   if (!userPickedBackend) {
     try {
-      const discResp = await fetchJson("/api/discover");
-      if (discResp.cluster_config && discResp.cluster_config.definition_id) {
-        resolvedTeamId = discResp.cluster_config.definition_id;
-      }
-      renderNetworkBridgeState(discResp.discovery_report, discResp.cluster_config);
+      applyDiscovery(await fetchJson("/api/discover"));
     } catch (_) {}
   }
   const backend = document.getElementById("backend-select").value;
@@ -1437,12 +1479,13 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   const timeBudgetMin = Math.max(0.5, Number(document.getElementById("time-budget-input").value || 8));
   const costBudgetUsd = Math.max(0.5, Number(document.getElementById("cost-budget-input").value || 5));
 
-  btn.disabled = true;
   btn.textContent = "Tuning…";
   setRunProvenance(backend);
   resetPanelsForLoading();
   renderLifecycleState("running", { current_stage: "starting", stage_label: `Splitting the data and starting ${modelId.split("/").pop()}` }, null);
-  const resp = await fetch("/api/run", {
+  let resp = null;
+  try {
+    resp = await fetch("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1460,11 +1503,17 @@ document.getElementById("btn-run").addEventListener("click", async () => {
       async_mode: true,
     }),
   });
-  if (!resp.ok) {
-    btn.disabled = false;
-    btn.textContent = RUN_LABEL;
-    const err = await resp.json();
-    const errMsg = err.detail || "The run could not start.";
+  } catch (_) {}
+  runStarting = false;
+  if (!resp || !resp.ok) {
+    let errMsg = SERVER_DOWN;
+    if (resp) {
+      try {
+        errMsg = (await resp.json()).detail || "The run could not start.";
+      } catch (_) {
+        errMsg = "The run could not start.";
+      }
+    }
     renderLifecycleState("failed", { error: errMsg }, null);
     const errBanner = document.getElementById("live-error-banner");
     errBanner.textContent = errMsg;
@@ -1571,7 +1620,6 @@ document.querySelectorAll('[popovertarget="data-menu"]').forEach((btn) =>
 document.getElementById("data-menu").addEventListener("click", (e) => {
   if (e.target.closest("button")) document.getElementById("data-menu").hidePopover();
 });
-document.getElementById("folder-picker").addEventListener("change", () => document.getElementById("data-menu").hidePopover());
 
 document.querySelectorAll(".artifact-tab").forEach((btn) => {
   btn.addEventListener("click", () => {

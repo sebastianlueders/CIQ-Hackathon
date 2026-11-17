@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Alchemy · Private fine-tuning on CIQ Fuzzball</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261117c" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261117i" />
 </head>
 <body>
   <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
@@ -171,6 +171,8 @@
           <p class="run-sub">The agent searches for a recipe, makes training fast, picks the fastest serving setup that keeps quality, and packages it as one workflow.</p>
         </div>
 
+        <fieldset class="run-fields" id="run-fields">
+        <legend class="sr-only">Run settings</legend>
         <div class="config" id="dropzone">
           <div class="config-row">
             <span class="config-label">Model</span>
@@ -188,7 +190,8 @@
               <span class="config-meta" id="dataset-status-bar">Train, validation and test splits ready · or drop files here</span>
             </div>
             <div class="config-actions">
-              <label class="btn btn-secondary btn-sm">Upload<input id="file-picker" type="file" multiple hidden /></label>
+              <button id="btn-upload" class="btn btn-secondary btn-sm" type="button">Upload</button>
+              <input id="file-picker" type="file" multiple hidden />
               <button class="btn btn-icon btn-icon-sm" type="button" popovertarget="data-menu" aria-label="More data options"><svg class="icon"><use href="#i-dots"/></svg></button>
             </div>
           </div>
@@ -196,7 +199,7 @@
           <div class="config-row">
             <label class="config-label" for="company-name-input">Company</label>
             <div class="config-value">
-              <input id="company-name-input" class="input" type="text" value="Apex Dynamics" spellcheck="false" />
+              <input id="company-name-input" class="input" type="text" value="Apex Dynamics" maxlength="60" spellcheck="false" autocomplete="organization" />
             </div>
             <span class="config-meta config-aside">Brands the packaged copilot</span>
           </div>
@@ -228,6 +231,7 @@
             <p class="config-meta advanced-note"><span id="preset-callout-title">Saved preset</span> · <span id="preset-savings-val">checking…</span></p>
           </div>
         </details>
+        </fieldset>
 
         <div class="run-actions">
           <button id="btn-run" class="btn btn-primary" type="button">Tune and build</button>
@@ -235,9 +239,9 @@
         </div>
       </div>
 
-      <div class="status" id="run-status" data-phase="pre_run" data-sim="true" aria-live="polite">
+      <div class="status" id="run-status" data-phase="pre_run" data-sim="true">
         <div class="status-line">
-          <p class="status-headline" id="lifecycle-headline">Ready to run</p>
+          <p class="status-headline" id="lifecycle-headline" aria-live="polite">Ready to run</p>
           <span class="chip chip-sim" id="sim-tag">Simulated</span>
         </div>
         <p class="status-sub" id="lifecycle-sub">Before training, the remote teacher splits your data into train, validation and test sets with no overlap.</p>
@@ -264,7 +268,8 @@
     </section>
 
     <div id="data-menu" class="menu menu-small" popover>
-      <label class="menu-item">Upload a folder<input id="folder-picker" type="file" webkitdirectory directory multiple hidden /></label>
+      <button id="btn-upload-folder" type="button" class="menu-item">Upload a folder</button>
+      <input id="folder-picker" type="file" webkitdirectory directory multiple hidden />
       <button id="btn-use-preset" type="button" class="menu-item">Use the LAMMPS sample corpus</button>
     </div>
 
@@ -486,6 +491,6 @@
     </div>
   </dialog>
 
-  <script src="/static/app.js?v=20261117c"></script>
+  <script src="/static/app.js?v=20261117i"></script>
 </body>
 </html>
