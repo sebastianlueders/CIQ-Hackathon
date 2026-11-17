@@ -129,6 +129,7 @@ def run_autoresearch_pipeline(
     preset_savings_usd = float(hw_preset["warm_start_savings_usd"]) if hw_preset else 0.0
     spent_gpu_hours = 0.0
     spent_usd = 0.0
+    spent_tokens = 0.0
 
     # Apply company hardware preset warm-start: skip redundant Stage A/B cold sweeps to save $ budget for Continuous Teacher!
     if hw_preset:
@@ -156,7 +157,7 @@ def run_autoresearch_pipeline(
             event_hook(payload)
 
     def _emit(payload: dict[str, Any]) -> None:
-        nonlocal spent_gpu_hours, spent_usd
+        nonlocal spent_gpu_hours, spent_usd, spent_tokens
         if payload.get("type") == "trial_finished":
             summ = payload.get("summary") or {}
             # Simulator computes theoretical wall_time_s for 480x32k tokens (~2500s); scale trial cost to realistic fast-rung runtime
@@ -167,10 +168,13 @@ def run_autoresearch_pipeline(
             spent_gpu_hours += trial_gpu_h
             raw_usd = spent_gpu_hours * cont_cfg.gpu_hourly_rate_usd
             spent_usd = round(max(0.04, raw_usd - preset_savings_usd * 0.25), 4)
+            spent_tokens += float(summ.get("mean_tokens_per_sec") or 0.0) * eff_wall_s
             payload = {
                 **payload,
                 "spent_usd": round(spent_usd, 3),
                 "cost_budget_usd": cont_cfg.cost_budget_usd,
+                "spent_tokens": int(spent_tokens),
+                "token_budget_m": cont_cfg.token_budget_m,
                 "preset_savings_usd": preset_savings_usd,
                 "elapsed_s": round(time.monotonic() - run_t0, 1),
                 "time_budget_s": round(cont_cfg.time_budget_minutes * 60.0, 1),
@@ -188,6 +192,7 @@ def run_autoresearch_pipeline(
             "continuous_enabled": cont_cfg.enabled,
             "time_budget_minutes": cont_cfg.time_budget_minutes,
             "cost_budget_usd": cont_cfg.cost_budget_usd,
+            "token_budget_m": cont_cfg.token_budget_m,
             "gpu_hourly_rate_usd": cont_cfg.gpu_hourly_rate_usd,
             "hardware_preset": hw_preset,
             "preset_savings_usd": preset_savings_usd,
@@ -458,7 +463,7 @@ def run_autoresearch_pipeline(
                 "stage": "continuous_teacher_loop",
                 "label": (
                     f"Continuous Remote-Teacher Loop: Optimizing Intelligence + Throughput "
-                    f"(Budget: ${cost_budget:.2f} / {cont_cfg.time_budget_minutes:.1f}m"
+                    f"(Budget: {cont_cfg.token_budget_m:g}M tokens / {cont_cfg.time_budget_minutes:.1f}m"
                     + (f" · Saved ${preset_savings_usd:.2f} via {hw_preset['preset_id']}" if hw_preset else "")
                     + ")"
                 ),
@@ -475,6 +480,9 @@ def run_autoresearch_pipeline(
                 break
             if spent_usd >= cost_budget:
                 stop_reason = f"cost_budget_reached (${spent_usd:.2f} >= ${cost_budget:.2f})"
+                break
+            if spent_tokens >= cont_cfg.token_budget_m * 1e6:
+                stop_reason = f"token_budget_reached ({spent_tokens / 1e6:.1f}M >= {cont_cfg.token_budget_m:g}M)"
                 break
 
             t_req = AdvisorStageRequest(
@@ -511,6 +519,7 @@ def run_autoresearch_pipeline(
                     "rationale": prop_exp.rationale,
                     "spent_usd": round(spent_usd, 3),
                     "cost_budget_usd": cost_budget,
+                    "spent_tokens": int(spent_tokens),
                     "elapsed_s": round(elapsed_now, 1),
                     "time_budget_s": round(time_budget_s, 1),
                 }

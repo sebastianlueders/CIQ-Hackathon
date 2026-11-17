@@ -120,6 +120,7 @@ class TriggerRunRequest(BaseModel):
     continuous_mode: bool = True
     time_budget_minutes: float = Field(default=8.0, ge=0.1, le=240.0)
     cost_budget_usd: float = Field(default=5.0, ge=0.1, le=500.0)
+    token_budget_m: float = Field(default=10.0, ge=0.1, le=1000.0)
     use_company_presets: bool = True
     async_mode: bool = False
 
@@ -186,6 +187,8 @@ class LiveRunState:
             "continuous_enabled": True,
             "spent_usd": 0.0,
             "cost_budget_usd": 5.0,
+            "spent_tokens": 0,
+            "token_budget_m": 10.0,
             "preset_savings_usd": 0.0,
             "elapsed_s": 0.0,
             "time_budget_s": 480.0,
@@ -290,6 +293,8 @@ class LiveRunState:
                 "continuous_enabled": True,
                 "spent_usd": 0.0,
                 "cost_budget_usd": 5.0,
+                "spent_tokens": 0,
+                "token_budget_m": 10.0,
                 "preset_savings_usd": 0.0,
                 "elapsed_s": 0.0,
                 "time_budget_s": 480.0,
@@ -474,6 +479,8 @@ class LiveRunState:
                         "continuous_enabled": bool(payload.get("continuous_enabled", True)),
                         "spent_usd": 0.0,
                         "cost_budget_usd": float(payload.get("cost_budget_usd") or 5.0),
+                        "spent_tokens": 0,
+                        "token_budget_m": float(payload.get("token_budget_m") or 10.0),
                         "preset_savings_usd": float(payload.get("preset_savings_usd") or 0.0),
                         "elapsed_s": 0.0,
                         "time_budget_s": float(payload.get("time_budget_minutes") or 8.0) * 60.0,
@@ -482,7 +489,7 @@ class LiveRunState:
                     }
                 )
                 entry["message"] = (
-                    f"Run initialized (Budget: ${self.live_budget['cost_budget_usd']:.2f} / "
+                    f"Run initialized (Budget: {self.live_budget['token_budget_m']:g}M tokens / "
                     f"{self.live_budget['time_budget_s'] / 60.0:.1f}m"
                     + (f" · Warm-start saved ${self.live_budget['preset_savings_usd']:.2f}" if self.live_budget["preset_savings_usd"] > 0 else "")
                     + ")"
@@ -495,12 +502,13 @@ class LiveRunState:
                         "teacher_round": r_num,
                         "max_teacher_rounds": int(payload.get("max_rounds") or 8),
                         "spent_usd": float(payload.get("spent_usd") or self.live_budget["spent_usd"]),
+                        "spent_tokens": int(payload.get("spent_tokens") or self.live_budget.get("spent_tokens") or 0),
                         "elapsed_s": float(payload.get("elapsed_s") or self.live_budget["elapsed_s"]),
                     }
                 )
                 self.stage_label = (
                     f"Remote Teacher Round {r_num}: Testing {payload.get('candidate_label')} "
-                    f"(${self.live_budget['spent_usd']:.2f} / ${self.live_budget['cost_budget_usd']:.2f})"
+                    f"({self.live_budget['spent_tokens'] / 1e6:.1f}M / {self.live_budget.get('token_budget_m', 10.0):g}M tokens)"
                 )
                 entry["message"] = f"[Teacher R{r_num}] {payload.get('rationale')}"
 
@@ -818,11 +826,13 @@ class LiveRunState:
                     self.live_stage_c_outcomes.append(summ)
                 if payload.get("spent_usd") is not None:
                     self.live_budget["spent_usd"] = float(payload["spent_usd"])
+                if payload.get("spent_tokens") is not None:
+                    self.live_budget["spent_tokens"] = int(payload["spent_tokens"])
                 if payload.get("elapsed_s") is not None:
                     self.live_budget["elapsed_s"] = float(payload["elapsed_s"])
                 entry["message"] = (
                     f"Completed {tid} ({w_size}x GB10) · {float(tok_s):,.0f} tok/s · Held-Out PPL {float(ppl):.3f} "
-                    f"(${self.live_budget['spent_usd']:.2f} spent)"
+                    f"({self.live_budget.get('spent_tokens', 0) / 1e6:.1f}M tokens used)"
                 )
 
             elif ev_type == "firewall_audit":
@@ -1721,6 +1731,7 @@ def create_app(run_dir: Path | None = None) -> FastAPI:
         exp.continuous_optimization.enabled = req.continuous_mode
         exp.continuous_optimization.time_budget_minutes = req.time_budget_minutes
         exp.continuous_optimization.cost_budget_usd = req.cost_budget_usd
+        exp.continuous_optimization.token_budget_m = req.token_budget_m
         exp.continuous_optimization.warm_start_from_company_presets = req.use_company_presets
 
         app.state.stop_event.clear()

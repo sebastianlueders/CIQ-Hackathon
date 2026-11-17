@@ -282,6 +282,7 @@ class ContinuousOptimizationConfig(BaseModel):
     enabled: bool = True
     time_budget_minutes: float = Field(default=8.0, ge=0.1, le=240.0)
     cost_budget_usd: float = Field(default=5.0, ge=0.1, le=500.0)
+    token_budget_m: float = Field(default=10.0, ge=0.1, le=1000.0)  # training tokens, in millions
     gpu_hourly_rate_usd: float = Field(default=3.20, gt=0.0)
     warm_start_from_company_presets: bool = True
     max_teacher_rounds: int = Field(default=8, ge=1, le=50)

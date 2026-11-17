@@ -604,11 +604,11 @@ function renderDualGpuFabric(snap) {
 function renderRealtimeAnalysis(snap) {
   const m = snap.live_step_metrics || {};
   const b = snap.live_budget || {};
-  if (b && b.cost_budget_usd != null) {
-    const spent = Number(b.spent_usd || 0);
-    const cap = Number(b.cost_budget_usd || 5.0);
+  if (b && b.token_budget_m != null) {
+    const spentM = Number(b.spent_tokens || 0) / 1e6;
+    const capM = Number(b.token_budget_m || 10);
     const rRound = Number(b.teacher_round || 0);
-    document.getElementById("rt-memsave").textContent = `R${rRound} · $${spent.toFixed(2)} of $${cap.toFixed(0)}`;
+    document.getElementById("rt-memsave").textContent = `R${rRound} · ${spentM.toFixed(1)}M of ${capM}M tokens`;
   }
   if (m && m.trial_id) {
     document.getElementById("rt-step").textContent = `${m.trial_id.slice(0, 18)} [${m.step}/${m.max_steps || m.step}]`;
@@ -1472,7 +1472,7 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   const continuousMode = document.getElementById("chk-continuous").checked;
   const usePresets = document.getElementById("chk-company-presets").checked;
   const timeBudgetMin = Math.max(0.5, Number(document.getElementById("time-budget-input").value || 8));
-  const costBudgetUsd = Math.max(0.5, Number(document.getElementById("cost-budget-input").value || 5));
+  const tokenBudgetM = Math.max(0.1, Number(document.getElementById("token-budget-input").value || 10));
 
   btn.textContent = "Running…";
   setRunProvenance(backend);
@@ -1493,7 +1493,7 @@ document.getElementById("btn-run").addEventListener("click", async () => {
       cluster_endpoint: clusterEp,
       continuous_mode: continuousMode,
       time_budget_minutes: timeBudgetMin,
-      cost_budget_usd: costBudgetUsd,
+      token_budget_m: tokenBudgetM,
       use_company_presets: usePresets,
       async_mode: true,
     }),
