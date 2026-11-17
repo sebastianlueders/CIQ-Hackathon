@@ -1267,6 +1267,8 @@ def infer_model_profile(model_id: str, node_mem_gb: int = 104) -> ModelProfileCo
     """Resolve exact preset or infer architecture, parameter scale, MoE routing, and node sizing
     for ANY HuggingFace repo ID (`org/model`) or local `/models/...` path."""
     cleaned = model_id.strip() or "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+    if len(cleaned) > 512:
+        raise ValueError("model_id must be at most 512 characters")
     lower = cleaned.lower()
 
     for preset in MODEL_CATALOG:

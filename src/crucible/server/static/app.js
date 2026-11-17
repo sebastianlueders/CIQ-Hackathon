@@ -18,6 +18,17 @@ async function fetchJson(url, opts) {
   return await resp.json();
 }
 
+function setSafeInlineContent(element, segments) {
+  element.replaceChildren(
+    ...segments.map((segment) => {
+      if (typeof segment === "string") return document.createTextNode(segment);
+      const node = document.createElement(segment.tag === "strong" ? "strong" : "code");
+      node.textContent = segment.text;
+      return node;
+    }),
+  );
+}
+
 function currentCompanyName() {
   const el = document.getElementById("company-name-input");
   return (el && el.value.trim()) || "Apex Dynamics";
@@ -137,7 +148,10 @@ function renderCatalogCards() {
 
   const wrap = document.getElementById("model-chips");
   if (filtered.length === 0) {
-    wrap.innerHTML = `<div class="catalog-empty">No catalog preset matches "${query}" in ${activeCategory}. You can still paste ANY HuggingFace <code>org/model</code> ID above!</div>`;
+    const empty = document.createElement("div");
+    empty.className = "catalog-empty";
+    empty.textContent = `No catalog preset matches "${query}" in ${activeCategory}. You can still paste ANY HuggingFace org/model ID above!`;
+    wrap.replaceChildren(empty);
     return;
   }
 
@@ -352,12 +366,24 @@ async function refreshBuildPreview() {
     const prev = await fetchJson(`/api/build/preview?company_name=${encodeURIComponent(comp)}`);
     buildArtifacts = prev.artifacts || {};
     const shortModel = String(prev.model_id || "").split("/").pop();
-    document.getElementById("build-title").innerHTML = `${comp} LLM Package: <code>${shortModel}</code>`;
-    document.getElementById("build-subtitle").innerHTML =
-      `Unzip &amp; run <code>python3 scripts/run_company_app.py</code> on your laptop to launch <strong>${comp}'s</strong> branded app backed by Fuzzball GPUs!`;
+    setSafeInlineContent(document.getElementById("build-title"), [
+      `${comp} LLM Package: `,
+      { tag: "code", text: shortModel },
+    ]);
+    setSafeInlineContent(document.getElementById("build-subtitle"), [
+      "Unzip & run ",
+      { tag: "code", text: "python3 scripts/run_company_app.py" },
+      " on your laptop to launch ",
+      { tag: "strong", text: `${comp}'s` },
+      " branded app backed by Fuzzball GPUs!",
+    ]);
     const subModel = document.getElementById("copilot-model-sub");
     if (subModel) {
-      subModel.innerHTML = `Powered by <code>${shortModel}</code> + Tuned LoRA &middot; Zero Cloud Data Egress`;
+      setSafeInlineContent(subModel, [
+        "Powered by ",
+        { tag: "code", text: shortModel },
+        " + Tuned LoRA · Zero Cloud Data Egress",
+      ]);
     }
     const insp = document.getElementById("inspector-model-label");
     if (insp) insp.textContent = prev.model_id;
@@ -474,7 +500,13 @@ function renderLifecycleState(phase, snap = null, summary = null) {
 
     outBanner.className = "output-readiness-banner output-banner-running";
     outTag.innerHTML = `<span class="spinner-ring spinner-ring-sm"></span>STATE: RUNNING &middot; OUTPUT STILL BUILDING`;
-    outText.innerHTML = `Currently executing <strong>${(snap && snap.stage_label) || "GB10 optimization"}</strong>. Final Private Copilot and downloadable <code>.zip</code> will unlock automatically as soon as Step 3 (FINISHED) completes.`;
+    setSafeInlineContent(outText, [
+      "Currently executing ",
+      { tag: "strong", text: (snap && snap.stage_label) || "GB10 optimization" },
+      ". Final Private Copilot and downloadable ",
+      { tag: "code", text: ".zip" },
+      " will unlock automatically as soon as Step 3 (FINISHED) completes.",
+    ]);
     outPill.className = "badge badge-amber";
     outPill.textContent = "BUILDING · NOT READY YET";
 
@@ -536,7 +568,15 @@ function renderLifecycleState(phase, snap = null, summary = null) {
 
     outBanner.className = "output-readiness-banner output-banner-finished";
     outTag.textContent = "✓ STATE: FINISHED · OUTPUT READY TO TEST & DOWNLOAD";
-    outText.innerHTML = `Your tuned <strong>${comp}</strong> Private Copilot, Remote-Teacher SFT splits (<code>teacher_sft_train.jsonl</code>), and turnkey <code>.zip</code> bundle are unlocked and ready below.`;
+    setSafeInlineContent(outText, [
+      "Your tuned ",
+      { tag: "strong", text: comp },
+      " Private Copilot, Remote-Teacher SFT splits (",
+      { tag: "code", text: "teacher_sft_train.jsonl" },
+      "), and turnkey ",
+      { tag: "code", text: ".zip" },
+      " bundle are unlocked and ready below.",
+    ]);
     outPill.className = "badge badge-green";
     outPill.textContent = "✓ OUTPUT READY";
 

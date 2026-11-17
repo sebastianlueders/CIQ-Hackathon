@@ -17,6 +17,8 @@ docs/build/*
 !docs/slides.pdf
 !docs/build/build-slides.sh
 !docs/build/slides-plain.tex
+!docs/build/build_slides_pptx.js
+!docs/slides.pptx
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
