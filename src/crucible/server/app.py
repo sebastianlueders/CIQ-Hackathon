@@ -245,7 +245,7 @@ class LiveRunState:
             "inter_gpu_gbps": 0.0,
             "allreduce_ms": 0.0,
             "payload_mb": 0.0,
-            "collective_op": "Standby — 200GbE RoCE + VAST RDMA Ready",
+            "collective_op": "Standby — RoCE + VAST RDMA ready",
             "vast_read_gbs": 0.0,
             "scaling_efficiency_pct": 99.2,
             "packets_synced": 0,
@@ -417,11 +417,11 @@ class LiveRunState:
                 "NCCL_DDP_ALLREDUCE": "NCCL Ring AllReduce (LoRA Gradients Sync Across GPU 0 <-> GPU 1)",
                 "VLLM_TP2_ALLREDUCE": "NCCL Tensor-Parallel AllReduce (Per-Layer Hidden States)",
                 "VLLM_DUAL_REPLICA": "VAST Shared Adapter Read + Load-Balanced Dual vLLM Replicas",
-            }.get(comm_mode, "NCCL Inter-Node Collective Sync (RoCE 200GbE)")
+            }.get(comm_mode, "NCCL inter-node collective sync (RoCE)")
             self.gpu_telemetry = {
                 "link_active": True,
                 "comm_mode": comm_mode,
-                "protocol": "NCCL RoCE v2 · 200GbE (/dev/infiniband/uverbs0-3)",
+                "protocol": "NCCL over RoCE v2 (/dev/infiniband/uverbs0-3)",
                 "link_utilization_pct": round(min(96.0, max(18.0, (bw_gbps / 200.0) * 100.0 + 22.0)), 1),
                 "inter_gpu_gbps": round(bw_gbps, 2),
                 "allreduce_ms": round(ar, 2),
