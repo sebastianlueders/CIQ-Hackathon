@@ -1,0 +1,24 @@
+{
+  "accepted": false,
+  "completion_pass_rate": 0.8083,
+  "held_out_loss": 99.0375,
+  "held_out_perplexity": 485165195.4098,
+  "label": "nvfp4-aggressive-batch256",
+  "max_num_seqs": 256,
+  "p50_latency_ms": 507.14,
+  "p99_latency_ms": 1544.9,
+  "passed_latency_ceiling": false,
+  "passed_quality_floor": false,
+  "perplexity_regression_pct": 0.0,
+  "precision": "NVFP4",
+  "rejection_reasons": [
+    "completion_pass_rate=0.808 below floor 0.840",
+    "p99_latency_ms=1544.9 exceeds ceiling 550.0"
+  ],
+  "replicas": 2,
+  "tensor_parallel": 1,
+  "throughput_tokens_per_sec": 4203.92,
+  "trial_id": "stagec-03-nvfp4-aggressive-batch256",
+  "ttft_ms": 232.2,
+  "use_low_prec_decode_kernel": true
+}

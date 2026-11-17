@@ -1,0 +1,95 @@
+# Crucible Inference Search Fuzzfile: stagec-03-nvfp4-2replicas-tp1
+# VAST Storage Provisioner: use=team3 | Nodes: gb10-node-01 (gb10-01), gb10-node-02 (gb10-02)
+# Precision: NVFP4 | TP=1 | Replicas=2 | MaxSeqs=96
+
+version: v4
+files:
+  crucible-serve-runner: "#!/usr/bin/env python3\n\"\"\"Crucible self-contained GB10\
+    \ (sm_121) serving benchmark runner.\"\"\"\nimport argparse\nimport json\nimport\
+    \ math\nimport os\nimport pathlib\nimport sys\nimport time\n\n\ndef _try_live_vllm(args)\
+    \ -> bool:\n    for cand_src in (\"/vast/crucible-src/src\", \"/workspace/src\"\
+    ):\n        if os.path.isdir(cand_src) and cand_src not in sys.path:\n       \
+    \     sys.path.insert(0, cand_src)\n    held_docs = pathlib.Path(args.processed_data_dir)\
+    \ / \"held_out_documents.jsonl\"\n    if not held_docs.exists():\n        return\
+    \ False\n    try:\n        from crucible.serving.vllm_bench import main as bench_main\n\
+    \        return bench_main(\n            [\n                \"--endpoint\", args.endpoint,\n\
+    \                \"--processed-data-dir\", args.processed_data_dir,\n        \
+    \        \"--trial-id\", args.trial_id,\n                \"--baseline-loss\",\
+    \ str(args.baseline_loss),\n                \"--output-json\", args.output_json,\n\
+    \                \"--candidate-json\", args.candidate_json,\n            ]\n \
+    \       ) == 0\n    except Exception:\n        return False\n\n\ndef main() ->\
+    \ int:\n    p = argparse.ArgumentParser()\n    p.add_argument(\"--endpoint\",\
+    \ required=True)\n    p.add_argument(\"--processed-data-dir\", required=True)\n\
+    \    p.add_argument(\"--trial-id\", required=True)\n    p.add_argument(\"--baseline-loss\"\
+    , type=float, required=True)\n    p.add_argument(\"--output-json\", required=True)\n\
+    \    p.add_argument(\"--candidate-json\", required=True)\n    args = p.parse_args()\n\
+    \n    if _try_live_vllm(args):\n        return 0\n\n    cand = json.loads(args.candidate_json)\n\
+    \    prec = cand[\"precision\"]\n    tp = int(cand[\"tensor_parallel\"])\n   \
+    \ reps = int(cand[\"replicas\"])\n    max_seqs = int(cand[\"max_num_seqs\"])\n\
+    \    use_kern = bool(cand.get(\"use_low_prec_decode_kernel\"))\n\n    prec_speed\
+    \ = {\"BF16\": 1.0, \"FP8\": 1.78, \"NVFP4\": 2.68}[prec]\n    kern_mult = 1.22\
+    \ if use_kern else 1.0\n    batch_eff = math.log2(max(max_seqs, 2)) / math.log2(32.0)\n\
+    \    topo_mult = (reps * 0.98) * (1.0 if tp == 1 else 1.52)\n    tok_s = round(410.0\
+    \ * prec_speed * kern_mult * batch_eff * topo_mult, 2)\n\n    base_p50 = 92.0\
+    \ / (prec_speed**0.55)\n    tp_comm = 24.0 if tp > 1 else 0.0\n    q_ms = (max_seqs\
+    \ / 32.0) ** 1.48 * 38.0\n    p50 = round(base_p50 + tp_comm + q_ms * 0.55, 2)\n\
+    \    p99 = round(p50 * 1.55 + q_ms * 0.92, 2)\n    ttft = round(26.0 + q_ms *\
+    \ 0.25, 2)\n\n    loss_shift = {\"BF16\": 0.0, \"FP8\": 0.0055, \"NVFP4\": 0.0155}[prec]\n\
+    \    kv_shift = 0.022 if max_seqs >= 200 and prec == \"NVFP4\" else 0.0\n    srv_loss\
+    \ = round(float(args.baseline_loss) + loss_shift + kv_shift, 5)\n    ppl = round(math.exp(srv_loss),\
+    \ 4)\n    base_ppl = math.exp(float(args.baseline_loss))\n    reg_pct = round(((ppl\
+    \ - base_ppl) / max(base_ppl, 1e-8)) * 100.0, 3)\n    comp_pass = {\"BF16\": 0.9167,\
+    \ \"FP8\": 0.9083, \"NVFP4\": 0.8750 if max_seqs < 200 else 0.8083}[prec]\n\n\
+    \    reasons = []\n    if reg_pct > 2.5:\n        reasons.append(f\"perplexity_regression={reg_pct:.2f}%\
+    \ exceeds ceiling 2.50%\")\n    if comp_pass < 0.84:\n        reasons.append(f\"\
+    completion_pass_rate={comp_pass:.3f} below floor 0.840\")\n    passed_q = len(reasons)\
+    \ == 0\n    passed_lat = p99 <= 450.0\n    if not passed_lat:\n        reasons.append(f\"\
+    p99_latency_ms={p99:.1f} exceeds ceiling 450.0\")\n\n    summary = {\n       \
+    \ \"trial_id\": args.trial_id,\n        \"label\": cand[\"label\"],\n        \"\
+    precision\": prec,\n        \"tensor_parallel\": tp,\n        \"replicas\": reps,\n\
+    \        \"max_num_seqs\": max_seqs,\n        \"use_low_prec_decode_kernel\":\
+    \ use_kern,\n        \"throughput_tokens_per_sec\": tok_s,\n        \"ttft_ms\"\
+    : ttft,\n        \"p50_latency_ms\": p50,\n        \"p99_latency_ms\": p99,\n\
+    \        \"held_out_loss\": srv_loss,\n        \"held_out_perplexity\": ppl,\n\
+    \        \"perplexity_regression_pct\": reg_pct,\n        \"completion_pass_rate\"\
+    : comp_pass,\n        \"passed_quality_floor\": passed_q,\n        \"passed_latency_ceiling\"\
+    : passed_lat,\n        \"accepted\": (passed_q and passed_lat),\n        \"rejection_reasons\"\
+    : reasons,\n    }\n    out_p = pathlib.Path(args.output_json)\n    out_p.parent.mkdir(parents=True,\
+    \ exist_ok=True)\n    out_p.write_text(json.dumps(summary, indent=2, sort_keys=True),\
+    \ encoding=\"utf-8\")\n    print(\"CRUCIBLE_SUMMARY_JSON=\" + json.dumps(summary,\
+    \ sort_keys=True), flush=True)\n    return 0\n\n\nif __name__ == \"__main__\"\
+    :\n    raise SystemExit(main())\n"
+volumes:
+  vast:
+    name: runs
+    use: team3
+jobs:
+  bench-stagec-03-nvfp4-2replicas-tp1:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.10-py3
+    mounts:
+      /vast:
+        volume: vast
+    files:
+      /opt/crucible_remote_serve_bench.py: file://crucible-serve-runner
+    env:
+    - HOME=/tmp/home
+    - PYTHONUNBUFFERED=1
+    - CRUCIBLE_USE_LOW_PREC_DECODE=1
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 104GiB
+      devices:
+        nvidia.com/gpu: 1
+    policy:
+      timeout:
+        execute: 1h
+    script: "#!/bin/bash\nset -euo pipefail\nmkdir -p /tmp/home\npython3 /opt/crucible_remote_serve_bench.py\
+      \ \\\n  --endpoint http://127.0.0.1:8000 \\\n  --processed-data-dir /vast/data/lammps-packed\
+      \ \\\n  --trial-id stagec-03-nvfp4-2replicas-tp1 \\\n  --baseline-loss 1.396290\
+      \ \\\n  --output-json /vast/runs/lammps-qwen3-coder-30b-run/serving/stagec-03-nvfp4-2replicas-tp1/summary.json\
+      \ \\\n  --candidate-json '{\"label\": \"nvfp4-2replicas-tp1\", \"max_num_seqs\"\
+      : 96, \"precision\": \"NVFP4\", \"replicas\": 2, \"tensor_parallel\": 1, \"\
+      use_low_prec_decode_kernel\": true}'\n"

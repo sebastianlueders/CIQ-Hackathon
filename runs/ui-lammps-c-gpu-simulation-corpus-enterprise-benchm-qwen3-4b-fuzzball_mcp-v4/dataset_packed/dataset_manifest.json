@@ -1,0 +1,30 @@
+{
+  "chunk_seq_len": 256,
+  "dataset_name": "lammps-c-gpu-simulation-corpus-enterprise-benchm",
+  "held_out_files": [
+    "src/comm_brick.cpp",
+    "src/comm_brick.h"
+  ],
+  "manifest_sha256": "2481a91e643044ddcce6afe31e136ae2847de1ca253d2c0a451e4b4d5b780cce",
+  "output_dir": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/runs/ui-lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-fuzzball_mcp-v4/dataset_packed",
+  "raw_data_export_permitted": false,
+  "source_root": "/Users/seb/Documents/Code/CIQ_Hackathon/Project/CIQ-Hackathon/fixtures/sample_lammps",
+  "split_chunk_counts": {
+    "held_out": 3,
+    "train": 19,
+    "val": 2
+  },
+  "split_file_counts": {
+    "held_out": 2,
+    "train": 13,
+    "val": 1
+  },
+  "split_lexeme_counts": {
+    "held_out": 510,
+    "train": 4178,
+    "val": 281
+  },
+  "split_salt": "crucible-lammps-c-gpu-simulation-corpus-enterprise-benchm-v1",
+  "total_cpp_files": 16,
+  "vocab_size": 151936
+}

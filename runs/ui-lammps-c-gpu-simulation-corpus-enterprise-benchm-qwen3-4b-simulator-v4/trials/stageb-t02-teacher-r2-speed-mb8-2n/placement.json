@@ -1,0 +1,8 @@
+{
+  "workflow_id": "d48b9ff0-1149-43a8-a415-0eb3ff9299f5",
+  "nodes": [
+    "CIQ-CHI-SPARK05",
+    "CIQ-CHI-SPARK06"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-run/stageb-t02-teacher-r2-speed-mb8-2n/metrics.json"
+}

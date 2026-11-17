@@ -1,0 +1,8 @@
+{
+  "workflow_id": "922ede46-9d23-4c8d-a6d5-81bab3b1f43c",
+  "nodes": [
+    "gb10-node-01",
+    "gb10-node-02"
+  ],
+  "object_uri": "fuzzball://user/crucible/apex-dynamics-private-kernels-qwen3-coder-30b-a3b-instruct-run/serving-stagec-05-nvfp4-aggressive-batch256/metrics.json"
+}

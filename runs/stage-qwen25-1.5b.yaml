@@ -1,0 +1,50 @@
+# Crucible On-Demand VAST Model Staging Workflow
+# Model: Qwen/Qwen2.5-Coder-1.5B-Instruct -> /vast/models/Qwen/Qwen2.5-Coder-1.5B-Instruct (0 GPUs consumed)
+
+version: v4
+volumes:
+  vast:
+    name: runs
+    use: team3
+  data:
+    name: data
+    use: team3
+  envs:
+    name: envs
+    use: team3
+  models:
+    name: models
+    use: team3
+jobs:
+  stage-model-vast:
+    image:
+      uri: docker://python:3.12-slim
+    mounts:
+      /vast:
+        volume: vast
+      /data:
+        volume: data
+      /envs:
+        volume: envs
+      /models:
+        volume: models
+    env:
+    - HF_XET_HIGH_PERFORMANCE=1
+    - HOME=/tmp/home
+    - PYTHONUNBUFFERED=1
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 16GiB
+    policy:
+      timeout:
+        execute: 4h
+      retry:
+        attempts: 2
+    script: "#!/bin/bash\nset -euo pipefail\nDEST=\"/vast/models/Qwen/Qwen2.5-Coder-1.5B-Instruct\"\
+      \nmkdir -p \"$DEST\" \"$HOME\"\nif [ -f \"$DEST/config.json\" ]; then\n  echo\
+      \ \"CRUCIBLE_STAGE_DONE=already_cached dest=$DEST\"\n  exit 0\nfi\npip install\
+      \ --quiet --no-cache-dir \"huggingface_hub[hf_xet]>=0.34\"\nhf download \"Qwen/Qwen2.5-Coder-1.5B-Instruct\"\
+      \ --local-dir \"$DEST\"\nrm -rf \"$DEST/.cache\"\ndu -sh \"$DEST\"\necho \"\
+      CRUCIBLE_STAGE_DONE=downloaded dest=$DEST\"\n"

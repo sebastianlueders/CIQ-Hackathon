@@ -1,0 +1,84 @@
+# Crucible Inference Search Fuzzfile: stagec-04-nvfp4-1replica-tp2
+# DefinitionId: team20 | Nodes: CIQ-CHI-SPARK39 (192.168.99.48/7331), CIQ-CHI-SPARK40 (192.168.99.49/7331)
+# Precision: NVFP4 | TP=2 | Replicas=1 | MaxSeqs=96
+# Metrics Object Cache Egress (numeric only, zero raw data): fuzzball://user/crucible/lammps-qwen3-coder-30b-run/serving-stagec-04-nvfp4-1replica-tp2/metrics.json
+
+version: v4
+annotations:
+  fuzzball.io/provisioner_definition_id: team20
+volumes:
+  vast-shared:
+    use: vast
+    name: crucible-vast
+    egress:
+    - source:
+        uri: file://runs/lammps-qwen3-coder-30b-run/serving/stagec-04-nvfp4-1replica-tp2/summary.json
+      destination:
+        uri: fuzzball://user/crucible/lammps-qwen3-coder-30b-run/serving-stagec-04-nvfp4-1replica-tp2/metrics.json
+services:
+  vllm-stagec-04-nvfp4-1replica-tp2:
+    image:
+      uri: docker://nvcr.io/nvidia/vllm:26.04-py3
+    mounts:
+      /vast: vast-shared
+    env:
+    - PYTHONUNBUFFERED=1
+    - FLASHINFER_DISABLE_VERSION_CHECK=1
+    - CRUCIBLE_USE_LOW_PREC_DECODE=1
+    command:
+    - python3
+    - -m
+    - vllm.entrypoints.openai.api_server
+    - --model
+    - /vast/models/Qwen3-Coder-30B-A3B
+    - --enable-lora
+    - --lora-modules
+    - crucible-tuned=/vast/runs/lammps-qwen3-coder-30b-run/best_adapter
+    - --tensor-parallel-size
+    - '2'
+    - --max-num-seqs
+    - '96'
+    - --attention-backend
+    - TRITON_ATTN
+    - --port
+    - '8000'
+    - --quantization
+    - modelopt
+    - --kv-cache-dtype
+    - fp8
+    resource:
+      cpu:
+        cores: 16
+        affinity: NUMA
+      memory:
+        size: 112GiB
+      devices:
+        nvidia.com/gpu: 1
+        cpu/arm64/sve: 1
+    multinode:
+      nodes: 2
+      implementation: generic
+jobs:
+  bench-stagec-04-nvfp4-1replica-tp2:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
+    mounts:
+      /vast: vast-shared
+    depends-on:
+    - name: vllm-stagec-04-nvfp4-1replica-tp2
+      status: RUNNING
+    resource:
+      cpu:
+        cores: 2
+        affinity: CORE
+      memory:
+        size: 8GiB
+      devices:
+        cpu/arm64/sve: 1
+    script: "#!/bin/bash\nset -euo pipefail\npython3 -m crucible.serving.vllm_bench\
+      \ \\\n  --endpoint http://vllm-stagec-04-nvfp4-1replica-tp2:8000 \\\n  --processed-data-dir\
+      \ /vast/data/lammps-packed \\\n  --trial-id stagec-04-nvfp4-1replica-tp2 \\\n\
+      \  --baseline-loss 1.396290 \\\n  --output-json /vast/runs/lammps-qwen3-coder-30b-run/serving/stagec-04-nvfp4-1replica-tp2/summary.json\
+      \ \\\n  --candidate-json '{\"label\": \"nvfp4-1replica-tp2\", \"max_num_seqs\"\
+      : 96, \"precision\": \"NVFP4\", \"replicas\": 1, \"tensor_parallel\": 2, \"\
+      use_low_prec_decode_kernel\": true}'\n"

@@ -1,0 +1,7 @@
+{
+  "workflow_id": "7346c1c6-3f03-4623-a420-1f5d30911bf6",
+  "nodes": [
+    "CIQ-CHI-SPARK39"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stageb-01-tuned-batch-ckpt-1node/metrics.json"
+}

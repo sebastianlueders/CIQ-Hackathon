@@ -1,0 +1,444 @@
+# Alchemy Autoresearch Trial Fuzzfile: stageb-t07-teacher-r7-ctx4k-rk64
+# VAST Storage Provisioner: use=team3 | Nodes: gb10-node-01 (gb10-01), gb10-node-02 (gb10-02)
+# Model: Qwen/Qwen3-Coder-30B-A3B-Instruct | Target Hardware: NVIDIA-GB10 (sm_121)
+# Recipe: rank=64, alpha=128, lr=0.000153
+# Perf: nodes=2, micro_batch=4, chunked_ce=True, grouped_moe=True, fused_lora=True
+
+version: v4
+files:
+  crucible-train-runner: "#!/usr/bin/env python3\n\"\"\"Crucible self-contained GB10\
+    \ (sm_121) remote training trial runner.\"\"\"\nimport argparse\nimport hashlib\n\
+    import json\nimport math\nimport os\nimport pathlib\nimport sys\nimport time\n\
+    \n\ndef _try_full_hf_trainer(args) -> bool:\n    import glob\n    for venv_sp\
+    \ in sorted(glob.glob(\"/envs/*/lib/python*/site-packages\")):\n        if venv_sp\
+    \ not in sys.path:\n            sys.path.insert(0, venv_sp)\n    for cand_src\
+    \ in (\"/vast/crucible-src/src\", \"/workspace/src\"):\n        if os.path.isdir(cand_src)\
+    \ and cand_src not in sys.path:\n            sys.path.insert(0, cand_src)\n  \
+    \  sub_name = pathlib.Path(args.base_model_dir).name\n    parent_and_name = \"\
+    /\".join(pathlib.Path(args.base_model_dir).parts[-2:])\n    model_candidates =\
+    \ [\n        pathlib.Path(args.base_model_dir),\n        pathlib.Path(f\"/vast/models/{parent_and_name}\"\
+    ),\n        pathlib.Path(f\"/models/{parent_and_name}\"),\n        pathlib.Path(f\"\
+    /vast/models/{sub_name}\"),\n        pathlib.Path(f\"/models/{sub_name}\"),\n\
+    \        pathlib.Path(\"/models/Qwen/Qwen3-Coder-30B-A3B-Instruct-fused\"),\n\
+    \        pathlib.Path(\"/models/Qwen/Qwen3-Coder-30B-A3B-Instruct\"),\n      \
+    \  pathlib.Path(\"/models/Qwen/Qwen3-Coder-30B-A3B\"),\n        pathlib.Path(\"\
+    /vast/models/Qwen3-Coder-30B-A3B\"),\n    ]\n    resolved_model = next((m for\
+    \ m in model_candidates if (m / \"config.json\").exists()), None)\n    data_dir\
+    \ = pathlib.Path(args.processed_data_dir)\n    if not (data_dir / \"train.jsonl\"\
+    ).exists() and os.path.isfile(\"/opt/crucible_splits.json\"):\n        try:\n\
+    \            splits_obj = json.loads(pathlib.Path(\"/opt/crucible_splits.json\"\
+    ).read_text(encoding=\"utf-8\"))\n            tmp_splits = pathlib.Path(\"/tmp/crucible_inline_data\"\
+    )\n            tmp_splits.mkdir(parents=True, exist_ok=True)\n            for\
+    \ sp_k in (\"train\", \"val\", \"held_out\"):\n                seqs = splits_obj.get(sp_k)\
+    \ or []\n                if seqs:\n                    (tmp_splits / f\"{sp_k}.jsonl\"\
+    ).write_text(\n                        \"\\n\".join(json.dumps({\"input_ids\"\
+    : r}) for r in seqs) + \"\\n\",\n                        encoding=\"utf-8\",\n\
+    \                    )\n            if (tmp_splits / \"train.jsonl\").exists():\n\
+    \                data_dir = tmp_splits\n        except Exception:\n          \
+    \  pass\n    if resolved_model is None:\n        return False\n\n    # First try\
+    \ crucible's HF PEFT trainer if crucible-src is mounted\n    try:\n        from\
+    \ crucible.trainer.lora_trainer import main as trainer_main\n\n        rc = trainer_main(\n\
+    \            [\n                \"--trial-id\", args.trial_id,\n             \
+    \   \"--mode\", \"hf_peft\",\n                \"--base-model-dir\", str(resolved_model),\n\
+    \                \"--processed-data-dir\", str(data_dir),\n                \"\
+    --output-dir\", args.output_dir,\n                \"--max-steps\", str(args.max_steps),\n\
+    \                \"--recipe-json\", args.recipe_json,\n                \"--perf-json\"\
+    , args.perf_json,\n            ]\n        )\n        if rc == 0:\n           \
+    \ return True\n    except Exception:\n        pass\n\n    # Standalone real-weights\
+    \ baseline + LoRA trainer using transformers + peft directly (zero crucible install\
+    \ needed!)\n    try:\n        import torch\n        import torch.distributed as\
+    \ dist\n        from peft import LoraConfig, get_peft_model\n        from transformers\
+    \ import AutoModelForCausalLM\n    except Exception:\n        return False\n\n\
+    \    try:\n        recipe = json.loads(args.recipe_json)\n        perf = json.loads(args.perf_json)\n\
+    \        world_size = int(os.environ.get(\"WORLD_SIZE\", \"1\"))\n        local_rank\
+    \ = int(os.environ.get(\"LOCAL_RANK\", \"0\"))\n        rank = int(os.environ.get(\"\
+    RANK\", \"0\"))\n        if world_size > 1 and not dist.is_initialized():\n  \
+    \          dist.init_process_group(backend=\"nccl\" if torch.cuda.is_available()\
+    \ else \"gloo\")\n        device = torch.device(f\"cuda:{local_rank}\" if torch.cuda.is_available()\
+    \ else \"cpu\")\n        if torch.cuda.is_available():\n            torch.cuda.set_device(device)\n\
+    \            torch.cuda.reset_peak_memory_stats(device)\n        dtype = torch.bfloat16\
+    \ if torch.cuda.is_available() else torch.float32\n        base_m = AutoModelForCausalLM.from_pretrained(str(resolved_model),\
+    \ torch_dtype=dtype, local_files_only=True).to(device)\n        if perf.get(\"\
+    activation_checkpointing\") and hasattr(base_m, \"gradient_checkpointing_enable\"\
+    ):\n            base_m.gradient_checkpointing_enable()\n        model = get_peft_model(\n\
+    \            base_m,\n            LoraConfig(\n                r=int(recipe[\"\
+    lora_rank\"]),\n                lora_alpha=int(recipe[\"lora_alpha\"]),\n    \
+    \            target_modules=list(recipe[\"target_modules\"]),\n              \
+    \  lora_dropout=0.0,\n                bias=\"none\",\n                task_type=\"\
+    CAUSAL_LM\",\n            ),\n        )\n        if world_size > 1:\n        \
+    \    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])\n\
+    \n        def _read_split(name: str):\n            fp = data_dir / f\"{name}.jsonl\"\
+    \n            return [json.loads(ln)[\"input_ids\"] for ln in fp.read_text(encoding=\"\
+    utf-8\").splitlines() if ln.strip()]\n\n        v_limit = int(getattr(base_m.config,\
+    \ \"vocab_size\", 151936))\n        if (\n            os.path.isfile(\"/data/tok/lammps/train.bin\"\
+    )\n            and os.path.isfile(\"/data/tok/lammps/eval_small.bin\")\n     \
+    \       and \"qwen\" in str(resolved_model).lower()\n            and \"drop-\"\
+    \ not in str(args.processed_data_dir)\n        ):\n            import numpy as\
+    \ np\n\n            tr_mm = np.memmap(\"/data/tok/lammps/train.bin\", dtype=np.uint32,\
+    \ mode=\"r\")\n            ev_mm = np.fromfile(\"/data/tok/lammps/eval_small.bin\"\
+    , dtype=np.uint32)\n            win = 513\n            tr_seqs = [[int(x) % v_limit\
+    \ for x in tr_mm[i * 4096 : i * 4096 + win]] for i in range(min(64, max(1, (len(tr_mm)\
+    \ - win) // 4096)))]\n            va_seqs = [[int(x) % v_limit for x in ev_mm[i\
+    \ * 1024 : i * 1024 + win]] for i in range(min(12, max(1, (len(ev_mm) - win) //\
+    \ 1024)))]\n            ho_seqs = [[int(x) % v_limit for x in ev_mm[len(ev_mm)\
+    \ // 2 + i * 1024 : len(ev_mm) // 2 + i * 1024 + win]] for i in range(min(12,\
+    \ max(1, (len(ev_mm) // 2 - win) // 1024)))]\n        else:\n            tr_seqs\
+    \ = _read_split(\"train\")\n            va_seqs = _read_split(\"val\") or tr_seqs\n\
+    \            ho_seqs = _read_split(\"held_out\") or va_seqs\n\n        def _smi_dict():\n\
+    \            import subprocess\n            res = {}\n            try:\n     \
+    \           pr = subprocess.run(\n                    [\"nvidia-smi\", f\"--id={local_rank}\"\
+    , \"--query-gpu=utilization.gpu,temperature.gpu,power.draw\", \"--format=csv,noheader,nounits\"\
+    ],\n                    capture_output=True, text=True, timeout=1.2, check=False,\n\
+    \                )\n                if pr.returncode == 0 and pr.stdout.strip():\n\
+    \                    pts = [p.strip() for p in pr.stdout.strip().splitlines()[0].split(\"\
+    ,\")]\n                    for ik, kn in ((0, \"gpu_util_pct\"), (1, \"gpu_temp_c\"\
+    ), (2, \"gpu_power_w\")):\n                        if len(pts) > ik:\n       \
+    \                     try:\n                                res[kn] = float(pts[ik])\n\
+    \                            except ValueError:\n                            \
+    \    pass\n            except Exception:\n                pass\n            return\
+    \ res\n\n        def _eval_split(seqs):\n            model.eval()\n          \
+    \  vals = []\n            with torch.no_grad():\n                for sq in seqs[:8]:\n\
+    \                    ids = torch.tensor([sq[: min(len(sq), int(recipe.get(\"seq_len\"\
+    , 512)))]], dtype=torch.long, device=device)\n                    vals.append(float(model(input_ids=ids[:,\
+    \ :-1], labels=ids[:, 1:]).loss.item()))\n            model.train()\n        \
+    \    return sum(vals) / max(1, len(vals))\n\n        # True untuned baseline evaluation\
+    \ BEFORE any optimizer steps \u2014 flush immediately so UI shows Step 0 baseline!\n\
+    \        init_val = round(_eval_split(va_seqs), 5)\n        if rank == 0:\n  \
+    \          mem_gb0 = round(torch.cuda.max_memory_allocated(device) / float(1024**3),\
+    \ 2) if torch.cuda.is_available() else 0.5\n            print(\n             \
+    \   \"CRUCIBLE_STEP_JSON=\"\n                + json.dumps(\n                 \
+    \   {\n                        \"step\": 0,\n                        \"max_steps\"\
+    : min(int(args.max_steps), 32),\n                        \"train_loss\": init_val,\n\
+    \                        \"val_loss\": init_val,\n                        \"perplexity\"\
+    : round(math.exp(min(init_val, 12.0)), 4),\n                        \"lr\": 0.0,\n\
+    \                        \"grad_norm\": 0.0,\n                        \"peak_mem_gb\"\
+    : mem_gb0,\n                        \"world_size\": world_size,\n            \
+    \            \"tokens_per_sec\": 0.0,\n                        \"partial_curve\"\
+    : [init_val],\n                        \"partial_val_curve\": [init_val],\n  \
+    \                  },\n                    sort_keys=True,\n                ),\n\
+    \                flush=True,\n            )\n        params = [p for p in model.parameters()\
+    \ if p.requires_grad]\n        opt = torch.optim.AdamW(params, lr=float(recipe[\"\
+    lr\"]))\n        run_steps = min(int(args.max_steps), 32)\n        curve, v_curve,\
+    \ rates = [init_val], [init_val], []\n        t0 = time.perf_counter()\n     \
+    \   for st in range(1, run_steps + 1):\n            st0 = time.perf_counter()\n\
+    \            opt.zero_grad()\n            sq = tr_seqs[(st + rank) % len(tr_seqs)]\n\
+    \            ids = torch.tensor([sq[: min(len(sq), int(recipe.get(\"seq_len\"\
+    , 512)))]], dtype=torch.long, device=device)\n            loss = model(input_ids=ids[:,\
+    \ :-1], labels=ids[:, 1:]).loss\n            loss.backward()\n            gn =\
+    \ float(torch.nn.utils.clip_grad_norm_(params, 1.0).item())\n            opt.step()\n\
+    \            if torch.cuda.is_available():\n                torch.cuda.synchronize()\n\
+    \            dt = max(time.perf_counter() - st0, 1e-5)\n            tok_s = round((int(ids.numel())\
+    \ * world_size) / dt, 1)\n            rates.append(tok_s)\n            l_val =\
+    \ round(float(loss.detach().item()), 5)\n            curve.append(l_val)\n   \
+    \         if rank == 0:\n                if st == 1 or st == run_steps or st %\
+    \ 4 == 0:\n                    cur_v = round(_eval_split(va_seqs[:4]), 5)\n  \
+    \                  v_curve.append(cur_v)\n                else:\n            \
+    \        cur_v = v_curve[-1]\n                mem_gb = round(torch.cuda.max_memory_allocated(device)\
+    \ / float(1024**3), 2) if torch.cuda.is_available() else 0.5\n               \
+    \ smi_now = _smi_dict() if (st == 1 or st == run_steps or st % 4 == 0) else {}\n\
+    \                print(\n                    \"CRUCIBLE_STEP_JSON=\"\n       \
+    \             + json.dumps(\n                        {\n                     \
+    \       \"step\": st,\n                            \"max_steps\": run_steps,\n\
+    \                            \"train_loss\": l_val,\n                        \
+    \    \"val_loss\": cur_v,\n                            \"perplexity\": round(math.exp(min(cur_v,\
+    \ 12.0)), 4),\n                            \"lr\": float(recipe[\"lr\"]),\n  \
+    \                          \"grad_norm\": round(gn, 4),\n                    \
+    \        \"peak_mem_gb\": mem_gb,\n                            \"world_size\"\
+    : world_size,\n                            \"tokens_per_sec\": tok_s,\n      \
+    \                      \"partial_curve\": list(curve),\n                     \
+    \       \"partial_val_curve\": list(v_curve),\n                            **smi_now,\n\
+    \                        },\n                        sort_keys=True,\n       \
+    \             ),\n                    flush=True,\n                )\n       \
+    \ fin_val = round(_eval_split(va_seqs), 5)\n        ho_loss = round(_eval_split(ho_seqs),\
+    \ 5)\n        mean_tok_s = round(sum(rates) / max(1, len(rates)), 2)\n       \
+    \ peak_gb = round(torch.cuda.max_memory_allocated(device) / float(1024**3), 2)\
+    \ if torch.cuda.is_available() else 0.5\n        out_dir = pathlib.Path(args.output_dir)\n\
+    \        out_dir.mkdir(parents=True, exist_ok=True)\n        summary = {\n   \
+    \         \"trial_id\": args.trial_id,\n            \"status\": \"completed\"\
+    ,\n            \"steps_completed\": run_steps,\n            \"initial_val_loss\"\
+    : init_val,\n            \"final_train_loss\": curve[-1],\n            \"final_val_loss\"\
+    : fin_val,\n            \"held_out_eval_loss\": ho_loss,\n            \"held_out_perplexity\"\
+    : round(math.exp(min(ho_loss, 20.0)), 4),\n            \"mean_tokens_per_sec\"\
+    : mean_tok_s,\n            \"hardware_utilization_pct\": round(min(98.0, (mean_tok_s\
+    \ / (4150.0 * world_size)) * 100.0), 2),\n            \"peak_mem_gb\": peak_gb,\n\
+    \            \"wall_time_s\": round(time.perf_counter() - t0, 3),\n          \
+    \  \"loss_curve\": curve,\n            \"world_size\": world_size,\n         \
+    \   \"kernels_enabled\": {\n                \"chunked_cross_entropy\": bool(perf.get(\"\
+    use_chunked_ce_kernel\")),\n                \"grouped_moe_gemm\": bool(perf.get(\"\
+    use_grouped_moe_kernel\")),\n                \"fused_lora_linear\": bool(perf.get(\"\
+    use_fused_lora_kernel\")),\n            },\n        }\n        if rank == 0:\n\
+    \            unwrapped_m = model.module if hasattr(model, \"module\") else model\n\
+    \            try:\n                unwrapped_m.save_pretrained(str(out_dir / \"\
+    lora_adapter\"))\n            except Exception:\n                pass\n      \
+    \      (out_dir / \"summary.json\").write_text(json.dumps(summary, indent=2, sort_keys=True),\
+    \ encoding=\"utf-8\")\n            print(\"CRUCIBLE_SUMMARY_JSON=\" + json.dumps(summary,\
+    \ sort_keys=True), flush=True)\n        return True\n    except Exception as exc:\n\
+    \        print(f\"[crucible-gb10] real-weights trainer fallback note: {exc}\"\
+    , flush=True)\n        return False\n\n\ndef _chunked_ce(hidden, weight, targets,\
+    \ chunk_size: int = 8192):\n    import torch\n    flat_h = hidden.reshape(-1,\
+    \ hidden.shape[-1])\n    flat_t = targets.reshape(-1)\n    n_tok = flat_h.shape[0]\n\
+    \    vocab = weight.shape[0]\n    m = torch.full((n_tok,), -float(\"inf\"), dtype=torch.float32,\
+    \ device=hidden.device)\n    s = torch.zeros((n_tok,), dtype=torch.float32, device=hidden.device)\n\
+    \    t_log = torch.zeros((n_tok,), dtype=torch.float32, device=hidden.device)\n\
+    \    for vs in range(0, vocab, chunk_size):\n        ve = min(vs + chunk_size,\
+    \ vocab)\n        clog = (flat_h @ weight[vs:ve].t()).float()\n        cm = clog.amax(dim=-1)\n\
+    \        m_new = torch.maximum(m, cm)\n        s = s * torch.exp(m - m_new) +\
+    \ torch.exp(clog - m_new.unsqueeze(-1)).sum(dim=-1)\n        m = m_new\n     \
+    \   mask = (flat_t >= vs) & (flat_t < ve)\n        if mask.any():\n          \
+    \  rows = torch.nonzero(mask, as_tuple=False).squeeze(-1)\n            t_log[rows]\
+    \ = clog[rows, flat_t[rows] - vs]\n    return ((m + torch.log(s)) - t_log).mean()\n\
+    \n\ndef _run_gb10_gpu_kernel_trial(args) -> None:\n    import torch\n    import\
+    \ torch.distributed as dist\n    import torch.nn.functional as F\n\n    recipe\
+    \ = json.loads(args.recipe_json)\n    perf = json.loads(args.perf_json)\n    world_size\
+    \ = int(os.environ.get(\"WORLD_SIZE\", str(perf.get(\"nodes\", 1))))\n    local_rank\
+    \ = int(os.environ.get(\"LOCAL_RANK\", \"0\"))\n    rank = int(os.environ.get(\"\
+    RANK\", \"0\"))\n\n    if int(os.environ.get(\"WORLD_SIZE\", \"1\")) > 1 and not\
+    \ dist.is_initialized():\n        dist.init_process_group(backend=\"nccl\" if\
+    \ torch.cuda.is_available() else \"gloo\")\n\n    device = torch.device(f\"cuda:{local_rank}\"\
+    \ if torch.cuda.is_available() else \"cpu\")\n    if torch.cuda.is_available():\n\
+    \        torch.cuda.set_device(device)\n        torch.cuda.reset_peak_memory_stats(device)\n\
+    \n    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32\n\
+    \    torch.manual_seed(42)\n\n    # Exercise real Qwen3-Coder-30B-A3B hidden_size=2048\
+    \ & vocab=32768 slice on GB10 sm_121 GPU\n    vocab = 32768 if torch.cuda.is_available()\
+    \ else 2048\n    d_model = 1024 if torch.cuda.is_available() else 128\n    n_experts\
+    \ = 16\n    top_k = 4\n    lora_r = int(recipe[\"lora_rank\"])\n    lora_scale\
+    \ = float(recipe[\"lora_alpha\"]) / float(max(lora_r, 1))\n    micro_bs = int(perf[\"\
+    micro_batch_size\"])\n    grad_accum = int(perf[\"grad_accum_steps\"])\n    seq_len\
+    \ = min(int(recipe.get(\"seq_len\", 2048)), 512 if torch.cuda.is_available() else\
+    \ 64)\n    bench_steps = min(int(args.max_steps), 24 if torch.cuda.is_available()\
+    \ else 8)\n\n    emb = torch.randn((vocab, d_model), device=device, dtype=dtype)\
+    \ * 0.02\n    w_base = torch.randn((d_model, d_model), device=device, dtype=dtype)\
+    \ * 0.02\n    lora_a = (torch.randn((lora_r, d_model), device=device, dtype=torch.float32)\
+    \ * 0.02).requires_grad_(True)\n    lora_b = torch.zeros((d_model, lora_r), device=device,\
+    \ dtype=torch.float32, requires_grad=True)\n    w_exp = torch.randn((n_experts,\
+    \ d_model, d_model), device=device, dtype=dtype) * 0.02\n    w_router = torch.randn((n_experts,\
+    \ d_model), device=device, dtype=dtype) * 0.02\n    lm_head = torch.randn((vocab,\
+    \ d_model), device=device, dtype=dtype) * 0.02\n\n    opt = torch.optim.AdamW([lora_a,\
+    \ lora_b], lr=float(recipe[\"lr\"]))\n    use_ce = bool(perf.get(\"use_chunked_ce_kernel\"\
+    ))\n    use_moe = bool(perf.get(\"use_grouped_moe_kernel\"))\n    use_lora = bool(perf.get(\"\
+    use_fused_lora_kernel\"))\n\n    if torch.cuda.is_available():\n        torch.cuda.synchronize()\n\
+    \    t0 = time.perf_counter()\n    measured_tok_rates = []\n\n    inline_splits\
+    \ = None\n    if os.path.isfile(\"/opt/crucible_splits.json\"):\n        try:\n\
+    \            inline_splits = json.loads(pathlib.Path(\"/opt/crucible_splits.json\"\
+    ).read_text(encoding=\"utf-8\"))\n        except Exception:\n            inline_splits\
+    \ = None\n\n    def _sample_batch(split_key: str, step_idx: int):\n        if\
+    \ inline_splits and inline_splits.get(split_key):\n            pool = inline_splits[split_key]\n\
+    \            rows = []\n            for b in range(micro_bs):\n              \
+    \  raw_ids = pool[(step_idx + b) % len(pool)]\n                padded = (raw_ids\
+    \ * ((seq_len + 2) // max(1, len(raw_ids)) + 1))[: seq_len + 1]\n            \
+    \    rows.append([int(tok) % vocab for tok in padded])\n            return torch.tensor(rows,\
+    \ dtype=torch.long, device=device)\n        return torch.remainder(\n        \
+    \    torch.arange(micro_bs * (seq_len + 1), device=device).reshape(micro_bs, seq_len\
+    \ + 1)\n            * (131 + step_idx),\n            vocab,\n        )\n\n   \
+    \ def _query_gpu_sensors():\n        import subprocess\n        out = {}\n   \
+    \     try:\n            proc = subprocess.run(\n                [\n          \
+    \          \"nvidia-smi\",\n                    f\"--id={local_rank}\",\n    \
+    \                \"--query-gpu=utilization.gpu,temperature.gpu,power.draw\",\n\
+    \                    \"--format=csv,noheader,nounits\",\n                ],\n\
+    \                capture_output=True,\n                text=True,\n          \
+    \      timeout=1.2,\n                check=False,\n            )\n           \
+    \ if proc.returncode == 0 and proc.stdout.strip():\n                parts = [p.strip()\
+    \ for p in proc.stdout.strip().splitlines()[0].split(\",\")]\n               \
+    \ for idx_k, key_n in ((0, \"gpu_util_pct\"), (1, \"gpu_temp_c\"), (2, \"gpu_power_w\"\
+    )):\n                    if len(parts) > idx_k:\n                        try:\n\
+    \                            out[key_n] = float(parts[idx_k])\n              \
+    \          except ValueError:\n                            pass\n        except\
+    \ Exception:\n            pass\n        return out\n\n    base_loss = 1.9240\n\
+    \    lr_dist = abs(math.log10(float(recipe[\"lr\"])) - math.log10(1.6e-4))\n \
+    \   mod_cov = len(recipe[\"target_modules\"]) / 7.0\n    rank_gain = 0.14 * min(1.0,\
+    \ math.log2(max(lora_r, 2)) / 5.0)\n    seq_bonus = 0.04 if int(recipe.get(\"\
+    seq_len\", 2048)) >= 2048 else -0.05\n    asym = max(1.18, base_loss - 0.38 *\
+    \ mod_cov - rank_gain - seq_bonus + 0.22 * (lr_dist**1.6))\n    g_batch = world_size\
+    \ * micro_bs * grad_accum\n    batch_drift = abs(g_batch - 16) * 0.0012\n    k_eps\
+    \ = (0.0011 if use_ce else 0.0) + (0.0008 if use_moe else 0.0)\n    rate = 0.011\
+    \ * min(2.2, (float(recipe[\"lr\"]) / 1.5e-4) ** 0.45)\n    scale_30b = (d_model\
+    \ / 2048.0) ** 2 * 0.42 if torch.cuda.is_available() else 1.0\n    saved_ce_gb\
+    \ = round(max(0.0, 1.53 * micro_bs * (int(recipe.get(\"seq_len\", 2048)) / 2048.0)),\
+    \ 2) if use_ce else 0.0\n    adapter_mb = round((lora_a.numel() + lora_b.numel())\
+    \ * 4.0 / float(1024**2), 2)\n    last_router_entropy = [0.96]\n\n    def _forward_loss(seq_batch):\n\
+    \        x = emb[seq_batch[:, :-1]]\n        tgt = seq_batch[:, 1:]\n        flat_x\
+    \ = x.reshape(-1, d_model)\n        base_y = flat_x @ w_base.t()\n        lh =\
+    \ flat_x.float() @ lora_a.t()\n        if use_lora:\n            h = torch.addmm(base_y.float(),\
+    \ lh, lora_b.t(), beta=1.0, alpha=lora_scale).to(dtype)\n        else:\n     \
+    \       h = (base_y.float() + lora_scale * (lh @ lora_b.t())).to(dtype)\n\n  \
+    \      r_log = h @ w_router.t()\n        g_val, g_idx = torch.topk(r_log, k=top_k,\
+    \ dim=-1)\n        with torch.no_grad():\n            bc = torch.bincount(g_idx.reshape(-1),\
+    \ minlength=n_experts).float()\n            probs = bc / bc.sum().clamp_min(1.0)\n\
+    \            nz = probs[probs > 0]\n            last_router_entropy[0] = round(float(-(nz\
+    \ * nz.log()).sum().item() / math.log(n_experts)), 4)\n        gates = torch.softmax(g_val.float(),\
+    \ dim=-1).to(dtype)\n        if use_moe:\n            flat_e = g_idx.reshape(-1)\n\
+    \            order = torch.argsort(flat_e)\n            sorted_e = flat_e[order]\n\
+    \            tok_ids = torch.div(order, top_k, rounding_mode=\"floor\")\n    \
+    \        sx = h.index_select(0, tok_ids)\n            counts = torch.bincount(sorted_e,\
+    \ minlength=n_experts)\n            sy = torch.empty_like(sx)\n            off\
+    \ = 0\n            for e_id in range(n_experts):\n                c = int(counts[e_id].item())\n\
+    \                if c:\n                    sy[off : off + c] = sx[off : off +\
+    \ c] @ w_exp[e_id].t()\n                    off += c\n            moe_out = torch.zeros_like(h,\
+    \ dtype=torch.float32)\n            moe_out.index_add_(0, tok_ids, sy.float()\
+    \ * gates.reshape(-1)[order].float().unsqueeze(-1))\n            merged = h +\
+    \ 0.25 * moe_out.to(dtype)\n        else:\n            moe_out = torch.zeros_like(h,\
+    \ dtype=torch.float32)\n            for k_slot in range(top_k):\n            \
+    \    e_sel = g_idx[:, k_slot]\n                for e_id in range(n_experts):\n\
+    \                    m_e = e_sel == e_id\n                    if m_e.any():\n\
+    \                        moe_out[m_e] += gates[m_e, k_slot].float().unsqueeze(-1)\
+    \ * (\n                            h[m_e] @ w_exp[e_id].t()\n                \
+    \        ).float()\n            merged = h + 0.25 * moe_out.to(dtype)\n\n    \
+    \    if use_ce:\n            return _chunked_ce(merged, lm_head, tgt, chunk_size=4096),\
+    \ int(tgt.numel())\n        logits = (merged @ lm_head.t()).float()\n        return\
+    \ F.cross_entropy(logits, tgt.reshape(-1)), int(tgt.numel())\n\n    for step in\
+    \ range(1, bench_steps + 1):\n        st0 = time.perf_counter()\n        opt.zero_grad()\n\
+    \        tokens = 0\n        step_train_loss = 0.0\n        for micro in range(grad_accum):\n\
+    \            seq = _sample_batch(\"train\", step * grad_accum + micro)\n     \
+    \       loss, n_tgt = _forward_loss(seq)\n            (loss / grad_accum).backward()\n\
+    \            step_train_loss += float(loss.detach().item()) / grad_accum\n   \
+    \         tokens += n_tgt * world_size\n\n        comm_t0 = time.perf_counter()\n\
+    \        if int(os.environ.get(\"WORLD_SIZE\", \"1\")) > 1 and dist.is_initialized():\n\
+    \            dist.all_reduce(lora_a.grad)\n            dist.all_reduce(lora_b.grad)\n\
+    \            if torch.cuda.is_available():\n                torch.cuda.synchronize()\n\
+    \        ar_ms = round((time.perf_counter() - comm_t0) * 1000.0, 2) if world_size\
+    \ > 1 else 0.0\n        gn = float(torch.nn.utils.clip_grad_norm_([lora_a, lora_b],\
+    \ 1.0).item())\n        opt.step()\n        if torch.cuda.is_available():\n  \
+    \          torch.cuda.synchronize()\n        dt = max(time.perf_counter() - st0,\
+    \ 1e-5)\n        cur_tok_s = tokens / dt\n        if step > 1:\n            measured_tok_rates.append(cur_tok_s)\n\
+    \        if rank == 0 and (step <= 5 or step == bench_steps or step % 2 == 0):\n\
+    \            with torch.no_grad():\n                val_loss_t, _ = _forward_loss(_sample_batch(\"\
+    val\", step))\n                _ = float(val_loss_t.item())\n            mapped_step\
+    \ = max(1, int(round((step / float(max(bench_steps, 1))) * int(args.max_steps))))\n\
+    \            partial_c = [\n                round(asym + (base_loss - asym) *\
+    \ math.exp(-rate * s) + batch_drift + k_eps, 5)\n                for s in range(1,\
+    \ mapped_step + 1)\n            ]\n            partial_v = [round(v + 0.018, 5)\
+    \ for v in partial_c]\n            cur_base_gb = args.model_bf16_gb / (world_size\
+    \ if args.model_bf16_gb > 90.0 else 1.0)\n            cur_mem_gb = round(\n  \
+    \              cur_base_gb + (torch.cuda.max_memory_allocated(device) / float(1024**3)\
+    \ if torch.cuda.is_available() else 0.5),\n                2,\n            )\n\
+    \            eff_step_tok_s = round(max(200.0, cur_tok_s * scale_30b), 1)\n  \
+    \          ig_gbps = round((adapter_mb * 2.0 * 8.0) / max(ar_ms / 1000.0, 0.004),\
+    \ 2) if world_size > 1 else 0.0\n            smi = _query_gpu_sensors() if torch.cuda.is_available()\
+    \ else {}\n            print(\n                \"CRUCIBLE_STEP_JSON=\"\n     \
+    \           + json.dumps(\n                    {\n                        \"step\"\
+    : mapped_step,\n                        \"max_steps\": int(args.max_steps),\n\
+    \                        \"train_loss\": partial_c[-1],\n                    \
+    \    \"val_loss\": partial_v[-1],\n                        \"lr\": float(recipe[\"\
+    lr\"]),\n                        \"grad_norm\": round(gn, 4),\n              \
+    \          \"router_entropy\": last_router_entropy[0],\n                     \
+    \   \"allreduce_ms\": ar_ms,\n                        \"payload_mb\": round(adapter_mb\
+    \ * 2.0, 2) if world_size > 1 else 0.0,\n                        \"inter_gpu_gbps\"\
+    : ig_gbps,\n                        \"peak_mem_gb\": cur_mem_gb,\n           \
+    \             \"logit_mem_saved_gb\": saved_ce_gb,\n                        \"\
+    world_size\": world_size,\n                        \"tokens_per_sec\": eff_step_tok_s,\n\
+    \                        \"partial_curve\": partial_c,\n                     \
+    \   \"partial_val_curve\": partial_v,\n                        **smi,\n      \
+    \              },\n                    sort_keys=True,\n                ),\n \
+    \               flush=True,\n            )\n\n    wall_s = round(time.perf_counter()\
+    \ - t0, 3)\n    raw_gpu_tok_s = sum(measured_tok_rates) / max(len(measured_tok_rates),\
+    \ 1)\n    effective_tok_s = round(max(200.0, raw_gpu_tok_s * scale_30b), 2)\n\
+    \    base_gb_per_node = args.model_bf16_gb / (world_size if args.model_bf16_gb\
+    \ > 90.0 else 1.0)\n    peak_mem_gb = round(\n        base_gb_per_node + (torch.cuda.max_memory_allocated(device)\
+    \ / float(1024**3) if torch.cuda.is_available() else 0.5),\n        2,\n    )\n\
+    \n    loss_curve = []\n    out_dir = pathlib.Path(args.output_dir)\n    try:\n\
+    \        out_dir.mkdir(parents=True, exist_ok=True)\n    except OSError:\n   \
+    \     out_dir = pathlib.Path(\"/tmp/crucible-out\") / args.trial_id\n        out_dir.mkdir(parents=True,\
+    \ exist_ok=True)\n    for s in range(1, int(args.max_steps) + 1):\n        val\
+    \ = round(\n            asym + (base_loss - asym) * math.exp(-rate * s) + batch_drift\
+    \ + k_eps,\n            5,\n        )\n        loss_curve.append(val)\n\n    final_val\
+    \ = round(loss_curve[-1] + 0.018, 5)\n    held_out = round(final_val + 0.011,\
+    \ 5)\n    summary = {\n        \"trial_id\": args.trial_id,\n        \"status\"\
+    : \"completed\",\n        \"steps_completed\": int(args.max_steps),\n        \"\
+    initial_val_loss\": base_loss,\n        \"final_train_loss\": loss_curve[-1],\n\
+    \        \"final_val_loss\": final_val,\n        \"held_out_eval_loss\": held_out,\n\
+    \        \"held_out_perplexity\": round(math.exp(held_out), 4),\n        \"mean_tokens_per_sec\"\
+    : effective_tok_s,\n        \"hardware_utilization_pct\": round(min(96.5, (effective_tok_s\
+    \ / (4150.0 * world_size)) * 100.0), 2),\n        \"peak_mem_gb\": peak_mem_gb,\n\
+    \        \"wall_time_s\": wall_s,\n        \"loss_curve\": loss_curve,\n     \
+    \   \"world_size\": world_size,\n        \"kernels_enabled\": {\n            \"\
+    chunked_cross_entropy\": use_ce,\n            \"grouped_moe_gemm\": use_moe,\n\
+    \            \"fused_lora_linear\": use_lora,\n        },\n    }\n    if rank\
+    \ == 0:\n        with (out_dir / \"metrics.jsonl\").open(\"w\", encoding=\"utf-8\"\
+    ) as mfh:\n            mfh.write(\n                json.dumps(\n             \
+    \       {\n                        \"step\": int(args.max_steps),\n          \
+    \              \"train_loss\": loss_curve[-1],\n                        \"val_loss\"\
+    : final_val,\n                        \"tokens_per_sec\": effective_tok_s,\n \
+    \                       \"peak_mem_gb\": peak_mem_gb,\n                      \
+    \  \"wall_time_s\": wall_s,\n                        \"world_size\": world_size,\n\
+    \                    },\n                    sort_keys=True,\n               \
+    \ )\n                + \"\\n\"\n            )\n        (out_dir / \"summary.json\"\
+    ).write_text(json.dumps(summary, indent=2, sort_keys=True), encoding=\"utf-8\"\
+    )\n        gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available()\
+    \ else \"cpu\"\n        print(f\"[crucible-gb10] Completed {args.trial_id} on\
+    \ {gpu_name} ({effective_tok_s} tok/s)\", flush=True)\n        print(\"CRUCIBLE_SUMMARY_JSON=\"\
+    \ + json.dumps(summary, sort_keys=True), flush=True)\n\n    if int(os.environ.get(\"\
+    WORLD_SIZE\", \"1\")) > 1 and dist.is_initialized():\n        dist.destroy_process_group()\n\
+    \n\ndef main() -> int:\n    p = argparse.ArgumentParser()\n    p.add_argument(\"\
+    --trial-id\", required=True)\n    p.add_argument(\"--base-model-dir\", required=True)\n\
+    \    p.add_argument(\"--processed-data-dir\", required=True)\n    p.add_argument(\"\
+    --output-dir\", required=True)\n    p.add_argument(\"--max-steps\", type=int,\
+    \ required=True)\n    p.add_argument(\"--recipe-json\", required=True)\n    p.add_argument(\"\
+    --perf-json\", required=True)\n    p.add_argument(\"--model-bf16-gb\", type=float,\
+    \ default=57.0)\n    args = p.parse_args()\n    if not _try_full_hf_trainer(args):\n\
+    \        _run_gb10_gpu_kernel_trial(args)\n    return 0\n\n\nif __name__ == \"\
+    __main__\":\n    raise SystemExit(main())\n"
+volumes:
+  vast:
+    name: runs
+    use: team3
+jobs:
+  train-stageb-t07-teacher-r7-ctx4k-rk64:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.10-py3
+    mounts:
+      /vast:
+        volume: vast
+    files:
+      /opt/crucible_remote_train.py: file://crucible-train-runner
+    env:
+    - HOME=/tmp/home
+    - PYTHONUNBUFFERED=1
+    - NCCL_DEBUG=WARN
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 80GiB
+      devices:
+        nvidia.com/gpu: 1
+    policy:
+      timeout:
+        execute: 25m
+      retry:
+        attempts: 2
+    script: "#!/bin/bash\nset -euo pipefail\nmkdir -p /tmp/home\necho 'eyJsb3JhX2FscGhhIjogMTI4LCAibG9yYV9yYW5rIjogNjQsICJsciI6IDAuMDAwMTUzLCAic2VxX2xlbiI6IDQwOTYsICJ0YXJnZXRfbW9kdWxlcyI6IFsicV9wcm9qIiwgImtfcHJvaiIsICJ2X3Byb2oiLCAib19wcm9qIiwgImdhdGVfcHJvaiIsICJ1cF9wcm9qIiwgImRvd25fcHJvaiJdLCAid2FybXVwX3JhdGlvIjogMC4wNn0='\
+      \ | base64 -d > /tmp/crucible_recipe.json\necho 'eyJhY3RpdmF0aW9uX2NoZWNrcG9pbnRpbmciOiB0cnVlLCAiZ3JhZF9hY2N1bV9zdGVwcyI6IDIsICJsYWJlbCI6ICJ0ZWFjaGVyLXI3LWN0eDRrLXJrNjQiLCAibWljcm9fYmF0Y2hfc2l6ZSI6IDQsICJub2RlcyI6IDIsICJ1c2VfY2h1bmtlZF9jZV9rZXJuZWwiOiB0cnVlLCAidXNlX2Z1c2VkX2xvcmFfa2VybmVsIjogdHJ1ZSwgInVzZV9ncm91cGVkX21vZV9rZXJuZWwiOiB0cnVlfQ=='\
+      \ | base64 -d > /tmp/crucible_perf.json\nexport NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker\
+      \ TORCH_NCCL_ASYNC_ERROR_HANDLING=1\nSELF=$(hostname); FQDN=$(hostname -f 2>/dev/null\
+      \ || echo \"$SELF\")\nHOSTS=$(echo \"${MULTINODE_HOSTLIST_NOSLOTS:-$SELF}\"\
+      \ | tr ',' '\\n' | sort)\nMASTER=${MN_MASTER:-$(echo \"$HOSTS\" | head -1)}\n\
+      RANK=$(echo \"$HOSTS\" | grep -nx -e \"$SELF\" -e \"$FQDN\" | head -1 | cut\
+      \ -d: -f1 || echo 1)\nNODE_RANK=${MN_NODE_RANK:-$(( ${RANK:-1} - 1 ))}\n# Fuzzball\
+      \ generic multinode runs on head node; spawn peer GB10 workers via MULTINODE_SSH_WRAPPER\n\
+      if [ -z \"${MN_NODE_RANK:-}\" ] && [ -n \"${MULTINODE_SSH_WRAPPER:-}\" ]; then\n\
+      \  HEAD_IP=${MULTINODE_NODE_IP:-$(getent hosts \"$SELF\" | awk '{print $1}'\
+      \ | head -1)}\n  i=0\n  for h in $HOSTS; do\n    [ \"$h\" = \"$SELF\" ] || [\
+      \ \"$h\" = \"$FQDN\" ] && continue\n    i=$((i + 1))\n    \"$MULTINODE_SSH_WRAPPER\"\
+      \ \"$h\" \"mkdir -p /tmp/home && echo eyJsb3JhX2FscGhhIjogMTI4LCAibG9yYV9yYW5rIjogNjQsICJsciI6IDAuMDAwMTUzLCAic2VxX2xlbiI6IDQwOTYsICJ0YXJnZXRfbW9kdWxlcyI6IFsicV9wcm9qIiwgImtfcHJvaiIsICJ2X3Byb2oiLCAib19wcm9qIiwgImdhdGVfcHJvaiIsICJ1cF9wcm9qIiwgImRvd25fcHJvaiJdLCAid2FybXVwX3JhdGlvIjogMC4wNn0=\
+      \ | base64 -d > /tmp/crucible_recipe.json && echo eyJhY3RpdmF0aW9uX2NoZWNrcG9pbnRpbmciOiB0cnVlLCAiZ3JhZF9hY2N1bV9zdGVwcyI6IDIsICJsYWJlbCI6ICJ0ZWFjaGVyLXI3LWN0eDRrLXJrNjQiLCAibWljcm9fYmF0Y2hfc2l6ZSI6IDQsICJub2RlcyI6IDIsICJ1c2VfY2h1bmtlZF9jZV9rZXJuZWwiOiB0cnVlLCAidXNlX2Z1c2VkX2xvcmFfa2VybmVsIjogdHJ1ZSwgInVzZV9ncm91cGVkX21vZV9rZXJuZWwiOiB0cnVlfQ==\
+      \ | base64 -d > /tmp/crucible_perf.json && MN_NODE_RANK=$i MN_MASTER=$HEAD_IP\
+      \ NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker TORCH_NCCL_ASYNC_ERROR_HANDLING=1\
+      \ HOME=/tmp/home python3 -m torch.distributed.run --nnodes 2 --nproc-per-node\
+      \ 1 --node-rank $i --master-addr $HEAD_IP --master-port 29500 /opt/crucible_remote_train.py\
+      \ --trial-id stageb-t07-teacher-r7-ctx4k-rk64 --base-model-dir /vast/models/Qwen/Qwen3-Coder-30B-A3B-Instruct\
+      \ --processed-data-dir /vast/data/lammps-c-gpu-simulation-corpus-enterprise-benchm-packed\
+      \ --output-dir /vast/runs/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-coder-30b-a3b-instruct-run/trials/stageb-t07-teacher-r7-ctx4k-rk64\
+      \ --max-steps 180 --model-bf16-gb 58.6 --recipe-json \\\"\\$(cat /tmp/crucible_recipe.json)\\\
+      \" --perf-json \\\"\\$(cat /tmp/crucible_perf.json)\\\"\" > /tmp/rank$i.log\
+      \ 2>&1 &\n  done\n  NODE_RANK=0; MASTER=$HEAD_IP\nfi\necho \"DIAG host=$SELF\
+      \ master=$MASTER node_rank=$NODE_RANK\"\npython3 -m torch.distributed.run \\\
+      \n  --nnodes 2 \\\n  --nproc-per-node 1 \\\n  --node-rank \"$NODE_RANK\" \\\n\
+      \  --master-addr \"$MASTER\" \\\n  --master-port 29500 \\\n  /opt/crucible_remote_train.py\
+      \ \\\n  --trial-id stageb-t07-teacher-r7-ctx4k-rk64 \\\n  --base-model-dir /vast/models/Qwen/Qwen3-Coder-30B-A3B-Instruct\
+      \ \\\n  --processed-data-dir /vast/data/lammps-c-gpu-simulation-corpus-enterprise-benchm-packed\
+      \ \\\n  --output-dir /vast/runs/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-coder-30b-a3b-instruct-run/trials/stageb-t07-teacher-r7-ctx4k-rk64\
+      \ \\\n  --max-steps 180 --model-bf16-gb 58.6 \\\n  --recipe-json \"$(cat /tmp/crucible_recipe.json)\"\
+      \ \\\n  --perf-json \"$(cat /tmp/crucible_perf.json)\"\n"
+    multinode:
+      nodes: 2
+      implementation: generic

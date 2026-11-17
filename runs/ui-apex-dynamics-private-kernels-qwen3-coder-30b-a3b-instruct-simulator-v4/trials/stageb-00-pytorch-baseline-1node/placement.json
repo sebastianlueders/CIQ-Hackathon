@@ -1,0 +1,7 @@
+{
+  "workflow_id": "669244a6-0a5a-43ed-aa13-7dd1fc5abf2c",
+  "nodes": [
+    "gb10-node-02"
+  ],
+  "object_uri": "fuzzball://user/crucible/apex-dynamics-private-kernels-qwen3-coder-30b-a3b-instruct-run/stageb-00-pytorch-baseline-1node/metrics.json"
+}

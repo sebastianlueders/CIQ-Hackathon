@@ -1,0 +1,61 @@
+# Live CIQ Fuzzball cluster configuration (defaults to Team 3: team3@fb-hack.local)
+# VAST storage provisioner (`use:`): team3 (auto-overridden by `context_show` if logged into another team)
+# Per-node GB10 hardware: 1x NVIDIA-GB10 (sm_121), 20c arm64, 127.9 GiB unified memory
+# Fast-scheduling container request: 8 cores / 80GiB RAM / 1x nvidia.com/gpu per node
+
+cluster_name: ciq-gb10-team3
+definition_id: team3
+pin_definition_annotation: false
+fuzzfile_version: v4
+
+nodes:
+  count: 2
+  gpu_model: "NVIDIA GB10"
+  gpu_product: "NVIDIA-GB10"
+  gpu_arch: "Blackwell"
+  sm_arch: "sm_121"
+  arch_device: ""
+  gpus_per_node: 1
+  physical_cores_per_node: 20
+  cpu_cores_per_node: 8
+  physical_memory_gib_per_node: 127.9
+  memory_gb_per_node: 96
+  measured_peak_bf16_tflops: 198.0
+  measured_peak_train_tok_s_per_node: 4150.0
+  interconnect: "NCCL-RoCE-200GbE"
+  inventory:
+    - hostname: "gb10-node-01"
+      node_id: "gb10-01"
+      address: "192.168.99.101"
+      status: "READY"
+      gpu_product: "NVIDIA-GB10"
+      gpus: 1
+      cores: 20
+      memory_gib: 127.9
+    - hostname: "gb10-node-02"
+      node_id: "gb10-02"
+      address: "192.168.99.102"
+      status: "READY"
+      gpu_product: "NVIDIA-GB10"
+      gpus: 1
+      cores: 20
+      memory_gib: 127.9
+
+vast:
+  volume_key: vast
+  persistent_volume_name: runs
+  provisioner: team3
+  ephemeral: false
+  ephemeral_size: 64GiB
+  mount_path: /vast
+  models_dir: /vast/models
+  datasets_dir: /vast/data
+  runs_dir: /vast/runs
+  object_cache_scope: user
+  egress_metrics_to_object_cache: false
+
+images:
+  # Pre-cached container images on CIQ hackathon GB10 nodes (instant start, 0s pull)
+  fetch: "docker://python:3.12-slim"
+  train: "docker://nvcr.io/nvidia/pytorch:26.10-py3"
+  serve: "docker://vllm/vllm-openai:v0.33.0"

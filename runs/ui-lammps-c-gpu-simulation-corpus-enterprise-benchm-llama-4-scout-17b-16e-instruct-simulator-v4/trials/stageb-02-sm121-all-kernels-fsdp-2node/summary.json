@@ -1,0 +1,21 @@
+{
+  "final_train_loss": 99.0,
+  "final_val_loss": 99.0,
+  "hardware_utilization_pct": 0.0,
+  "held_out_eval_loss": 99.0,
+  "held_out_perplexity": 9999.0,
+  "initial_val_loss": 1.924,
+  "kernels_enabled": {
+    "chunked_cross_entropy": true,
+    "fused_lora_linear": true,
+    "grouped_moe_gemm": true
+  },
+  "loss_curve": [],
+  "mean_tokens_per_sec": 0.0,
+  "peak_mem_gb": 116.49,
+  "status": "oom",
+  "steps_completed": 0,
+  "trial_id": "stageb-02-sm121-all-kernels-fsdp-2node",
+  "wall_time_s": 1.0,
+  "world_size": 2
+}

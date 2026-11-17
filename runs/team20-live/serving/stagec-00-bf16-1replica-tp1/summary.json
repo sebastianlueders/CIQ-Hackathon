@@ -1,0 +1,21 @@
+{
+  "accepted": true,
+  "completion_pass_rate": 0.9167,
+  "held_out_loss": 1.39629,
+  "held_out_perplexity": 4.0402,
+  "label": "bf16-1replica-tp1",
+  "max_num_seqs": 32,
+  "p50_latency_ms": 112.9,
+  "p99_latency_ms": 209.96,
+  "passed_latency_ceiling": true,
+  "passed_quality_floor": true,
+  "perplexity_regression_pct": 0.0,
+  "precision": "BF16",
+  "rejection_reasons": [],
+  "replicas": 1,
+  "tensor_parallel": 1,
+  "throughput_tokens_per_sec": 401.8,
+  "trial_id": "stagec-00-bf16-1replica-tp1",
+  "ttft_ms": 35.5,
+  "use_low_prec_decode_kernel": false
+}

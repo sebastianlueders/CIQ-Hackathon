@@ -1,0 +1,52 @@
+# Crucible Autoresearch Trial Fuzzfile: stageb-01-tuned-batch-ckpt-1node
+# DefinitionId: team20 | Nodes: CIQ-CHI-SPARK39 (192.168.99.48/7331), CIQ-CHI-SPARK40 (192.168.99.49/7331)
+# Model: Qwen/Qwen3-Coder-30B-A3B | Target Hardware: NVIDIA-GB10 (sm_121, cpu/arm64/sve)
+# Recipe: rank=32, alpha=64, lr=0.00015
+# Perf: nodes=1, micro_batch=4, chunked_ce=False, grouped_moe=False, fused_lora=False
+# Metrics Object Cache Egress (numeric only, zero raw data): fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stageb-01-tuned-batch-ckpt-1node/metrics.json
+
+version: v4
+annotations:
+  fuzzball.io/provisioner_definition_id: team20
+volumes:
+  vast-shared:
+    use: vast
+    name: crucible-vast
+    egress:
+    - source:
+        uri: file://runs/lammps-qwen3-coder-30b-run/trials/stageb-01-tuned-batch-ckpt-1node/summary.json
+      destination:
+        uri: fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stageb-01-tuned-batch-ckpt-1node/metrics.json
+jobs:
+  train-stageb-01-tuned-batch-ckpt-1node:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.03-py3
+    mounts:
+      /vast: vast-shared
+    env:
+    - PYTHONUNBUFFERED=1
+    - NCCL_IB_DISABLE=0
+    - CUDA_DEVICE_MAX_CONNECTIONS=1
+    - TORCH_CUDA_ARCH_LIST=12.0;12.1
+    resource:
+      cpu:
+        cores: 16
+        affinity: NUMA
+      memory:
+        size: 112GiB
+      devices:
+        nvidia.com/gpu: 1
+        cpu/arm64/sve: 1
+    policy:
+      timeout:
+        execute: 2h
+    script: "#!/bin/bash\nset -euo pipefail\npython3 -m crucible.trainer.lora_trainer\
+      \ \\\n  --trial-id stageb-01-tuned-batch-ckpt-1node \\\n  --base-model-dir /vast/models/Qwen3-Coder-30B-A3B\
+      \ \\\n  --processed-data-dir /vast/data/lammps-packed \\\n  --output-dir /vast/runs/lammps-qwen3-coder-30b-run/trials/stageb-01-tuned-batch-ckpt-1node\
+      \ \\\n  --max-steps 180 \\\n  --recipe-json '{\"lora_alpha\": 64, \"lora_rank\"\
+      : 32, \"lr\": 0.00015, \"seq_len\": 2048, \"target_modules\": [\"q_proj\", \"\
+      k_proj\", \"v_proj\", \"o_proj\", \"gate_proj\", \"up_proj\", \"down_proj\"\
+      ], \"warmup_ratio\": 0.05}' \\\n  --perf-json '{\"activation_checkpointing\"\
+      : true, \"grad_accum_steps\": 4, \"label\": \"tuned-batch-ckpt-1node\", \"micro_batch_size\"\
+      : 4, \"nodes\": 1, \"use_chunked_ce_kernel\": false, \"use_fused_lora_kernel\"\
+      : false, \"use_grouped_moe_kernel\": false}'\n"

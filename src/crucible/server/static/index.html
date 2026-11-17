@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alchemy Client Studio — Fuzzball Remote GPU Server &amp; Local LLM Forge</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20261115k" />
+</head>
+<body>
+  <!-- ENTERPRISE CLIENT WORKSTATION HEADER -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">A</div>
+      <div>
+        <div class="brand-title-row">
+          <h1>Alchemy</h1>
+          <span class="badge badge-accent">Enterprise Client Studio</span>
+          <span class="lifecycle-top-pill lifecycle-pill-prerun" id="header-lifecycle-pill">STATE: PRE-RUN</span>
+        </div>
+        <p class="subtitle">
+          Run on your business workstation &middot; Dispatch private LoRA &amp; <code>sm_121</code> kernel optimization to your remote CIQ Fuzzball 2&times;GB10 server &middot; Receive a turnkey local LLM build.
+        </p>
+      </div>
+    </div>
+
+    <div class="stack-pills">
+      <span class="pill" title="Local client machine hosting this UI"><span class="dot dot-cyan"></span>Client: <code id="pill-client-host">workstation.local</code></span>
+      <span class="pill" title="Remote CIQ Fuzzball cluster server"><span class="dot dot-green" id="dot-cluster"></span>Fuzzball Server: <code id="pill-cluster-ep">api.fb-hack.civilfritz.net:443</code> (<code id="pill-def-id">team3</code>)</span>
+      <span class="pill"><span class="dot dot-violet"></span>2&times; NVIDIA GB10 &middot; <code>sm_121</code> &middot; <code id="pill-fz-ver">v4</code></span>
+      <span class="pill pill-shield" id="pill-privacy"><span class="dot dot-green"></span>Zero Cloud Leak: 0 Raw Bytes Egressed</span>
+    </div>
+
+    <div class="actions">
+      <a href="/api/build/bundle.zip" id="btn-top-download" class="btn btn-download btn-locked" aria-disabled="true">Output Locked (Pre-Run)</a>
+      <button id="btn-probe" class="btn btn-outline" title="Simulate a raw code exfiltration attempt and verify the local schema firewall blocks it">Verify Zero-Leak Guard</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 3-STATE PROCESS LIFECYCLE & OUTPUT READINESS STEPPER (PRE-RUN -> RUNNING -> FINISHED) -->
+    <section class="lifecycle-banner lifecycle-prerun" id="lifecycle-banner" aria-live="polite">
+      <div class="lifecycle-top-row">
+        <div class="lifecycle-copy">
+          <div class="lifecycle-badge-row">
+            <span class="lifecycle-state-chip" id="lifecycle-state-chip">STEP 1 OF 3 &middot; PRE-RUN</span>
+            <span class="lifecycle-teacher-chip" id="lifecycle-teacher-chip">Teacher SFT Splits Ready on Launch</span>
+          </div>
+          <h2 class="lifecycle-headline" id="lifecycle-headline">Pre-Run: Configure Model, Upload Private Data &amp; Click &ldquo;Tune on Fuzzball &amp; Generate Local LLM&rdquo;</h2>
+          <p class="lifecycle-sub" id="lifecycle-sub">Final output is locked until optimization runs. Your uploaded corpus will be partitioned by the Remote Teacher into leak-free Train (80%), Val (10%), and Test (10%) teaching pairs.</p>
+        </div>
+
+        <div class="lifecycle-cta-group" id="lifecycle-cta-group">
+          <button type="button" id="btn-jump-output" class="btn btn-primary btn-sm hidden">Jump to Tuned Output &darr;</button>
+          <a href="/api/build/bundle.zip" id="btn-banner-download" class="btn btn-download btn-sm hidden" download>Download Ready .zip</a>
+        </div>
+      </div>
+
+      <div class="lifecycle-stepper">
+        <div class="lc-step lc-step-active" id="lc-step-prerun">
+          <span class="lc-num">1</span>
+          <span><strong>PRE-RUN</strong> &middot; Select Model &amp; Upload Data</span>
+        </div>
+        <div class="lc-arrow">&rarr;</div>
+        <div class="lc-step" id="lc-step-running">
+          <span class="lc-num">2</span>
+          <span><strong>RUNNING</strong> &middot; Teacher Train/Val/Test SFT &amp; GB10 Tuning</span>
+        </div>
+        <div class="lc-arrow">&rarr;</div>
+        <div class="lc-step" id="lc-step-finished">
+          <span class="lc-num">3</span>
+          <span><strong>FINISHED</strong> &middot; Tuned Copilot &amp; .zip Output Ready</span>
+        </div>
+      </div>
+
+      <div class="lifecycle-progress-track">
+        <div class="lifecycle-progress-fill" id="lifecycle-progress-fill" style="width: 8%"></div>
+      </div>
+    </section>
+
+    <!-- CLIENT WORKSTATION <-> FUZZBALL CLUSTER BRIDGE BANNER -->
+    <section class="panel topology-bridge-panel">
+      <div class="bridge-grid">
+        <div class="bridge-node bridge-client">
+          <div class="bridge-kicker">LOCAL CLIENT BUSINESS MACHINE (THIS UI)</div>
+          <div class="bridge-title" id="bridge-client-name">MacBook / Enterprise Workstation</div>
+          <div class="bridge-meta" id="bridge-client-meta">Ingests private files into deterministic Train / Val / Sealed Test splits &middot; Pulls tuned LoRA + Ollama/vLLM build</div>
+        </div>
+
+        <div class="bridge-connector">
+          <div class="bridge-line-label">OIDC TLS + Fuzzball v4 Workflows &middot; Numeric Metrics Only</div>
+          <div class="bridge-wire">
+            <span class="wire-pulse"></span>
+          </div>
+          <div class="bridge-sub" id="bridge-conn-status">Connected to CIQ Fuzzball Control Plane &middot; VAST Shared Volume Mounted at <code>/vast</code></div>
+        </div>
+
+        <div class="bridge-node bridge-server">
+          <div class="bridge-kicker">REMOTE CIQ FUZZBALL GPU CLUSTER SERVER</div>
+          <div class="bridge-title"><span id="bridge-server-ep">api.fb-hack.civilfritz.net:443</span> &middot; <code id="bridge-team-tag">team3</code></div>
+          <div class="bridge-meta">2&times; NVIDIA GB10 Grace Blackwell (<code>255.8 GiB</code> LPDDR5X) &middot; 200GbE RoCE NCCL &middot; VAST Data NVMe Fabric (<code>1.64 GB/s</code>)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3-STEP ENTERPRISE WORKFLOW BUILDER: MODEL -> PRIVATE DATA -> FUZZBALL SERVER LAUNCH -->
+    <section class="panel builder-panel">
+      <div class="builder-grid">
+        <!-- 1. VAST MODEL CATALOG & DYNAMIC ARCHITECTURE PROBE -->
+        <div class="builder-col">
+          <div class="step-header-row">
+            <span class="step-kicker">1. SELECT BASE MODEL (<span id="catalog-count-badge">40</span> PRESETS + ANY HUGGINGFACE / VAST ID)</span>
+          </div>
+
+          <div class="model-search-row">
+            <input
+              id="model-id-input"
+              class="model-input"
+              type="text"
+              value="Qwen/Qwen3-Coder-30B-A3B-Instruct"
+              placeholder="Enter any HuggingFace ID (org/model) or VAST path (/models/...) or pick below"
+              spellcheck="false"
+              aria-label="Base Model ID"
+            />
+            <input
+              id="catalog-filter-input"
+              class="catalog-search-input"
+              type="search"
+              placeholder="Filter 40 models (e.g. Qwen3, Llama, R1, MoE, 3B, 70B, MIT)…"
+              aria-label="Filter Model Catalog"
+            />
+          </div>
+
+          <div class="category-tabs" id="model-category-tabs"></div>
+          <div class="model-catalog-grid" id="model-chips" role="listbox" aria-label="Tunable Open-Weight Models"></div>
+
+          <div class="model-readiness-bar" id="model-readiness-bar">
+            <div id="model-spec-line" class="model-spec-text">
+              Inferred: MoE (128 experts, top-8) &middot; 30.5B total (3.3B active) &middot; Pre-Loaded on VAST &middot; Preset Opt Ready
+            </div>
+            <button id="btn-stage-model" type="button" class="btn btn-outline btn-sm hidden">Load onto VAST Volume</button>
+          </div>
+        </div>
+
+        <!-- 2. ENTERPRISE TENANT & PRIVATE BUSINESS DATA INGESTION -->
+        <div class="builder-col">
+          <div class="step-kicker">2. COMPANY WORKSPACE &amp; PRIVATE CORPUS (LOCAL SPLIT &rarr; VAST)</div>
+          <label class="field-row">
+            <span>Enterprise Organization / Copilot Brand</span>
+            <input id="company-name-input" class="team-text" type="text" value="Apex Dynamics" placeholder="e.g. Apex Dynamics, Meridian Labs…" spellcheck="false" aria-label="Company Name" />
+          </label>
+          <div class="dropzone" id="dropzone">
+            <div class="dropzone-main">
+              <strong>Drop proprietary codebases, <code>.jsonl</code>/<code>.json</code>/<code>.csv</code>, SOP docs (<code>.md</code>/<code>.txt</code>), or <code>.zip</code></strong>
+              <span class="dropzone-sub">Hashed whole-document grouping prevents near-duplicate leakage across Train (80%), Val (10%), and Sealed Test (10%)</span>
+            </div>
+            <div class="dropzone-buttons">
+              <label class="btn btn-outline btn-sm">
+                Select Files
+                <input id="file-picker" type="file" multiple hidden />
+              </label>
+              <label class="btn btn-outline btn-sm">
+                Select Folder
+                <input id="folder-picker" type="file" webkitdirectory directory multiple hidden />
+              </label>
+              <button id="btn-use-preset" type="button" class="btn btn-outline btn-sm">Use LAMMPS C++ Benchmark</button>
+            </div>
+          </div>
+          <div class="dataset-status-bar" id="dataset-status-bar">
+            Preset Active: <strong>LAMMPS C++ &amp; GPU Simulation Corpus</strong> &middot; Train / Validation / Held-Out Test splits ready
+          </div>
+        </div>
+
+        <!-- 3. CONTINUOUS REMOTE-TEACHER BUDGET & LAUNCH -->
+        <div class="builder-col builder-col-launch">
+          <div>
+            <div class="step-kicker">3. CONTINUOUS TEACHER &amp; COST / TIME BUDGET</div>
+            <div class="launch-fields" style="margin-top:7px;">
+              <label class="field-row">
+                <span>Execution Mode</span>
+                <select id="backend-select" aria-label="Execution Backend">
+                  <option value="simulator" selected>Fuzzball GB10 Empirical Twin (Live Dual-GPU Stream)</option>
+                  <option value="fuzzball_mcp">CIQ Fuzzball 4.2 MCP Server &middot; Live Hardware</option>
+                  <option value="fuzzball">CIQ Fuzzball CLI &middot; Live Hardware (Auto-Queues)</option>
+                  <option value="local_torch">Local PyTorch Micro-Trainer (Client Machine)</option>
+                </select>
+              </label>
+
+              <div class="budget-inputs-grid">
+                <label class="field-row">
+                  <span>Time Budget (min)</span>
+                  <input id="time-budget-input" class="team-text" type="number" min="1" max="120" step="1" value="8" aria-label="Time Budget Minutes" />
+                </label>
+                <label class="field-row">
+                  <span>Cost Cap ($ USD)</span>
+                  <input id="cost-budget-input" class="team-text" type="number" min="0.5" max="200" step="0.5" value="5.00" aria-label="Cost Budget USD" />
+                </label>
+              </div>
+
+              <label class="check-row">
+                <input id="chk-continuous" type="checkbox" checked />
+                <span>Continuous Remote-Teacher Loop (Intelligence + Speed)</span>
+              </label>
+              <label class="check-row">
+                <input id="chk-company-presets" type="checkbox" checked />
+                <span>Warm-Start from Company <code>sm_121</code> Presets (Saves $$$)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="measured-callout" id="preset-savings-box">
+            <div class="callout-title" id="preset-callout-title">Company GB10 Preset Warm-Start Active</div>
+            <div class="callout-row"><span>Preset Savings:</span> <strong id="preset-savings-val">Saves $2.40 (skips cold kernel probes)</strong></div>
+            <div class="callout-row"><span>Live Budget Meter:</span> <strong id="live-budget-meter">$0.00 / $5.00 &middot; 0.0 / 8.0m</strong></div>
+          </div>
+
+          <div class="launch-btn-row">
+            <button id="btn-run" class="btn btn-primary btn-hero">Tune on Fuzzball &amp; Generate Local LLM</button>
+            <button id="btn-stop-run" type="button" class="btn btn-stop hidden">Stop &amp; Package Best</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIVE DUAL-GPU USAGE & INTER-GPU NCCL / RoCE / VAST FABRIC TELEMETRY -->
+    <section class="panel gpu-fabric-panel">
+      <div class="panel-header">
+        <div>
+          <span class="stage-tag">LIVE DUAL-GPU HARDWARE TELEMETRY &amp; INTER-GPU COLLECTIVE COMMUNICATIONS</span>
+          <h2>Remote Fuzzball GB10 Compute Nodes &amp; Real-Time GPU 0 &harr; GPU 1 NCCL / RoCE Fabric</h2>
+          <p class="panel-sub">Live SM compute load, Tensor Core utilization, unified LPDDR5X memory allocation, and bidirectional gradient AllReduce / FSDP / TP2 traffic across both GPUs</p>
+        </div>
+        <div class="fabric-badges">
+          <span class="badge badge-accent" id="fabric-mode-badge">DUAL-GPU FABRIC READY</span>
+          <span class="badge" id="fabric-bw-badge">NCCL RoCE 200GbE &middot; 0.0 Gbps</span>
+        </div>
+      </div>
+
+      <div class="gpu-topology-wrap">
+        <div class="gpu-fabric-grid">
+          <!-- GPU 0 NODE CARD -->
+          <div class="gpu-node-card" id="gpu0-card">
+            <div class="gpu-card-top">
+              <div class="gpu-card-id-group">
+                <span class="gpu-rank-badge gpu-rank-0">GPU 0 &middot; RANK 0</span>
+                <span class="gpu-hostname" id="gpu0-host">CIQ-CHI-SPARK05</span>
+              </div>
+              <span class="gpu-state-badge" id="gpu0-state">READY</span>
+            </div>
+            <div class="gpu-role-text" id="gpu0-role">NVIDIA GB10 Blackwell (sm_121 &middot; 48 SMs)</div>
+
+            <div class="gpu-meter-group">
+              <div class="gpu-meter-row">
+                <div class="gpu-meter-head">
+                  <span>SM Compute</span>
+                  <strong class="gpu-val-green" id="gpu0-sm-txt">0.0%</strong>
+                </div>
+                <div class="gpu-meter-track">
+                  <div class="gpu-meter-fill gpu-fill-green" id="gpu0-sm-bar" style="width: 2%"></div>
+                </div>
+              </div>
+
+              <div class="gpu-meter-row">
+                <div class="gpu-meter-head">
+                  <span>Blackwell Tensor Cores (BF16/FP8/NVFP4)</span>
+                  <strong class="gpu-val-cyan" id="gpu0-tc-txt">0.0%</strong>
+                </div>
+                <div class="gpu-meter-track">
+                  <div class="gpu-meter-fill gpu-fill-cyan" id="gpu0-tc-bar" style="width: 2%"></div>
+                </div>
+              </div>
+
+              <div class="gpu-meter-row">
+                <div class="gpu-meter-head">
+                  <span>Unified LPDDR5X Memory</span>
+                  <strong class="gpu-val-violet" id="gpu0-mem-txt">0.0 / 127.9 GiB</strong>
+                </div>
+                <div class="gpu-meter-track">
+                  <div class="gpu-meter-fill gpu-fill-violet" id="gpu0-mem-bar" style="width: 2%"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="gpu-die-and-stats">
+              <div class="sm-die-grid" id="gpu0-cores" aria-hidden="true">
+                <span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span>
+                <span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span>
+              </div>
+              <div class="gpu-perf-readouts">
+                <div class="gpu-tflops-line" id="gpu0-tflops">0.0 TFLOP/s &middot; 0 GB/s</div>
+                <div class="gpu-toks-line" id="gpu0-toks">0 tok/s &middot; 24W &middot; 39&deg;C</div>
+              </div>
+            </div>
+
+            <div class="gpu-wf-meta" id="gpu0-wf" title="Workflow: idle">Workflow: idle &middot; Done: 0</div>
+          </div>
+
+          <!-- INTER-GPU NCCL / RoCE / FSDP HIGH-SPEED COLLECTIVE BRIDGE (CENTER) -->
+          <div class="gpu-comm-bridge">
+            <div class="comm-box">
+              <div class="comm-proto" id="svg-comm-proto">NCCL RoCE v2 &middot; 200GbE RDMA</div>
+              <div class="comm-bw" id="svg-comm-bw">Dual-GPU Link Ready</div>
+            </div>
+
+            <div class="comm-pipes-wrap">
+              <div class="comm-dir-label comm-dir-fwd" id="svg-fwd-label">NCCL Ring AllReduce Rank 0 &rarr; 1</div>
+              <svg class="comm-pipes-svg" viewBox="0 0 320 58" width="100%" height="58" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="nvGreenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#65a30d" />
+                    <stop offset="100%" stop-color="#a3e635" />
+                  </linearGradient>
+                  <linearGradient id="cyanLinkGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#38bdf8" />
+                    <stop offset="50%" stop-color="#a3e635" />
+                    <stop offset="100%" stop-color="#38bdf8" />
+                  </linearGradient>
+                </defs>
+                <line x1="6" y1="16" x2="314" y2="16" stroke="#1b2c49" stroke-width="8" stroke-linecap="round" />
+                <line x1="6" y1="16" x2="314" y2="16" stroke="url(#cyanLinkGrad)" stroke-width="3.5" stroke-dasharray="10 8" class="comm-flow-fwd" id="svg-link-fwd" />
+                <line x1="314" y1="42" x2="6" y2="42" stroke="#1b2c49" stroke-width="8" stroke-linecap="round" />
+                <line x1="314" y1="42" x2="6" y2="42" stroke="url(#nvGreenGrad)" stroke-width="3.5" stroke-dasharray="10 8" class="comm-flow-rev" id="svg-link-rev" />
+              </svg>
+              <div class="comm-dir-label comm-dir-rev" id="svg-rev-label">&larr; NCCL Ring AllReduce Rank 1 &rarr; 0</div>
+            </div>
+
+            <div class="comm-box">
+              <div class="comm-sync" id="svg-allreduce-txt">AllReduce Latency: 0.0 ms &middot; Payload: 0.0 MB</div>
+              <div class="comm-op" id="svg-collective-op">2-Node Scaling Efficiency: 99.2%</div>
+            </div>
+          </div>
+
+          <!-- GPU 1 NODE CARD -->
+          <div class="gpu-node-card" id="gpu1-card">
+            <div class="gpu-card-top">
+              <div class="gpu-card-id-group">
+                <span class="gpu-rank-badge gpu-rank-1">GPU 1 &middot; RANK 1</span>
+                <span class="gpu-hostname" id="gpu1-host">CIQ-CHI-SPARK06</span>
+              </div>
+              <span class="gpu-state-badge" id="gpu1-state">READY</span>
+            </div>
+            <div class="gpu-role-text" id="gpu1-role">NVIDIA GB10 Blackwell (sm_121 &middot; 48 SMs)</div>
+
+            <div class="gpu-meter-group">
+              <div class="gpu-meter-row">
+                <div class="gpu-meter-head">
+                  <span>SM Compute</span>
+                  <strong class="gpu-val-green" id="gpu1-sm-txt">0.0%</strong>
+                </div>
+                <div class="gpu-meter-track">
+                  <div class="gpu-meter-fill gpu-fill-green" id="gpu1-sm-bar" style="width: 2%"></div>
+                </div>
+              </div>
+
+              <div class="gpu-meter-row">
+                <div class="gpu-meter-head">
+                  <span>Blackwell Tensor Cores (BF16/FP8/NVFP4)</span>
+                  <strong class="gpu-val-cyan" id="gpu1-tc-txt">0.0%</strong>
+                </div>
+                <div class="gpu-meter-track">
+                  <div class="gpu-meter-fill gpu-fill-cyan" id="gpu1-tc-bar" style="width: 2%"></div>
+                </div>
+              </div>
+
+              <div class="gpu-meter-row">
+                <div class="gpu-meter-head">
+                  <span>Unified LPDDR5X Memory</span>
+                  <strong class="gpu-val-violet" id="gpu1-mem-txt">0.0 / 127.9 GiB</strong>
+                </div>
+                <div class="gpu-meter-track">
+                  <div class="gpu-meter-fill gpu-fill-violet" id="gpu1-mem-bar" style="width: 2%"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="gpu-die-and-stats">
+              <div class="sm-die-grid" id="gpu1-cores" aria-hidden="true">
+                <span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span>
+                <span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span><span class="sm-cell"></span>
+              </div>
+              <div class="gpu-perf-readouts">
+                <div class="gpu-tflops-line" id="gpu1-tflops">0.0 TFLOP/s &middot; 0 GB/s</div>
+                <div class="gpu-toks-line" id="gpu1-toks">0 tok/s &middot; 24W &middot; 39&deg;C</div>
+              </div>
+            </div>
+
+            <div class="gpu-wf-meta" id="gpu1-wf" title="Workflow: idle">Workflow: idle &middot; Done: 0</div>
+          </div>
+        </div>
+
+        <!-- SHARED VAST DATA NVMe-oF STORAGE BANNER -->
+        <div class="vast-storage-banner">
+          <div class="vast-banner-title" id="svg-vast-title">
+            VAST Data Shared Persistent Volume (<code>/vast</code> &middot; <code>use: team3</code>) &mdash; Zero-Copy Weights, Tokenized Splits &amp; LoRA Checkpoints
+          </div>
+          <div class="vast-banner-sub" id="svg-vast-stats">
+            Measured Direct Safetensors Stream: 1.64 GB/s/node (62s 30B load) &middot; Zero Raw Data Egress Enabled
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- REAL-TIME TUNING TELEMETRY & LIVE STEP-BY-STEP DIAGNOSTIC ANALYSIS -->
+    <section class="panel realtime-analysis-panel">
+      <div class="panel-header">
+        <div>
+          <span class="stage-tag">REAL-TIME TUNING DIAGNOSTICS &amp; CONVERGENCE TELEMETRY</span>
+          <h2 id="live-stage-label">Ready — Select any model &amp; click "Tune on Fuzzball &amp; Generate Local LLM"</h2>
+        </div>
+        <span class="badge badge-green" id="live-run-state">READY</span>
+      </div>
+
+      <div id="live-error-banner" class="error-banner hidden"></div>
+
+      <!-- 8 LIVE STEP KPI GAUGES -->
+      <div class="rt-metrics-strip">
+        <div class="rt-kpi">
+          <span class="rt-label">Active Trial &amp; Step</span>
+          <span class="rt-val" id="rt-step">Idle</span>
+        </div>
+        <div class="rt-kpi">
+          <span class="rt-label">Train / Val Loss</span>
+          <span class="rt-val" id="rt-loss">— / —</span>
+        </div>
+        <div class="rt-kpi">
+          <span class="rt-label">Live Perplexity</span>
+          <span class="rt-val" id="rt-ppl">—</span>
+        </div>
+        <div class="rt-kpi">
+          <span class="rt-label">Learning Rate</span>
+          <span class="rt-val" id="rt-lr">—</span>
+        </div>
+        <div class="rt-kpi">
+          <span class="rt-label">Grad L2 Norm (|g|)</span>
+          <span class="rt-val" id="rt-grad">—</span>
+        </div>
+        <div class="rt-kpi">
+          <span class="rt-label">MoE Router Entropy</span>
+          <span class="rt-val" id="rt-entropy">—</span>
+        </div>
+        <div class="rt-kpi">
+          <span class="rt-label">Teacher &amp; $ Spent</span>
+          <span class="rt-val" id="rt-memsave">R0 &middot; $0.00</span>
+        </div>
+        <div class="rt-kpi">
+          <span class="rt-label">Cluster Throughput</span>
+          <span class="rt-val rt-val-accent" id="rt-toks">—</span>
+        </div>
+      </div>
+
+      <div class="rt-bottom-grid">
+        <div>
+          <div class="sub-kicker">LIVE FUZZBALL WORKFLOW &amp; STEP EVENT STREAM</div>
+          <div class="event-feed" id="live-event-feed"></div>
+        </div>
+        <div>
+          <div class="sub-kicker">COMPLETED &amp; ACTIVE FUZZBALL TRIAL LEDGER</div>
+          <div class="trial-ledger-wrap">
+            <table class="data-table compact-table" id="live-trial-ledger">
+              <thead>
+                <tr>
+                  <th>Trial ID</th>
+                  <th>GPUs</th>
+                  <th>Tok/s</th>
+                  <th>Val Loss</th>
+                  <th>Test PPL</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4-STAGE AUTORESEARCH FUNNEL SUMMARY -->
+    <section class="funnel-grid" id="funnel-cards">
+      <article class="stage-card">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE A &middot; RECIPE SEARCH</span>
+          <span class="stage-status">Successive Halving</span>
+        </div>
+        <div class="metric-big" id="kpi-ppl">—</div>
+        <div class="metric-label">Held-Out Test Perplexity (Base &rarr; Tuned)</div>
+        <div class="stage-meta" id="meta-stage-a">Loading trials...</div>
+      </article>
+
+      <article class="stage-card">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE B &middot; TRAINING PERF</span>
+          <span class="stage-status">Loss-Curve Gated</span>
+        </div>
+        <div class="metric-big" id="kpi-train-speed">—</div>
+        <div class="metric-label">Cluster Training Speed &amp; <code>sm_121</code> Kernels</div>
+        <div class="stage-meta" id="meta-stage-b">Loading sweep...</div>
+      </article>
+
+      <article class="stage-card">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE C &middot; INFERENCE PERF</span>
+          <span class="stage-status">Quality-Floor Gated</span>
+        </div>
+        <div class="metric-big" id="kpi-serve-speed">—</div>
+        <div class="metric-label">vLLM Serving Throughput (BF16 &rarr; FP8 / NVFP4)</div>
+        <div class="stage-meta" id="meta-stage-c">Loading serving configs...</div>
+      </article>
+
+      <article class="stage-card stage-card-highlight" id="stage-d-card">
+        <div class="stage-header">
+          <span class="stage-tag">STAGE D &middot; CLIENT LLM BUILD</span>
+          <span class="stage-status" id="stage-d-status-pill">Pre-Run &middot; Locked</span>
+        </div>
+        <div class="metric-big" id="kpi-dag">Awaiting Run</div>
+        <div class="metric-label">Tuned for <code id="kpi-model-short">Qwen3-Coder-30B-A3B</code></div>
+        <div class="stage-meta" id="meta-stage-d">Unlocks once Teacher SFT + Stages A/B/C finish</div>
+      </article>
+    </section>
+
+    <!-- LOSS CURVE + THROUGHPUT WATERFALL -->
+    <section class="grid-two">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Real-Time Train &amp; Validation Loss-Curve Equivalence</h2>
+            <p class="panel-sub">Streams live optimization trajectories and enforces Stage B mathematical equivalence (&Delta; &le; 0.025 vs. reference)</p>
+          </div>
+          <span class="badge" id="curve-badge">Max &Delta; = 0.0067</span>
+        </div>
+        <div id="loss-chart-wrap" class="chart-box"></div>
+        <div class="chart-legend" id="loss-legend"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Stage B Training Throughput &amp; Dual-GPU Scaling Waterfall</h2>
+            <p class="panel-sub">Measured tokens/sec across PyTorch baseline, grouped MoE + <code>torch.compile</code>, Triton Fused CE, and 2-node NCCL DDP</p>
+          </div>
+          <span class="badge badge-green" id="util-badge">83.8% Cluster Peak</span>
+        </div>
+        <div id="train-bars" class="bars-list"></div>
+      </div>
+    </section>
+
+    <!-- SERVING SWEEP + KERNEL PARITY & FIREWALL AUDIT -->
+    <section class="grid-two">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Stage C vLLM Serving Sweep (Evaluated on Sealed Test Split)</h2>
+            <p class="panel-sub">Sweeps BF16, FP8, and Blackwell NVFP4 across 1&times;TP1, 2&times;TP1 replicas, and 1&times;TP2 tensor parallel</p>
+          </div>
+        </div>
+        <table class="data-table" id="serving-table">
+          <thead>
+            <tr>
+              <th>Config</th>
+              <th>Precision</th>
+              <th>Topology</th>
+              <th>Tok/s</th>
+              <th>P99</th>
+              <th>Test PPL &Delta;</th>
+              <th>Gate</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Custom <code>sm_121</code> Kernel Parity &amp; Zero-Egress Firewall Audit</h2>
+            <p class="panel-sub">Numerical parity vs. FP32 PyTorch reference + cryptographic SHA-256 proof that 0 raw bytes left your VAST/local boundary</p>
+          </div>
+        </div>
+        <table class="data-table compact-table" id="kernel-table">
+          <thead>
+            <tr>
+              <th>Kernel</th>
+              <th>Max Abs Error</th>
+              <th>Mem Saving</th>
+              <th>Parity</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="advisor-box" id="advisor-rationales"></div>
+        <div class="firewall-banner" id="firewall-audit-box"></div>
+      </div>
+    </section>
+
+    <!-- OUTPUT READINESS CALLOUT + FINAL RESULT: BRANDED ENTERPRISE PRIVATE AI COPILOT & DEPLOYABLE .ZIP -->
+    <section class="output-readiness-banner output-banner-prerun" id="output-readiness-banner">
+      <div class="output-banner-left">
+        <span class="output-state-tag" id="output-state-tag">PRE-RUN &middot; OUTPUT NOT READY YET</span>
+        <div class="output-banner-text" id="output-banner-text">
+          Start an optimization run above to generate your tuned LoRA adapter, Teacher SFT splits, Private Copilot, and downloadable <code>.zip</code> bundle.
+        </div>
+      </div>
+      <span class="badge" id="output-ready-pill">LOCKED UNTIL FINISHED</span>
+    </section>
+
+    <section class="grid-two output-section-locked" id="final-copilot-section">
+      <div class="panel playground-panel">
+        <div class="copilot-brand-bar">
+          <div class="copilot-brand-left">
+            <div class="copilot-avatar" id="copilot-avatar">AD</div>
+            <div>
+              <span class="stage-tag">FINAL CLIENT APPLICATION &middot; PRIVATE DOMAIN LLM</span>
+              <h2 id="copilot-brand-heading">Apex Dynamics &mdash; Private Engineering Copilot</h2>
+              <p class="panel-sub" id="copilot-model-sub">Powered by <code>Qwen3-Coder-30B-A3B</code> + Tuned LoRA &middot; Zero Cloud Data Egress</p>
+            </div>
+          </div>
+          <span class="badge" id="copilot-exec-badge">PRE-RUN &middot; LOCKED</span>
+        </div>
+
+        <div class="copilot-prompt-bar">
+          <input
+            id="playground-prompt"
+            class="model-input"
+            type="text"
+            value="Write a SIMD-friendly neighbor-bin loop for a cutoff molecular dynamics force kernel."
+            aria-label="Test Prompt"
+          />
+          <button id="btn-run-cluster-copilot" class="btn btn-primary btn-sm" disabled title="Unlocks automatically when optimization finishes">Run Live on Fuzzball GPU</button>
+          <button id="btn-run-playground" class="btn btn-outline btn-sm" disabled title="Unlocks automatically when optimization finishes">Instant Preview</button>
+        </div>
+
+        <div class="playground-compare">
+          <div class="pg-col">
+            <div class="sub-kicker">UNTUNED BASE MODEL</div>
+            <pre class="pg-code" id="pg-base-out">Awaiting optimization run completion…</pre>
+          </div>
+          <div class="pg-col pg-col-tuned">
+            <div class="sub-kicker" style="color:#a3e635;" id="pg-tuned-kicker">APEX DYNAMICS TUNED PRIVATE COPILOT</div>
+            <pre class="pg-code" id="pg-tuned-out">Output unlocks automatically as soon as your tuning run reaches FINISHED.</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- DELIVERABLE BUILD PACKAGE CARD + ARTIFACT VIEWER -->
+      <div class="panel yaml-panel">
+        <div class="panel-header">
+          <div>
+            <span class="stage-tag">TURNKEY UNZIP-AND-RUN CLIENT BUNDLE</span>
+            <h2 id="build-title">Apex Dynamics LLM Package (<code id="inspector-model-label">Qwen/Qwen3-Coder-30B-A3B-Instruct</code>)</h2>
+            <p class="panel-sub" id="build-subtitle">Unzip &amp; run <code>python3 scripts/run_company_app.py</code> on your laptop to launch this exact branded app backed by Fuzzball GPUs!</p>
+          </div>
+          <a href="/api/build/bundle.zip" id="btn-card-download" class="btn btn-download btn-sm btn-locked" aria-disabled="true">Output Locked</a>
+        </div>
+        <div class="unzip-quickstart">
+          <span>Unzip &amp; Launch Locally:</span>
+          <code id="unzip-cmd-line">cd ~/Downloads &amp;&amp; unzip -o &quot;$(ls -t apex-dynamics-private-llm-*.zip | head -1)&quot; -d apex-ai &amp;&amp; python3 apex-ai/scripts/run_company_app.py</code>
+        </div>
+        <div class="yaml-controls">
+          <button data-artifact="scripts/run_company_app.py" class="btn btn-outline btn-sm artifact-tab active-tab">run_company_app.py</button>
+          <button data-artifact="data/teacher_sft_train.jsonl" class="btn btn-outline btn-sm artifact-tab">teacher_sft_train.jsonl</button>
+          <button data-artifact="fuzzfile.yaml" class="btn btn-outline btn-sm artifact-tab">fuzzfile.yaml</button>
+          <button data-artifact="Modelfile.ollama" class="btn btn-outline btn-sm artifact-tab">Modelfile.ollama</button>
+          <button data-artifact="scripts/client_query_llm.py" class="btn btn-outline btn-sm artifact-tab">client_query_llm.py</button>
+          <button data-artifact="configs/train_recipe.yaml" class="btn btn-outline btn-sm artifact-tab">train_recipe.yaml</button>
+          <button data-artifact="BUILD_REPORT.md" class="btn btn-outline btn-sm artifact-tab">BUILD_REPORT.md</button>
+          <button id="btn-copy-yaml" class="btn btn-outline btn-sm">Copy</button>
+        </div>
+        <pre class="code-viewer" id="yaml-viewer">Awaiting optimization run completion to finalize turnkey artifacts…</pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js?v=20261115k" ></script>
+</body>
+</html>

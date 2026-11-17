@@ -1,0 +1,241 @@
+# ==============================================================================
+# Alchemy Turnkey Autoresearch Workflow (ingest -> train -> eval -> serve)
+# ==============================================================================
+# Cluster        : fb-hack | VAST Storage Provisioner: use=team3
+# Nodes          : CIQ-CHI-SPARK05 (192.168.99.14/7331), CIQ-CHI-SPARK06 (192.168.99.15/7331)
+# Node Hardware  : 1x NVIDIA-GB10 (Blackwell, sm_121), 20c arm64, 127.9 GiB/node
+# Per-Node Alloc : 8 cores, 96GiB RAM, 1x nvidia.com/gpu
+# Shared Storage : VAST persistent volume 'runs' (use: team3) mounted at /vast
+# Base Model     : Qwen/Qwen3-4B (MoE, 151,936 vocab, 7.7 GB BF16)
+# Dataset        : lammps-c-gpu-simulation-corpus-enterprise-benchm (whole-file sealed held-out split; raw data never left VAST)
+#
+# Measured Autoresearch Decisions:
+#   [Stage A - Winning LoRA Recipe]
+#     rank=64, alpha=128, lr=0.000174,
+#     modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'], seq_len=2048
+#     Held-out perplexity: 6.736 (base) -> 4.239 (fine-tuned)
+#
+#   [Stage B - Winning Training Performance Config (teacher-r2-speed-mb8-2n)]
+#     nodes=2, micro_batch=8, grad_accum=1,
+#     activation_checkpointing=False,
+#     sm_121 kernels: chunked_ce=True, grouped_moe=False, fused_lora=True
+#     Throughput: 1103.4 -> 4712.5 tok/s (4.27x)
+#
+#   [Stage C - Winning vLLM Serving Config (nvfp4-2replicas-tp1)]
+#     precision=NVFP4, replicas=2, tensor_parallel=1,
+#     max_num_seqs=96, low_prec_decode_kernel=True
+#     Serving throughput: 401.8 -> 3460.3 tok/s
+#
+# Launch end-to-end on CIQ Fuzzball (Team 20):
+#   fuzzball workflow validate final-crucible-workflow.yaml
+#   fuzzball workflow start final-crucible-workflow.yaml --name lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-team20
+# ==============================================================================
+
+version: v4
+volumes:
+  vast:
+    name: runs
+    use: team3
+  data:
+    name: data
+    use: team3
+  envs:
+    name: envs
+    use: team3
+  models:
+    name: models
+    use: team3
+jobs:
+  ingest-lammps:
+    image:
+      uri: docker://python:3.12-slim
+    mounts:
+      /vast:
+        volume: vast
+      /data:
+        volume: data
+      /envs:
+        volume: envs
+      /models:
+        volume: models
+    env:
+    - HOME=/tmp/home
+    - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/vast/crucible-src/src
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 16GiB
+    policy:
+      timeout:
+        execute: 30m
+    script: "#!/bin/bash\nset -euo pipefail\nmkdir -p /tmp/home\npip install --quiet\
+      \ --no-cache-dir pyyaml pydantic numpy httpx\nif ! python3 -c \"import crucible\"\
+      \ 2>/dev/null && [ ! -d \"/vast/crucible-src/src/crucible\" ]; then\n  python3\
+      \ -c \"import urllib.request,tarfile,os; os.makedirs('/vast/crucible-src',exist_ok=True);\
+      \ urllib.request.urlretrieve('https://codeload.github.com/sebastianlueders/CIQ-Hackathon/tar.gz/seb-branch','/tmp/c.tgz')\"\
+      \n  tar -xzf /tmp/c.tgz -C \"/vast/crucible-src\" --strip-components=1\nfi\n\
+      python3 -m crucible.cli ingest \\\n  --source-dir /vast/data/builtin-lammps-cpp-bench\
+      \ \\\n  --output-dir /vast/data/lammps-c-gpu-simulation-corpus-enterprise-benchm-packed\
+      \ \\\n  --seq-len 2048\n"
+  train-lora:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.10-py3
+    mounts:
+      /vast:
+        volume: vast
+      /data:
+        volume: data
+      /envs:
+        volume: envs
+      /models:
+        volume: models
+    depends-on:
+    - name: ingest-lammps
+      status: FINISHED
+    env:
+    - HOME=/tmp/home
+    - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/vast/crucible-src/src
+    - NCCL_DEBUG=WARN
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 80GiB
+      devices:
+        nvidia.com/gpu: 1
+    policy:
+      timeout:
+        execute: 12h
+      retry:
+        attempts: 2
+    script: "#!/bin/bash\nset -euo pipefail\nmkdir -p /tmp/home\necho 'eyJsb3JhX2FscGhhIjogMTI4LCAibG9yYV9yYW5rIjogNjQsICJsciI6IDAuMDAwMTc0LCAic2VxX2xlbiI6IDIwNDgsICJ0YXJnZXRfbW9kdWxlcyI6IFsicV9wcm9qIiwgImtfcHJvaiIsICJ2X3Byb2oiLCAib19wcm9qIiwgImdhdGVfcHJvaiIsICJ1cF9wcm9qIiwgImRvd25fcHJvaiJdLCAid2FybXVwX3JhdGlvIjogMC4wNX0='\
+      \ | base64 -d > /tmp/crucible_recipe.json\necho 'eyJhY3RpdmF0aW9uX2NoZWNrcG9pbnRpbmciOiBmYWxzZSwgImdyYWRfYWNjdW1fc3RlcHMiOiAxLCAibGFiZWwiOiAidGVhY2hlci1yMi1zcGVlZC1tYjgtMm4iLCAibWljcm9fYmF0Y2hfc2l6ZSI6IDgsICJub2RlcyI6IDIsICJ1c2VfY2h1bmtlZF9jZV9rZXJuZWwiOiB0cnVlLCAidXNlX2Z1c2VkX2xvcmFfa2VybmVsIjogdHJ1ZSwgInVzZV9ncm91cGVkX21vZV9rZXJuZWwiOiBmYWxzZX0='\
+      \ | base64 -d > /tmp/crucible_perf.json\nexport NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker\
+      \ TORCH_NCCL_ASYNC_ERROR_HANDLING=1\nSELF=$(hostname); FQDN=$(hostname -f 2>/dev/null\
+      \ || echo \"$SELF\")\nHOSTS=$(echo \"${MULTINODE_HOSTLIST_NOSLOTS:-$SELF}\"\
+      \ | tr ',' '\\n' | sort)\nMASTER=${MN_MASTER:-$(echo \"$HOSTS\" | head -1)}\n\
+      RANK=$(echo \"$HOSTS\" | grep -nx -e \"$SELF\" -e \"$FQDN\" | head -1 | cut\
+      \ -d: -f1 || echo 1)\nNODE_RANK=${MN_NODE_RANK:-$(( ${RANK:-1} - 1 ))}\nif [\
+      \ -z \"${MN_NODE_RANK:-}\" ] && [ -n \"${MULTINODE_SSH_WRAPPER:-}\" ]; then\n\
+      \  HEAD_IP=${MULTINODE_NODE_IP:-$(getent hosts \"$SELF\" | awk '{print $1}'\
+      \ | head -1)}\n  i=0\n  for h in $HOSTS; do\n    [ \"$h\" = \"$SELF\" ] || [\
+      \ \"$h\" = \"$FQDN\" ] && continue\n    i=$((i + 1))\n    \"$MULTINODE_SSH_WRAPPER\"\
+      \ \"$h\" \"mkdir -p /tmp/home && echo eyJsb3JhX2FscGhhIjogMTI4LCAibG9yYV9yYW5rIjogNjQsICJsciI6IDAuMDAwMTc0LCAic2VxX2xlbiI6IDIwNDgsICJ0YXJnZXRfbW9kdWxlcyI6IFsicV9wcm9qIiwgImtfcHJvaiIsICJ2X3Byb2oiLCAib19wcm9qIiwgImdhdGVfcHJvaiIsICJ1cF9wcm9qIiwgImRvd25fcHJvaiJdLCAid2FybXVwX3JhdGlvIjogMC4wNX0=\
+      \ | base64 -d > /tmp/crucible_recipe.json && echo eyJhY3RpdmF0aW9uX2NoZWNrcG9pbnRpbmciOiBmYWxzZSwgImdyYWRfYWNjdW1fc3RlcHMiOiAxLCAibGFiZWwiOiAidGVhY2hlci1yMi1zcGVlZC1tYjgtMm4iLCAibWljcm9fYmF0Y2hfc2l6ZSI6IDgsICJub2RlcyI6IDIsICJ1c2VfY2h1bmtlZF9jZV9rZXJuZWwiOiB0cnVlLCAidXNlX2Z1c2VkX2xvcmFfa2VybmVsIjogdHJ1ZSwgInVzZV9ncm91cGVkX21vZV9rZXJuZWwiOiBmYWxzZX0=\
+      \ | base64 -d > /tmp/crucible_perf.json && MN_NODE_RANK=$i MN_MASTER=$HEAD_IP\
+      \ NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo,docker TORCH_NCCL_ASYNC_ERROR_HANDLING=1\
+      \ PYTHONPATH=/vast/crucible-src/src HOME=/tmp/home python3 -m torch.distributed.run\
+      \ --nnodes 2 --nproc-per-node 1 --node-rank $i --master-addr $HEAD_IP --master-port\
+      \ 29500 -m crucible.trainer.lora_trainer --trial-id production-lora --base-model-dir\
+      \ /vast/models/Qwen/Qwen3-4B --processed-data-dir /vast/data/lammps-c-gpu-simulation-corpus-enterprise-benchm-packed\
+      \ --output-dir /vast/runs/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-production\
+      \ --max-steps 140 --recipe-json \\\"\\$(cat /tmp/crucible_recipe.json)\\\" --perf-json\
+      \ \\\"\\$(cat /tmp/crucible_perf.json)\\\"\" > /tmp/rank$i.log 2>&1 &\n  done\n\
+      \  NODE_RANK=0; MASTER=$HEAD_IP\nfi\npython3 -m torch.distributed.run \\\n \
+      \ --nnodes 2 \\\n  --nproc-per-node 1 \\\n  --node-rank \"$NODE_RANK\" \\\n\
+      \  --master-addr \"$MASTER\" \\\n  --master-port 29500 \\\n  -m crucible.trainer.lora_trainer\
+      \ \\\n  --trial-id production-lora \\\n  --base-model-dir /vast/models/Qwen/Qwen3-4B\
+      \ \\\n  --processed-data-dir /vast/data/lammps-c-gpu-simulation-corpus-enterprise-benchm-packed\
+      \ \\\n  --output-dir /vast/runs/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-production\
+      \ \\\n  --max-steps 140 \\\n  --recipe-json \"$(cat /tmp/crucible_recipe.json)\"\
+      \ \\\n  --perf-json \"$(cat /tmp/crucible_perf.json)\"\n"
+    multinode:
+      nodes: 2
+      implementation: generic
+  eval-held-out:
+    image:
+      uri: docker://nvcr.io/nvidia/pytorch:26.10-py3
+    mounts:
+      /vast:
+        volume: vast
+      /data:
+        volume: data
+      /envs:
+        volume: envs
+      /models:
+        volume: models
+    depends-on:
+    - name: train-lora
+      status: FINISHED
+    env:
+    - HOME=/tmp/home
+    - PYTHONUNBUFFERED=1
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 96GiB
+      devices:
+        nvidia.com/gpu: 1
+    policy:
+      timeout:
+        execute: 45m
+    script: "#!/bin/bash\nset -euo pipefail\npython3 - <<'PY'\nimport json, pathlib,\
+      \ sys\nsummary = json.loads(pathlib.Path('/vast/runs/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-production/summary.json').read_text())\n\
+      ceiling = 4.3446\nppl = float(summary['held_out_perplexity'])\nprint(f'Verified\
+      \ held-out perplexity: {ppl:.4f} (ceiling: {ceiling:.4f})')\nif ppl > ceiling:\n\
+      \    sys.exit('Held-out quality floor check failed \u2014 aborting promotion\
+      \ to serving.')\nPY\n"
+services:
+  serve-vllm:
+    image:
+      uri: docker://vllm/vllm-openai:v0.33.0
+    mounts:
+      /vast:
+        volume: vast
+      /data:
+        volume: data
+      /envs:
+        volume: envs
+      /models:
+        volume: models
+    depends-on:
+    - name: eval-held-out
+      status: FINISHED
+    env:
+    - HOME=/tmp
+    - PYTHONUNBUFFERED=1
+    - CRUCIBLE_USE_LOW_PREC_DECODE=1
+    - CRUCIBLE_TARGET_REPLICAS=2
+    command:
+    - python3
+    - -m
+    - vllm.entrypoints.openai.api_server
+    - --model
+    - /vast/models/Qwen/Qwen3-4B
+    - --enable-lora
+    - --lora-modules
+    - crucible-tuned=/vast/runs/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-production/lora_adapter
+    - --tensor-parallel-size
+    - '1'
+    - --max-num-seqs
+    - '96'
+    - --attention-backend
+    - TRITON_ATTN
+    - --port
+    - '8000'
+    - --quantization
+    - modelopt
+    - --kv-cache-dtype
+    - fp8
+    resource:
+      cpu:
+        cores: 8
+      memory:
+        size: 96GiB
+      devices:
+        nvidia.com/gpu: 1
+    persist: true
+    network:
+      ports:
+      - name: http
+        port: 8000
+      endpoints:
+      - name: crucible-coder-api
+        port-name: http
+        protocol: http
+        type: subdomain
+        scope: group

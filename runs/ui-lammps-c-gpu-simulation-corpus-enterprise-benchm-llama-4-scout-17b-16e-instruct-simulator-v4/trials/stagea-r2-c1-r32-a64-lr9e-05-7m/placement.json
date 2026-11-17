@@ -1,0 +1,8 @@
+{
+  "workflow_id": "7ae47ff2-eb99-4a87-a6cd-0029bd167a42",
+  "nodes": [
+    "gb10-node-01",
+    "gb10-node-02"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-c-gpu-simulation-corpus-enterprise-benchm-llama-4-scout-17b-16e-instruct-run/stagea-r2-c1-r32-a64-lr9e-05-7m/metrics.json"
+}

@@ -1,0 +1,1 @@
+{"content": "### Instruction:\nOptimize force kernel step 1\n\n### Response:\ninline double step_1(double r2) { return 1.0 / r2; }", "rel_path": "qa/domain_tasks.jsonl#record-00001", "sha256": "482c86b052b413fc6aca8e5ead66f4f8158889dd649478ca2bb7c324b8ef7247", "size_bytes": 113, "stem_group": "qa/domain_tasks.jsonl::rec-00001"}

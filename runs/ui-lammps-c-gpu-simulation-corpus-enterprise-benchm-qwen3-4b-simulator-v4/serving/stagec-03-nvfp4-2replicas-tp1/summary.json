@@ -1,0 +1,21 @@
+{
+  "accepted": true,
+  "completion_pass_rate": 0.875,
+  "held_out_loss": 1.50057,
+  "held_out_perplexity": 4.4842,
+  "label": "nvfp4-2replicas-tp1",
+  "max_num_seqs": 96,
+  "p50_latency_ms": 159.73,
+  "p99_latency_ms": 425.29,
+  "passed_latency_ceiling": true,
+  "passed_quality_floor": true,
+  "perplexity_regression_pct": 1.562,
+  "precision": "NVFP4",
+  "rejection_reasons": [],
+  "replicas": 2,
+  "tensor_parallel": 1,
+  "throughput_tokens_per_sec": 3460.33,
+  "trial_id": "stagec-03-nvfp4-2replicas-tp1",
+  "ttft_ms": 74.29,
+  "use_low_prec_decode_kernel": true
+}

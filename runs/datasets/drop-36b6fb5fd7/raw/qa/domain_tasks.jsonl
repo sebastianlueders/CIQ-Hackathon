@@ -1,0 +1,6 @@
+{"instruction":"Optimize force kernel step 0","output":"inline double step_0(double r2) { return 1.0 / r2; }"}
+{"instruction":"Optimize force kernel step 1","output":"inline double step_1(double r2) { return 1.0 / r2; }"}
+{"instruction":"Optimize force kernel step 2","output":"inline double step_2(double r2) { return 1.0 / r2; }"}
+{"instruction":"Optimize force kernel step 3","output":"inline double step_3(double r2) { return 1.0 / r2; }"}
+{"instruction":"Optimize force kernel step 4","output":"inline double step_4(double r2) { return 1.0 / r2; }"}
+{"instruction":"Optimize force kernel step 5","output":"inline double step_5(double r2) { return 1.0 / r2; }"}

@@ -1,0 +1,4 @@
+{"peak_mem_gb": 17.16, "step": 1, "tokens_per_sec": 1103.42, "train_loss": 1.90403, "val_loss": 1.92076, "wall_time_s": 29.7, "world_size": 1}
+{"peak_mem_gb": 17.16, "step": 15, "tokens_per_sec": 1103.42, "train_loss": 1.81587, "val_loss": 1.8326, "wall_time_s": 445.45, "world_size": 1}
+{"peak_mem_gb": 17.16, "step": 30, "tokens_per_sec": 1103.42, "train_loss": 1.74351, "val_loss": 1.76024, "wall_time_s": 890.9, "world_size": 1}
+{"peak_mem_gb": 17.16, "step": 40, "tokens_per_sec": 1103.42, "train_loss": 1.71653, "val_loss": 1.73326, "wall_time_s": 1187.87, "world_size": 1}

@@ -1,0 +1,7 @@
+{
+  "workflow_id": "5cc01c1e-b7ee-42ef-ae9f-aaa051955363",
+  "nodes": [
+    "CIQ-CHI-SPARK05"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-4b-run/stagea-r0-c0-r16-a32-lr3e-04-6m/metrics.json"
+}

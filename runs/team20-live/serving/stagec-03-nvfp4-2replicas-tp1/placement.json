@@ -1,0 +1,8 @@
+{
+  "workflow_id": "c9f20a04-ee42-4202-a9f0-4fb64cbfbd92",
+  "nodes": [
+    "CIQ-CHI-SPARK39",
+    "CIQ-CHI-SPARK40"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-qwen3-coder-30b-run/serving-stagec-03-nvfp4-2replicas-tp1/metrics.json"
+}

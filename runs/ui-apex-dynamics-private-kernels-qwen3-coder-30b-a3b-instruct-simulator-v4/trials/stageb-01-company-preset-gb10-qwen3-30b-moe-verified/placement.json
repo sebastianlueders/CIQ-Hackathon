@@ -1,0 +1,8 @@
+{
+  "workflow_id": "0f89e492-c0ab-4250-a26b-aa84f04e15ee",
+  "nodes": [
+    "gb10-node-01",
+    "gb10-node-02"
+  ],
+  "object_uri": "fuzzball://user/crucible/apex-dynamics-private-kernels-qwen3-coder-30b-a3b-instruct-run/stageb-01-company-preset-gb10-qwen3-30b-moe-verified/metrics.json"
+}

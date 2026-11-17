@@ -1,0 +1,21 @@
+{
+  "accepted": true,
+  "completion_pass_rate": 0.9083,
+  "held_out_loss": 1.46627,
+  "held_out_perplexity": 4.333,
+  "label": "fp8-2replicas-tp1",
+  "max_num_seqs": 64,
+  "p50_latency_ms": 125.3,
+  "p99_latency_ms": 291.74,
+  "passed_latency_ceiling": true,
+  "passed_quality_floor": true,
+  "perplexity_regression_pct": 0.552,
+  "precision": "FP8",
+  "rejection_reasons": [],
+  "replicas": 2,
+  "tensor_parallel": 1,
+  "throughput_tokens_per_sec": 2094.12,
+  "trial_id": "stagec-02-fp8-2replicas-tp1",
+  "ttft_ms": 52.5,
+  "use_low_prec_decode_kernel": true
+}

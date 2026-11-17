@@ -1,0 +1,7 @@
+{
+  "workflow_id": "3a7a7733-4725-48ff-a4cc-23989fda9306",
+  "nodes": [
+    "gb10-node-01"
+  ],
+  "object_uri": "fuzzball://user/crucible/apex-dynamics-private-kernels-qwen3-coder-30b-a3b-instruct-run/stagea-r1-c0-r16-a32-lr3e-04-6m/metrics.json"
+}

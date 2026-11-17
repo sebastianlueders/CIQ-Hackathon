@@ -1,0 +1,8 @@
+{
+  "workflow_id": "4c80e81f-d8c8-45ad-aeaf-f85319180d3d",
+  "nodes": [
+    "gb10-node-01",
+    "gb10-node-02"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-c-gpu-simulation-corpus-enterprise-benchm-qwen3-coder-30b-a3b-instruct-run/stageb-t04-teacher-r4-pareto-rk64-mb6/metrics.json"
+}

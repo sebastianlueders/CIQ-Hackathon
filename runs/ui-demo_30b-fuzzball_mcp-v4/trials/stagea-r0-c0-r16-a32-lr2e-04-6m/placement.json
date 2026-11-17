@@ -1,0 +1,7 @@
+{
+  "workflow_id": "c44f849c-cfbb-4734-800d-9d3341187ddd",
+  "nodes": [
+    "192.168.99.15/7331"
+  ],
+  "object_uri": "fuzzball://user/crucible/lammps-qwen3-coder-30b-run/stagea-r0-c0-r16-a32-lr2e-04-6m/metrics.json"
+}
