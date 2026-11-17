@@ -38,6 +38,7 @@ function syncCompanyBranding() {
   const slug = comp.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "company";
   const av = document.getElementById("copilot-avatar");
   if (av) av.textContent = initials;
+  document.getElementById("crumb-project").textContent = `${comp} copilot`;
   const hd = document.getElementById("copilot-brand-heading");
   if (hd) hd.textContent = `${comp} private engineering copilot`;
   const kk = document.getElementById("pg-tuned-kicker");
@@ -148,7 +149,7 @@ function renderCatalogCards() {
         .filter(Boolean)
         .join(" · ");
       return `
-        <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" aria-pressed="${isAct}" data-model-id="${esc(m.id)}" title="${esc(m.id)} — ${esc(m.recommended_use)}">
+        <button type="button" class="model-card ${isAct ? "model-card-active" : ""}" aria-pressed="${isAct}" data-model-id="${esc(m.id)}" title="${esc(m.id)}: ${esc(m.recommended_use)}">
           <span class="mc-top">
             <span class="mc-label">${esc(m.label)}</span>
             <span class="mc-node ${twoGpu ? "mc-node-2" : ""}">${twoGpu ? "2 GPUs" : "1 GPU"}</span>
@@ -210,16 +211,16 @@ function renderClientMachineBridge(clientInfo, clusterEp, teamId) {
     host.title = `${clientInfo.os} · ${clientInfo.arch} · ${clientInfo.cpu_cores} cores`;
   }
   if (clusterEp) document.getElementById("pill-cluster-ep").textContent = clusterEp;
-  if (teamId) document.getElementById("pill-def-id").textContent = teamId;
+  if (teamId) {
+    document.getElementById("pill-def-id").textContent = teamId;
+    document.getElementById("crumb-team").textContent = teamId;
+  }
 }
 
-// Header chip: where the NEXT run will execute.
-function syncModeChip() {
-  const v = document.getElementById("backend-select").value;
-  const sim = v === "simulator";
-  const chip = document.getElementById("mode-chip");
-  chip.textContent = sim ? "Simulated" : v === "local_torch" ? "This laptop" : "Live · 2× GB10";
-  chip.className = `chip ${sim ? "chip-sim" : "chip-live"}`;
+// Simulation banner: shown while the next run would use the twin, or while the run on screen did.
+function syncEnvBanner() {
+  const nextSim = document.getElementById("backend-select").value === "simulator";
+  document.body.dataset.env = nextSim || document.body.dataset.sim === "true" ? "sim" : "live";
 }
 
 // "Simulated" labels: where the SHOWN run actually ran. A simulated number must never read as measured
@@ -228,6 +229,7 @@ function setRunProvenance(backend) {
   const sim = String(backend || "simulator") === "simulator";
   document.getElementById("run-status").dataset.sim = String(sim);
   document.body.dataset.sim = String(sim);
+  syncEnvBanner();
 }
 
 function renderNetworkBridgeState(discReport, clusterCfg) {
@@ -263,7 +265,7 @@ function renderNetworkBridgeState(discReport, clusterCfg) {
   }
   // Off the cluster this button only reaches the twin, which "Compare answers" already does.
   document.getElementById("btn-run-cluster-copilot").classList.toggle("hidden", !(reachable && !cordoned));
-  syncModeChip();
+  syncEnvBanner();
 }
 
 async function initStudio() {
@@ -370,7 +372,7 @@ function renderArtifactViewer() {
   }
 }
 
-const RUN_LABEL = "Tune and build";
+const RUN_LABEL = "Start run";
 
 // Progress per backend stage, and which of the four tracker steps it belongs to.
 const STAGE_PCT = {
@@ -438,7 +440,7 @@ function renderLifecycleState(phase, snap = null, summary = null) {
   byId("run-fields").disabled = running;
   if (!runStarting) {
     byId("btn-run").disabled = running;
-    byId("btn-run").textContent = running ? "Tuning…" : RUN_LABEL;
+    byId("btn-run").textContent = running ? "Running…" : RUN_LABEL;
   }
   setDownloadReady(byId("btn-top-download"), finished);
   setDownloadReady(byId("btn-card-download"), finished);
@@ -486,8 +488,8 @@ function renderLifecycleState(phase, snap = null, summary = null) {
 
   pill.className = "chip";
   pill.textContent = "Ready";
-  headline.textContent = "Ready to run";
-  sub.textContent = "Before training, the remote teacher splits your data into train, validation and test sets with no overlap.";
+  headline.textContent = "No run yet";
+  sub.textContent = "Start a run to see each stage, its result and live numbers here.";
   fill.style.width = "0%";
   byId("kpi-dag").textContent = "—";
   renderArtifactViewer();
@@ -1031,7 +1033,7 @@ function renderLossSvg(curves, valCurves = {}, activeTrialId = "", liveEq = {}) 
     active.push({
       key: refKey,
       label: `reference: ${refKey.split("-").slice(2).join("-")}`,
-      color: "#c3cfe0",
+      color: "#d4d4d8",
       dash: "",
       src: curves,
     });
@@ -1078,7 +1080,7 @@ function renderLossSvg(curves, valCurves = {}, activeTrialId = "", liveEq = {}) 
     }
   } else {
     const recentKeys = allKeys.slice(-3);
-    const palette = ["#c3cfe0", "#76b900", "#8fa4c4"];
+    const palette = ["#d4d4d8", "#76b900", "#a1a1aa"];
     recentKeys.forEach((k, idx) => {
       active.push({ key: k, label: `${k} (train)`, color: palette[idx % palette.length], dash: "", src: curves });
       if (Array.isArray(valCurves[k]) && valCurves[k].length > 1) {
@@ -1105,8 +1107,8 @@ function renderLossSvg(curves, valCurves = {}, activeTrialId = "", liveEq = {}) 
   for (let g = 0; g <= 4; g++) {
     const val = yMin + (g / 4) * (yMax - yMin);
     const y = yScale(val).toFixed(1);
-    gridLines += `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="#222d40" stroke-width="1"/>`;
-    gridLines += `<text x="${pad.left - 6}" y="${Number(y) + 4}" fill="#8392a8" font-size="10.5" text-anchor="end">${val.toFixed(2)}</text>`;
+    gridLines += `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="#27272a" stroke-width="1"/>`;
+    gridLines += `<text x="${pad.left - 6}" y="${Number(y) + 4}" fill="#8a8a93" font-size="10.5" text-anchor="end">${val.toFixed(2)}</text>`;
   }
 
   let polylines = "";
@@ -1121,7 +1123,7 @@ function renderLossSvg(curves, valCurves = {}, activeTrialId = "", liveEq = {}) 
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="none">
       ${gridLines}
       ${polylines}
-      <text x="${(width + pad.left) / 2}" y="${height - 5}" fill="#8392a8" font-size="10.5" text-anchor="middle">Optimizer step</text>
+      <text x="${(width + pad.left) / 2}" y="${height - 5}" fill="#8a8a93" font-size="10.5" text-anchor="middle">Optimizer step</text>
     </svg>
   `;
 
@@ -1421,7 +1423,7 @@ document.getElementById("btn-use-preset").addEventListener("click", async () => 
 
 document.getElementById("backend-select").addEventListener("change", (e) => {
   userPickedBackend = true;
-  syncModeChip();
+  syncEnvBanner();
   if (currentLifecyclePhase === "pre_run") setRunProvenance(e.target.value);
 });
 
@@ -1450,13 +1452,13 @@ document.getElementById("btn-stage-model").addEventListener("click", async () =>
 document.getElementById("btn-stop-run").addEventListener("click", async () => {
   const stopBtn = document.getElementById("btn-stop-run");
   stopBtn.disabled = true;
-  stopBtn.textContent = "Stopping and packaging…";
+  stopBtn.textContent = "Stopping…";
   try {
     await fetchJson("/api/run/stop", { method: "POST" });
   } catch (_) {}
   setTimeout(() => {
     stopBtn.disabled = false;
-    stopBtn.textContent = "Stop and package best";
+    stopBtn.textContent = "Stop and package";
   }, 1200);
 });
 
@@ -1466,7 +1468,7 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   if (runStarting || btn.disabled || currentLifecyclePhase === "running") return;
   runStarting = true;
   btn.disabled = true;
-  btn.textContent = "Checking the cluster…";
+  btn.textContent = "Connecting…";
   const modelId = currentModelId();
   if (!userPickedBackend) {
     try {
@@ -1481,7 +1483,7 @@ document.getElementById("btn-run").addEventListener("click", async () => {
   const timeBudgetMin = Math.max(0.5, Number(document.getElementById("time-budget-input").value || 8));
   const costBudgetUsd = Math.max(0.5, Number(document.getElementById("cost-budget-input").value || 5));
 
-  btn.textContent = "Tuning…";
+  btn.textContent = "Running…";
   setRunProvenance(backend);
   resetPanelsForLoading();
   renderLifecycleState("running", { current_stage: "starting", stage_label: `Splitting the data and starting ${modelId.split("/").pop()}` }, null);
@@ -1583,14 +1585,14 @@ document.getElementById("btn-probe").addEventListener("click", async () => {
       label.textContent = "Leak blocked";
     } else {
       showNotice("The probe was not blocked. Check the firewall configuration before demoing.");
-      label.textContent = "Verify zero-leak guard";
+      label.textContent = "Privacy check";
     }
   } catch (_) {
     showNotice("The privacy check could not reach the local server. Is <code>alchemy serve</code> running?");
-    label.textContent = "Verify zero-leak guard";
+    label.textContent = "Privacy check";
   } finally {
     probeBtn.disabled = false;
-    setTimeout(() => (label.textContent = "Verify zero-leak guard"), 4000);
+    setTimeout(() => (label.textContent = "Privacy check"), 4000);
   }
 });
 
