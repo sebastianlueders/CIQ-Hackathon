@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Alchemy · Private fine-tuning on CIQ Fuzzball</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261117i" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261117l" />
 </head>
 <body>
   <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
@@ -25,8 +25,10 @@
     </div>
 
     <div class="top-actions">
-      <span class="chip" id="header-lifecycle-pill">Ready</span>
-      <span class="chip chip-sim" id="mode-chip" title="Where the next run executes">Simulated</span>
+      <span class="chip-pair" title="Run state · where the next run executes">
+        <span class="chip" id="header-lifecycle-pill">Ready</span>
+        <span class="chip chip-sim" id="mode-chip">Simulated</span>
+      </span>
       <button id="btn-probe" class="btn btn-quiet" type="button" title="Tries to send a raw C++ snippet out and shows the firewall blocking it">
         <svg class="icon"><use href="#i-shield"/></svg><span id="probe-label">Verify zero-leak guard</span>
       </button>
@@ -50,6 +52,10 @@
       </dl>
     </div>
     <div class="menu-section">
+      <p class="menu-title">Privacy audit</p>
+      <div class="firewall-banner" id="firewall-audit-box"></div>
+    </div>
+    <div class="menu-section">
       <a href="/api/build/bundle.zip" id="btn-top-download" class="menu-item is-locked" aria-disabled="true">
         <svg class="icon"><use href="#i-download"/></svg>
         <span>Download package (.zip)</span>
@@ -69,36 +75,36 @@
 
       <ul class="result-strip">
         <li class="result">
-          <div class="result-top">
+          <button class="result-btn" type="button" popovertarget="how-quality">
             <span class="result-label">Held-out loss</span>
-            <button class="btn btn-icon btn-icon-sm" type="button" popovertarget="how-quality" aria-label="How held-out loss was measured"><svg class="icon"><use href="#i-dots"/></svg></button>
-          </div>
-          <p class="result-value">−19.3%</p>
-          <p class="result-detail">0.730 → 0.589 on files it never saw</p>
+            <span class="result-value">−19.3%</span>
+            <span class="result-detail">0.730 → 0.589 on files it never saw</span>
+            <span class="result-more">How we measured this</span>
+          </button>
         </li>
         <li class="result">
-          <div class="result-top">
+          <button class="result-btn" type="button" popovertarget="how-training">
             <span class="result-label">Training speed</span>
-            <button class="btn btn-icon btn-icon-sm" type="button" popovertarget="how-training" aria-label="How the training speedup was measured"><svg class="icon"><use href="#i-dots"/></svg></button>
-          </div>
-          <p class="result-value">8.0×</p>
-          <p class="result-detail">356 → 2,858 tokens/s</p>
+            <span class="result-value">8.0×</span>
+            <span class="result-detail">356 → 2,858 tokens/s</span>
+            <span class="result-more">How we measured this</span>
+          </button>
         </li>
         <li class="result">
-          <div class="result-top">
+          <button class="result-btn" type="button" popovertarget="how-serving">
             <span class="result-label">Serving speed</span>
-            <button class="btn btn-icon btn-icon-sm" type="button" popovertarget="how-serving" aria-label="How the serving speedup was measured"><svg class="icon"><use href="#i-dots"/></svg></button>
-          </div>
-          <p class="result-value">1.8×</p>
-          <p class="result-detail">FP8, quality within 0.2% of BF16</p>
+            <span class="result-value">1.8×</span>
+            <span class="result-detail">FP8, quality within 0.2% of BF16</span>
+            <span class="result-more">How we measured this</span>
+          </button>
         </li>
         <li class="result">
-          <div class="result-top">
+          <button class="result-btn" type="button" popovertarget="how-scaling">
             <span class="result-label">Second node</span>
-            <button class="btn btn-icon btn-icon-sm" type="button" popovertarget="how-scaling" aria-label="How two-node scaling was measured"><svg class="icon"><use href="#i-dots"/></svg></button>
-          </div>
-          <p class="result-value">1.98×</p>
-          <p class="result-detail">99% scaling efficiency</p>
+            <span class="result-value">1.98×</span>
+            <span class="result-detail">99% scaling efficiency</span>
+            <span class="result-more">How we measured this</span>
+          </button>
         </li>
       </ul>
     </section>
@@ -168,7 +174,6 @@
       <div class="run-config">
         <div class="run-head">
           <h2 id="run-title">Run Alchemy</h2>
-          <p class="run-sub">The agent searches for a recipe, makes training fast, picks the fastest serving setup that keeps quality, and packages it as one workflow.</p>
         </div>
 
         <fieldset class="run-fields" id="run-fields">
@@ -290,7 +295,7 @@
       <div class="ask">
         <input id="playground-prompt" class="input" type="text" value="Write a SIMD-friendly neighbor-bin loop for a cutoff molecular dynamics force kernel." aria-label="Prompt to compare" />
         <button id="btn-run-playground" class="btn btn-secondary" type="button" disabled>Compare answers</button>
-        <button id="btn-run-cluster-copilot" class="btn btn-quiet" type="button" disabled>Run on Fuzzball GPU</button>
+        <button id="btn-run-cluster-copilot" class="btn btn-quiet hidden" type="button" disabled>Run on Fuzzball GPU</button>
       </div>
       <p class="config-meta"><span class="chip" id="copilot-exec-badge">Waiting for a run</span></p>
 
@@ -406,8 +411,9 @@
       </details>
 
       <details class="panel">
-        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Loss curves</span><span class="badge" id="curve-badge">Waiting for a run</span><span class="badge badge-sim">Simulated</span></summary>
+        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Training</span><span class="badge" id="curve-badge">Waiting for a run</span><span class="badge badge-sim">Simulated</span></summary>
         <div class="panel-body">
+          <h3 class="panel-h">Recipe search and loss curves</h3>
           <p class="panel-lead" id="meta-stage-a">Parallel LoRA recipe search with successive halving.</p>
           <p class="config-meta">A speed change is accepted only if its loss curve stays within Δ 0.025 of the reference.</p>
           <div id="loss-chart-wrap" class="chart-box"></div>
@@ -418,19 +424,23 @@
             <div><dt>Gradient norm</dt><dd id="rt-grad">—</dd></div>
             <div><dt>MoE router entropy</dt><dd id="rt-entropy">—</dd></div>
           </dl>
-        </div>
-      </details>
 
-      <details class="panel">
-        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Training speedups</span><span class="badge" id="util-badge">Waiting for a run</span><span class="badge badge-sim">Simulated</span></summary>
-        <div class="panel-body">
+          <h3 class="panel-h">Speedup trials <span class="badge" id="util-badge">Waiting for a run</span></h3>
           <p class="panel-lead" id="meta-stage-b">Kernels, compile and two-node data parallel, each gated on the loss curve.</p>
           <div id="train-bars" class="bars-list"></div>
+
+          <h3 class="panel-h">Custom <code>sm_121</code> kernel parity</h3>
+          <div class="table-wrap">
+            <table class="data-table" id="kernel-table">
+              <thead><tr><th>Kernel</th><th>Max abs error</th><th>Memory saving</th><th>Parity</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </details>
 
       <details class="panel">
-        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Serving sweep</span><span class="badge badge-sim">Simulated</span></summary>
+        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Serving</span><span class="badge badge-sim">Simulated</span></summary>
         <div class="panel-body">
           <p class="panel-lead" id="meta-stage-c">vLLM precisions and topologies, scored on the sealed test split.</p>
           <div class="table-wrap">
@@ -442,24 +452,11 @@
         </div>
       </details>
 
-      <details class="panel" id="panel-privacy">
-        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Kernels and privacy audit</span></summary>
-        <div class="panel-body">
-          <div class="table-wrap">
-            <table class="data-table" id="kernel-table">
-              <thead><tr><th>Kernel</th><th>Max abs error</th><th>Memory saving</th><th>Parity</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <div class="firewall-banner" id="firewall-audit-box"></div>
-          <div class="advisor-box" id="advisor-rationales"></div>
-        </div>
-      </details>
-
       <details class="panel">
-        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Event log and trials</span></summary>
+        <summary><svg class="icon chevron"><use href="#i-chevron"/></svg><span class="summary-title">Event log</span></summary>
         <div class="panel-body log-grid">
           <div class="event-feed" id="live-event-feed"></div>
+          <div class="advisor-box" id="advisor-rationales"></div>
           <div class="table-wrap">
             <table class="data-table" id="live-trial-ledger">
               <thead><tr><th>Trial</th><th>GPUs</th><th>Tok/s</th><th>Val loss</th><th>Test PPL</th></tr></thead>
@@ -491,6 +488,6 @@
     </div>
   </dialog>
 
-  <script src="/static/app.js?v=20261117i"></script>
+  <script src="/static/app.js?v=20261117l"></script>
 </body>
 </html>

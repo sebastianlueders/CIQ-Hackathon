@@ -261,6 +261,8 @@ function renderNetworkBridgeState(discReport, clusterCfg) {
       backendSel.value = "simulator";
     }
   }
+  // Off the cluster this button only reaches the twin, which "Compare answers" already does.
+  document.getElementById("btn-run-cluster-copilot").classList.toggle("hidden", !(reachable && !cordoned));
   syncModeChip();
 }
 
