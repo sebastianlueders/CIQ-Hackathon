@@ -217,19 +217,12 @@ function renderClientMachineBridge(clientInfo, clusterEp, teamId) {
   }
 }
 
-// Simulation banner: shown while the next run would use the twin, or while the run on screen did.
-function syncEnvBanner() {
-  const nextSim = document.getElementById("backend-select").value === "simulator";
-  document.body.dataset.env = nextSim || document.body.dataset.sim === "true" ? "sim" : "live";
-}
-
 // "Simulated" labels: where the SHOWN run actually ran. A simulated number must never read as measured
 // (PRODUCT.md, principle 1), so this follows the server's effective backend, not the dropdown.
 function setRunProvenance(backend) {
   const sim = String(backend || "simulator") === "simulator";
   document.getElementById("run-status").dataset.sim = String(sim);
   document.body.dataset.sim = String(sim);
-  syncEnvBanner();
 }
 
 function renderNetworkBridgeState(discReport, clusterCfg) {
@@ -265,7 +258,6 @@ function renderNetworkBridgeState(discReport, clusterCfg) {
   }
   // Off the cluster this button only reaches the twin, which "Compare answers" already does.
   document.getElementById("btn-run-cluster-copilot").classList.toggle("hidden", !(reachable && !cordoned));
-  syncEnvBanner();
 }
 
 async function initStudio() {
@@ -1423,7 +1415,6 @@ document.getElementById("btn-use-preset").addEventListener("click", async () => 
 
 document.getElementById("backend-select").addEventListener("change", (e) => {
   userPickedBackend = true;
-  syncEnvBanner();
   if (currentLifecyclePhase === "pre_run") setRunProvenance(e.target.value);
 });
 
